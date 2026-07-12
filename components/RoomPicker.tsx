@@ -18,13 +18,27 @@ export function RoomPicker({ value, onChange }: { value?: string; onChange: (val
   const { t } = useI18n();
   const { addRoom, roomExists, rooms } = usePlantStore();
   const [isAddingRoom, setIsAddingRoom] = useState(false);
+  const [isSavingRoom, setIsSavingRoom] = useState(false);
   const [roomName, setRoomName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const saveRoom = async () => {
+    if (isSavingRoom) {
+      return;
+    }
+
     const trimmedName = roomName.trim();
     if (!trimmedName) {
       setError(t("rooms.nameRequired"));
+      return;
+    }
+
+    const existingRoom = rooms.find((room) => room.name.trim().toLocaleLowerCase() === trimmedName.toLocaleLowerCase());
+    if (existingRoom) {
+      onChange(existingRoom.id);
+      setRoomName("");
+      setError(null);
+      setIsAddingRoom(false);
       return;
     }
     if (roomExists(trimmedName)) {
@@ -32,11 +46,21 @@ export function RoomPicker({ value, onChange }: { value?: string; onChange: (val
       return;
     }
 
-    const room = await addRoom(trimmedName);
-    onChange(room.id);
-    setRoomName("");
-    setError(null);
-    setIsAddingRoom(false);
+    setIsSavingRoom(true);
+    try {
+      const room = await addRoom(trimmedName);
+      onChange(room.id);
+      setRoomName("");
+      setError(null);
+      setIsAddingRoom(false);
+    } catch (error) {
+      console.error("room_save_failed", {
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+      setError(t("rooms.saveFailed"));
+    } finally {
+      setIsSavingRoom(false);
+    }
   };
 
   return (
@@ -66,7 +90,7 @@ export function RoomPicker({ value, onChange }: { value?: string; onChange: (val
             {room.name}
           </button>
         ))}
-        <button type="button" onClick={() => setIsAddingRoom(true)} className="min-h-11 rounded-[18px] bg-white/70 px-3 text-sm font-extrabold text-[#8b8173]">
+        <button type="button" onClick={() => setIsAddingRoom(true)} disabled={isSavingRoom} className="min-h-11 rounded-[18px] bg-white/70 px-3 text-sm font-extrabold text-[#8b8173] disabled:opacity-60">
           {t("rooms.addRoom")}
         </button>
       </div>
@@ -88,11 +112,11 @@ export function RoomPicker({ value, onChange }: { value?: string; onChange: (val
             </label>
             {error ? <p className="mt-3 rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold text-[#9b2c3e]">{error}</p> : null}
             <div className="mt-5 grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => setIsAddingRoom(false)} className="min-h-12 rounded-[18px] bg-white px-4 text-sm font-extrabold text-[#5f594f]">
+              <button type="button" onClick={() => setIsAddingRoom(false)} disabled={isSavingRoom} className="min-h-12 rounded-[18px] bg-white px-4 text-sm font-extrabold text-[#5f594f] disabled:opacity-60">
                 {t("plantDetail.cancel")}
               </button>
-              <button type="button" onClick={() => void saveRoom()} className="min-h-12 rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]">
-                {t("rooms.addRoomAction")}
+              <button type="button" onClick={() => void saveRoom()} disabled={isSavingRoom} className="min-h-12 rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f] disabled:opacity-60">
+                {isSavingRoom ? t("rooms.addingRoom") : t("rooms.addRoomAction")}
               </button>
             </div>
           </div>

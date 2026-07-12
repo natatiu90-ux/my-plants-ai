@@ -26,6 +26,10 @@ function normalizeAction(action: Plant["nextAction"]) {
   return action ?? "none";
 }
 
+function isBuiltInRoomKey(roomKey: string | undefined) {
+  return Boolean(roomKey?.startsWith("rooms."));
+}
+
 async function withSignedPhotoUrls(supabase: SupabaseClient, rows: PlantPhotoRow[]) {
   return Promise.all(
     rows.map(async (row) => {
@@ -66,7 +70,8 @@ export class PlantRepository {
       .from("plants")
       .insert({
         user_id: this.user.id,
-        room_id: input.roomKey ?? null,
+        room_id: input.roomKey && !isBuiltInRoomKey(input.roomKey) ? input.roomKey : null,
+        room_key: isBuiltInRoomKey(input.roomKey) ? input.roomKey : null,
         home_name: input.homeName || null,
         species_name: input.speciesName || "Unknown plant",
         scientific_name: input.scientificName || null,
@@ -87,7 +92,8 @@ export class PlantRepository {
       .from("plants")
       .update({
         home_name: input.homeName || null,
-        room_id: input.roomKey ?? null,
+        room_id: input.roomKey && !isBuiltInRoomKey(input.roomKey) ? input.roomKey : null,
+        room_key: isBuiltInRoomKey(input.roomKey) ? input.roomKey : null,
         notes: input.notes || null
       })
       .eq("id", plantId)
@@ -261,18 +267,57 @@ export class RoomRepository {
   }
 
   async addRoom(name: string) {
+    const trimmedName = name.trim();
     const { data, error } = await this.supabase
       .from("rooms")
       .insert({
         user_id: this.user.id,
-        name,
+        name: trimmedName,
         is_custom: true
       })
       .select("*")
       .single();
 
+    if (error && "code" in error && error.code === "23505") {
+      const existing = await this.findRoomByName(trimmedName);
+      if (existing) {
+        return existing;
+      }
+    }
+
     assertNoError(error);
     return mapRoom(data);
+  }
+
+  async findRoomByName(name: string) {
+    const { data, error } = await this.supabase
+      .from("rooms")
+      .select("*")
+      .eq("user_id", this.user.id)
+      .ilike("name", name.trim())
+      .limit(1)
+      .maybeSingle();
+
+    assertNoError(error);
+    return data ? mapRoom(data) : null;
+  }
+
+  async deleteRoom(roomId: string, replacementRoomKey?: string) {
+    const nextRoomId = replacementRoomKey && !isBuiltInRoomKey(replacementRoomKey) ? replacementRoomKey : null;
+    const nextRoomKey = isBuiltInRoomKey(replacementRoomKey) ? replacementRoomKey : null;
+
+    const { error: updateError } = await this.supabase
+      .from("plants")
+      .update({
+        room_id: nextRoomId,
+        room_key: nextRoomKey
+      })
+      .eq("user_id", this.user.id)
+      .eq("room_id", roomId);
+    assertNoError(updateError);
+
+    const { error } = await this.supabase.from("rooms").delete().eq("id", roomId).eq("user_id", this.user.id);
+    assertNoError(error);
   }
 }
 

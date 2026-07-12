@@ -51,6 +51,7 @@ type PlantStoreValue = PlantState & {
   addPlant: (input: AddPlantInput) => Promise<string>;
   updatePlant: (plantId: string, input: { homeName?: string; roomKey?: Plant["roomKey"]; notes?: string }) => Promise<void>;
   addRoom: (name: string) => Promise<Room>;
+  deleteRoom: (roomId: string, replacementRoomKey?: Plant["roomKey"]) => Promise<void>;
   roomExists: (name: string) => boolean;
   addPlantPhoto: (plantId: string, input: { url: string; type: PhotoType; isCover?: boolean }) => Promise<PlantPhoto | undefined>;
   addPlantPhotos: (plantId: string, inputs: { url: string; type: PhotoType; isCover?: boolean }[]) => Promise<PlantPhoto[]>;
@@ -199,9 +200,37 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         throw new Error("Plant collection is not ready.");
       }
 
-      const room = await repositories.rooms.addRoom(name.trim());
-      setState((current) => ({ ...current, rooms: [...current.rooms, room] }));
+      const trimmedName = name.trim();
+      const existingRoom = state.rooms.find((room) => room.name.trim().toLocaleLowerCase() === trimmedName.toLocaleLowerCase());
+      if (existingRoom) {
+        return existingRoom;
+      }
+
+      const room = await repositories.rooms.addRoom(trimmedName);
+      setState((current) => {
+        const currentRoom = current.rooms.find((item) => item.id === room.id || item.name.trim().toLocaleLowerCase() === room.name.trim().toLocaleLowerCase());
+        if (currentRoom) {
+          return current;
+        }
+        return { ...current, rooms: [...current.rooms, room] };
+      });
       return room;
+    },
+    [repositories, state.rooms]
+  );
+
+  const deleteRoom = useCallback(
+    async (roomId: string, replacementRoomKey?: Plant["roomKey"]) => {
+      if (!repositories) {
+        throw new Error("Plant collection is not ready.");
+      }
+
+      await repositories.rooms.deleteRoom(roomId, replacementRoomKey);
+      setState((current) => ({
+        ...current,
+        rooms: current.rooms.filter((room) => room.id !== roomId),
+        plants: current.plants.map((plant) => (plant.roomKey === roomId ? { ...plant, roomKey: replacementRoomKey } : plant))
+      }));
     },
     [repositories]
   );
@@ -461,6 +490,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       addPlant,
       updatePlant,
       addRoom,
+      deleteRoom,
       roomExists,
       addPlantPhoto,
       addPlantPhotos,
@@ -482,6 +512,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       addRoom,
       bootstrap,
       deleteMilestone,
+      deleteRoom,
       deletePlant,
       deletePlantPhoto,
       error,

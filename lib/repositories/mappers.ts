@@ -15,6 +15,7 @@ import type { TranslationKey } from "@/i18n/dictionaries";
 export type PlantRow = {
   id: string;
   room_id: string | null;
+  room_key?: string | null;
   home_name: string | null;
   species_name: string | null;
   scientific_name: string | null;
@@ -92,7 +93,7 @@ export function mapPlant(row: PlantRow): Plant {
     nextAction: row.next_action === "none" ? null : row.next_action,
     lastWateredAt: toDateKey(row.last_watered_at),
     nextCheckAt: toDateKey(row.next_check_at),
-    roomKey: row.room_id ?? undefined,
+    roomKey: row.room_key ?? row.room_id ?? undefined,
     lightConditionKey: "light.mediumIndirect",
     notes: row.notes ?? undefined
   };
