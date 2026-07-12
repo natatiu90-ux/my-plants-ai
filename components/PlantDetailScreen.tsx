@@ -17,6 +17,7 @@ import { PlantHeroImage } from "./PlantHeroImage";
 import { PlantStatusSection } from "./PlantStatusSection";
 import { PrimaryCareAction } from "./PrimaryCareAction";
 import { Toast } from "./Toast";
+import type { SoilCheckResult } from "@/types/plant";
 
 type Sheet = "check_soil" | "add_photo" | "add_event" | null;
 
@@ -36,6 +37,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [isCompletingAction, setIsCompletingAction] = useState(false);
 
   useEffect(() => {
     if (!toast) {
@@ -58,15 +60,28 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
 
   const plantName = plantDisplayName(plant, t("plants.unknownName"));
 
-  const completeWatering = () => {
-    waterPlant(plant.id);
-    setSheet(null);
-    setToast(t("toast.wateringSaved"));
+  const completeWatering = async () => {
+    if (isCompletingAction) {
+      return;
+    }
+
+    setIsCompletingAction(true);
+    try {
+      await waterPlant(plant.id);
+      setSheet(null);
+      setToast(t("toast.wateringSaved"));
+    } finally {
+      setIsCompletingAction(false);
+    }
   };
 
   const openPrimaryAction = () => {
+    if (isCompletingAction) {
+      return;
+    }
+
     if (plant.nextAction === "water") {
-      completeWatering();
+      void completeWatering();
     } else if (plant.nextAction === "check_soil") {
       setSheet("check_soil");
     } else if (plant.nextAction === "take_photo") {
@@ -107,13 +122,23 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       <PhotoGallery photos={photos} onAddPhoto={() => setSheet("add_photo")} />
       <CareHistory milestones={milestones} onAddEvent={() => setSheet("add_event")} />
 
-      <PrimaryCareAction plant={plant} onAction={openPrimaryAction} />
+      <PrimaryCareAction plant={plant} onAction={openPrimaryAction} disabled={isCompletingAction} />
       {sheet === "check_soil" ? (
         <CheckSoilSheet
           onClose={() => setSheet(null)}
-          onWatered={completeWatering}
-          onSoilChecked={(result) => {
-            recordSoilChecked(plant.id, result);
+          onWatered={() => void completeWatering()}
+          isSaving={isCompletingAction}
+          onSoilChecked={async (result: SoilCheckResult, note) => {
+            if (isCompletingAction) {
+              return;
+            }
+
+            setIsCompletingAction(true);
+            try {
+              await recordSoilChecked(plant.id, result, note);
+            } finally {
+              setIsCompletingAction(false);
+            }
             setToast(t("toast.soilChecked"));
           }}
         />
@@ -123,10 +148,15 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           title={t("photos.addPhotos")}
           hasExistingCover={photos.some((photo) => photo.isCover)}
           onCancel={() => setSheet(null)}
-          onSave={(selectedPhotos) => {
-            addPlantPhotos(plant.id, selectedPhotos);
-            setSheet(null);
-            setToast(t("toast.photoSaved"));
+          onSave={async (selectedPhotos) => {
+            setIsCompletingAction(true);
+            try {
+              await addPlantPhotos(plant.id, selectedPhotos);
+              setSheet(null);
+              setToast(t("toast.photoSaved"));
+            } finally {
+              setIsCompletingAction(false);
+            }
           }}
         />
       ) : null}

@@ -7,6 +7,7 @@ export type PlantAction = "water" | "check_soil" | "take_photo" | null;
 export type PhotoType = "overview" | "leaf" | "pot" | "roots" | "problem" | "other";
 
 export type PlantCareEventType = "watered" | "soil_checked" | "photo_added";
+export type SoilCheckResult = "dry" | "slightly_damp" | "very_wet" | "not_sure";
 
 export type PlantMilestoneType =
   | "plant_added"

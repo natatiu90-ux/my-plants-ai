@@ -137,6 +137,39 @@ export class PlantRepository {
 
     assertNoError(error);
   }
+
+  async updateRecommendationState(
+    plantId: string,
+    input: {
+      status: Plant["status"];
+      nextAction: Plant["nextAction"];
+      nextCheckAt?: string | null;
+      lastWateredAt?: string | null;
+    }
+  ) {
+    const update: {
+      status: Plant["status"];
+      next_action: Plant["nextAction"] | "none";
+      next_check_at: string | null;
+      last_watered_at?: string;
+    } = {
+      status: input.status,
+      next_action: normalizeAction(input.nextAction),
+      next_check_at: input.nextCheckAt ? `${input.nextCheckAt}T12:00:00.000Z` : null
+    };
+
+    if (input.lastWateredAt) {
+      update.last_watered_at = `${input.lastWateredAt}T12:00:00.000Z`;
+    }
+
+    const { error } = await this.supabase
+      .from("plants")
+      .update(update)
+      .eq("id", plantId)
+      .eq("user_id", this.user.id);
+
+    assertNoError(error);
+  }
 }
 
 export class PhotoRepository {
@@ -446,6 +479,42 @@ export class AnalysisRepository {
     });
 
     assertNoError(error);
+  }
+
+  async resolveLatestActiveRecommendation(
+    plantId: string,
+    input: { action: string; result: string; replacementRecommendationId?: string | null }
+  ) {
+    const { data: latest, error: selectError } = await this.supabase
+      .from("plant_analyses")
+      .select("id")
+      .eq("user_id", this.user.id)
+      .eq("plant_id", plantId)
+      .is("resolved_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    assertNoError(selectError);
+    if (!latest?.id) {
+      return null;
+    }
+
+    const { error } = await this.supabase
+      .from("plant_analyses")
+      .update({
+        status: "resolved",
+        resolved_at: new Date().toISOString(),
+        resolution_action: input.action,
+        resolution_result: input.result,
+        replacement_recommendation_id: input.replacementRecommendationId ?? null
+      })
+      .eq("id", latest.id)
+      .eq("user_id", this.user.id)
+      .is("resolved_at", null);
+
+    assertNoError(error);
+    return latest.id as string;
   }
 }
 

@@ -6,7 +6,7 @@ import { addDays, toDateKey } from "@/lib/date-format";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/client";
 import { createRepositories } from "@/lib/repositories/supabase-repositories";
 import { commonNameFromScientificName } from "@/lib/plant-display";
-import type { PhotoType, Plant, PlantCareEvent, PlantMilestone, PlantPhoto, Room } from "@/types/plant";
+import type { PhotoType, Plant, PlantCareEvent, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
 
 type PlantState = {
   plants: Plant[];
@@ -70,7 +70,7 @@ type PlantStoreValue = PlantState & {
   ) => Promise<void>;
   deleteMilestone: (milestoneId: string) => Promise<void>;
   waterPlant: (plantId: string) => Promise<void>;
-  recordSoilChecked: (plantId: string, result: string) => Promise<void>;
+  recordSoilChecked: (plantId: string, result: SoilCheckResult, note?: string) => Promise<void>;
   deletePlant: (plantId: string) => Promise<void>;
 };
 
@@ -246,9 +246,30 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       const hasExistingPhotos = state.photos.some((photo) => photo.plantId === plantId);
       const photos = await repositories.photos.addPhotos(plantId, inputs, hasExistingPhotos);
       const shouldAssignCover = photos.some((photo) => photo.isCover);
+      const shouldResolvePhotoRecommendation = photos.length > 0 && state.plants.some((plant) => plant.id === plantId && plant.nextAction === "take_photo");
+      if (shouldResolvePhotoRecommendation) {
+        await repositories.analyses.resolveLatestActiveRecommendation(plantId, { action: "photo_added", result: "photo_added" });
+        await repositories.plants.updateRecommendationState(plantId, {
+          status: "healthy",
+          nextAction: null,
+          nextCheckAt: toDateKey(addDays(new Date(), 4))
+        });
+      }
 
       setState((current) => ({
         ...current,
+        plants: current.plants.map((plant) =>
+          shouldResolvePhotoRecommendation && plant.id === plantId
+            ? {
+                ...plant,
+                status: "healthy",
+                statusLabelKey: "status.doingGreat",
+                messageKey: "plants.afterWatering.message",
+                nextAction: null,
+                nextCheckAt: toDateKey(addDays(new Date(), 4))
+              }
+            : plant
+        ),
         photos: [
           ...photos,
           ...current.photos.map((photo) => (shouldAssignCover && photo.plantId === plantId ? { ...photo, isCover: false } : photo))
@@ -267,7 +288,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
 
       return photos;
     },
-    [repositories, state.photos]
+    [repositories, state.photos, state.plants]
   );
 
   const addPlant = useCallback(
@@ -456,6 +477,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
     async (plantId: string) => {
       const nextCheckAt = toDateKey(addDays(new Date(), 4));
       await repositories?.plants.markWatered(plantId, nextCheckAt);
+      await repositories?.analyses.resolveLatestActiveRecommendation(plantId, { action: "watered", result: "watered" });
       await repositories?.careEvents.addCareEvent(plantId, { type: "watered" });
       setState((current) => ({
         ...current,
@@ -478,15 +500,83 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
     [repositories]
   );
 
+  const soilCheckResolution = (result: SoilCheckResult) => {
+    if (result === "dry") {
+      return {
+        status: "check_soon" as const,
+        nextAction: "water" as const,
+        nextCheckAt: null,
+        replacementRecommendationId: "water_after_soil_check"
+      };
+    }
+
+    if (result === "not_sure") {
+      return {
+        status: "healthy" as const,
+        nextAction: null,
+        nextCheckAt: toDateKey(addDays(new Date(), 1)),
+        replacementRecommendationId: "soil_check_guidance"
+      };
+    }
+
+    return {
+      status: "healthy" as const,
+      nextAction: null,
+      nextCheckAt: toDateKey(addDays(new Date(), 2)),
+      replacementRecommendationId: null
+    };
+  };
+
   const recordSoilChecked = useCallback(
-    async (plantId: string, result: string) => {
-      await repositories?.careEvents.addCareEvent(plantId, { type: "soil_checked", metadata: { result } });
+    async (plantId: string, result: SoilCheckResult, note?: string) => {
+      if (!repositories) {
+        return;
+      }
+
+      const resolution = soilCheckResolution(result);
+      await repositories.analyses.resolveLatestActiveRecommendation(plantId, {
+        action: "soil_checked",
+        result,
+        replacementRecommendationId: resolution.replacementRecommendationId
+      });
+      await repositories.plants.updateRecommendationState(plantId, {
+        status: resolution.status,
+        nextAction: resolution.nextAction,
+        nextCheckAt: resolution.nextCheckAt
+      });
+      await repositories.careEvents.addCareEvent(plantId, { type: "soil_checked", metadata: { result, followUp: resolution.replacementRecommendationId ?? "next_check_scheduled" } });
+      const milestone = await repositories.milestones.addMilestone(plantId, {
+        type: "soil_checked",
+        eventDate: toDateKey(new Date()),
+        note
+      });
       setState((current) => ({
         ...current,
+        plants: current.plants.map((plant) =>
+          plant.id === plantId
+            ? {
+                ...plant,
+                status: resolution.status,
+                statusLabelKey:
+                  resolution.nextAction === "water"
+                    ? "status.looksThirsty"
+                    : resolution.nextAction === "check_soil"
+                      ? "status.checkSoilToday"
+                      : "status.doingGreat",
+                messageKey:
+                  resolution.status === "check_soon"
+                    ? "plants.checkSoon.message"
+                    : "plants.afterWatering.message",
+                nextAction: resolution.nextAction,
+                nextCheckAt: resolution.nextCheckAt ?? undefined
+              }
+            : plant
+        ),
         careEvents: [
           { id: `${plantId}-soil-${Date.now()}`, plantId, type: "soil_checked", createdAt: toDateKey(new Date()), metadata: { result } },
           ...current.careEvents
-        ]
+        ],
+        milestones: [milestone, ...current.milestones]
       }));
     },
     [repositories]

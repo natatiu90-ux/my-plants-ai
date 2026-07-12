@@ -84,15 +84,23 @@ function toDateKey(value: string | null | undefined) {
 }
 
 export function mapPlant(row: PlantRow): Plant {
+  const nextAction = row.next_action === "none" ? null : row.next_action;
+  const statusLabelKey =
+    nextAction === "water"
+      ? "status.looksThirsty"
+      : nextAction === "check_soil"
+        ? "status.checkSoilToday"
+        : statusLabelKeys[row.status];
+
   return {
     id: row.id,
     homeName: row.home_name ?? undefined,
     speciesName: row.species_name || commonNameFromScientificName(row.scientific_name),
     scientificName: row.scientific_name ?? undefined,
     status: row.status,
-    statusLabelKey: statusLabelKeys[row.status],
+    statusLabelKey,
     messageKey: messageKeys[row.status],
-    nextAction: row.next_action === "none" ? null : row.next_action,
+    nextAction,
     lastWateredAt: toDateKey(row.last_watered_at),
     nextCheckAt: toDateKey(row.next_check_at),
     roomKey: row.room_key ?? row.room_id ?? undefined,

@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, X } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
-
-type SoilChoice = "dry" | "slightly_damp" | "very_wet" | "not_sure";
+import type { SoilCheckResult } from "@/types/plant";
 
 const soilOptions = [
   { value: "dry", labelKey: "checkSoil.dry" },
@@ -16,14 +15,16 @@ const soilOptions = [
 export function CheckSoilSheet({
   onClose,
   onWatered,
-  onSoilChecked
+  onSoilChecked,
+  isSaving
 }: {
   onClose: () => void;
   onWatered: () => void;
-  onSoilChecked: (result: SoilChoice) => void;
+  onSoilChecked: (result: SoilCheckResult, note: string) => Promise<void>;
+  isSaving?: boolean;
 }) {
   const { t } = useI18n();
-  const [choice, setChoice] = useState<SoilChoice | null>(null);
+  const [choice, setChoice] = useState<SoilCheckResult | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -38,9 +39,19 @@ export function CheckSoilSheet({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
-  const choose = (nextChoice: SoilChoice) => {
+  const noteForChoice = (nextChoice: SoilCheckResult) => {
+    if (nextChoice === "dry") return t("checkSoil.ready");
+    if (nextChoice === "slightly_damp") return t("checkSoil.wait");
+    if (nextChoice === "very_wet") return t("checkSoil.wet");
+    return t("checkSoil.unsure");
+  };
+
+  const choose = async (nextChoice: SoilCheckResult) => {
+    if (isSaving) {
+      return;
+    }
     setChoice(nextChoice);
-    onSoilChecked(nextChoice);
+    await onSoilChecked(nextChoice, noteForChoice(nextChoice));
   };
 
   return (
@@ -56,8 +67,9 @@ export function CheckSoilSheet({
             <button
               type="button"
               onClick={() => setChoice(null)}
+              disabled={isSaving}
               aria-label={t("settings.back")}
-              className="flex size-11 items-center justify-center rounded-2xl bg-white text-[#7d776b] shadow-[0_1px_8px_rgba(0,0,0,0.06)]"
+              className="flex size-11 items-center justify-center rounded-2xl bg-white text-[#7d776b] shadow-[0_1px_8px_rgba(0,0,0,0.06)] disabled:opacity-50"
             >
               <ArrowLeft aria-hidden="true" size={18} />
             </button>
@@ -71,8 +83,9 @@ export function CheckSoilSheet({
             ref={closeRef}
             type="button"
             onClick={onClose}
+            disabled={isSaving}
             aria-label={t("settings.close")}
-            className="flex size-11 items-center justify-center rounded-2xl bg-white text-[#7d776b] shadow-[0_1px_8px_rgba(0,0,0,0.06)]"
+            className="flex size-11 items-center justify-center rounded-2xl bg-white text-[#7d776b] shadow-[0_1px_8px_rgba(0,0,0,0.06)] disabled:opacity-50"
           >
             <X aria-hidden="true" size={18} />
           </button>
@@ -85,7 +98,8 @@ export function CheckSoilSheet({
                 key={option.value}
                 type="button"
                 onClick={() => choose(option.value)}
-                className="min-h-[56px] rounded-[20px] bg-white/75 px-4 text-left text-[15px] font-extrabold text-[#4f4940] shadow-[0_1px_6px_rgba(0,0,0,0.04)]"
+                disabled={isSaving}
+                className="min-h-[56px] rounded-[20px] bg-white/75 px-4 text-left text-[15px] font-extrabold text-[#4f4940] shadow-[0_1px_6px_rgba(0,0,0,0.04)] disabled:opacity-60"
               >
                 {t(option.labelKey)}
               </button>
@@ -102,11 +116,12 @@ export function CheckSoilSheet({
               <button
                 type="button"
                 onClick={onWatered}
-                className="min-h-12 rounded-[18px] bg-gradient-to-br from-[#92cc90] to-[#6ba369] px-4 text-sm font-extrabold text-white shadow-fab"
+                disabled={isSaving}
+                className="min-h-12 rounded-[18px] bg-gradient-to-br from-[#92cc90] to-[#6ba369] px-4 text-sm font-extrabold text-white shadow-fab disabled:opacity-60"
               >
                 {t("checkSoil.iWatered")}
               </button>
-              <button type="button" onClick={onClose} className="min-h-12 rounded-[18px] px-4 text-sm font-extrabold text-[#777167]">
+              <button type="button" onClick={onClose} disabled={isSaving} className="min-h-12 rounded-[18px] px-4 text-sm font-extrabold text-[#777167] disabled:opacity-50">
                 {t("checkSoil.notNow")}
               </button>
             </div>
@@ -114,7 +129,7 @@ export function CheckSoilSheet({
         ) : null}
 
         {choice === "slightly_damp" ? (
-          <ResultMessage message={t("checkSoil.wait")} buttonLabel={t("checkSoil.gotIt")} onClose={onClose} />
+          <ResultMessage message={t("checkSoil.wait")} buttonLabel={t("checkSoil.gotIt")} onClose={onClose} disabled={isSaving} />
         ) : null}
 
         {choice === "very_wet" ? (
@@ -124,7 +139,8 @@ export function CheckSoilSheet({
             <button
               type="button"
               onClick={onClose}
-              className="mt-4 min-h-12 w-full rounded-[18px] bg-white px-4 text-sm font-extrabold text-[#5f594f] shadow-[0_1px_8px_rgba(0,0,0,0.06)]"
+              disabled={isSaving}
+              className="mt-4 min-h-12 w-full rounded-[18px] bg-white px-4 text-sm font-extrabold text-[#5f594f] shadow-[0_1px_8px_rgba(0,0,0,0.06)] disabled:opacity-50"
             >
               {t("checkSoil.gotIt")}
             </button>
@@ -132,21 +148,22 @@ export function CheckSoilSheet({
         ) : null}
 
         {choice === "not_sure" ? (
-          <ResultMessage message={t("checkSoil.unsure")} buttonLabel={t("checkSoil.backToOptions")} onClose={() => setChoice(null)} />
+          <ResultMessage message={t("checkSoil.unsure")} buttonLabel={t("checkSoil.backToOptions")} onClose={() => setChoice(null)} disabled={isSaving} />
         ) : null}
       </div>
     </div>
   );
 }
 
-function ResultMessage({ message, buttonLabel, onClose }: { message: string; buttonLabel: string; onClose: () => void }) {
+function ResultMessage({ message, buttonLabel, onClose, disabled }: { message: string; buttonLabel: string; onClose: () => void; disabled?: boolean }) {
   return (
     <div>
       <p className="rounded-[22px] bg-[#f4efe6] p-4 text-[15px] font-bold leading-6 text-[#5f594f]">{message}</p>
       <button
         type="button"
         onClick={onClose}
-        className="mt-4 min-h-12 w-full rounded-[18px] bg-white px-4 text-sm font-extrabold text-[#5f594f] shadow-[0_1px_8px_rgba(0,0,0,0.06)]"
+        disabled={disabled}
+        className="mt-4 min-h-12 w-full rounded-[18px] bg-white px-4 text-sm font-extrabold text-[#5f594f] shadow-[0_1px_8px_rgba(0,0,0,0.06)] disabled:opacity-50"
       >
         {buttonLabel}
       </button>

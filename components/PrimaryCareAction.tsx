@@ -6,7 +6,7 @@ import type { Plant, PlantAction } from "@/types/plant";
 
 const actionIcons: Exclude<PlantAction, null>[] = ["water", "check_soil", "take_photo"];
 
-export function PrimaryCareAction({ plant, onAction }: { plant: Plant; onAction: () => void }) {
+export function PrimaryCareAction({ plant, onAction, disabled }: { plant: Plant; onAction: () => void; disabled?: boolean }) {
   const { t } = useI18n();
   const action = plant.nextAction;
 
@@ -28,7 +28,8 @@ export function PrimaryCareAction({ plant, onAction }: { plant: Plant; onAction:
       <button
         type="button"
         onClick={onAction}
-        className={`flex min-h-[58px] w-full items-center justify-center gap-2 rounded-[22px] bg-gradient-to-br ${tone} px-5 text-base font-extrabold text-white shadow-fab transition hover:-translate-y-0.5 active:translate-y-0`}
+        disabled={disabled}
+        className={`flex min-h-[58px] w-full items-center justify-center gap-2 rounded-[22px] bg-gradient-to-br ${tone} px-5 text-base font-extrabold text-white shadow-fab transition hover:-translate-y-0.5 active:translate-y-0 disabled:translate-y-0 disabled:opacity-60`}
       >
         <Icon aria-hidden="true" size={20} />
         {t(labelKey)}
