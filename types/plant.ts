@@ -1,6 +1,6 @@
 import type { TranslationKey } from "@/i18n/dictionaries";
 
-export type PlantStatus = "healthy" | "check_soon" | "needs_attention";
+export type PlantStatus = "healthy" | "check_soon" | "needs_attention" | "unknown";
 
 export type PlantAction = "water" | "check_soil" | "take_photo" | null;
 
@@ -24,6 +24,7 @@ export interface Plant {
   id: string;
   homeName?: string;
   speciesName: string;
+  scientificName?: string;
   status: PlantStatus;
   messageKey: TranslationKey;
   statusLabelKey: TranslationKey;
@@ -70,6 +71,7 @@ export interface PlantPhoto {
   plantId: string;
   url: string;
   storageId?: string;
+  storagePath?: string;
   type: PhotoType;
   createdAt: string;
   isCover: boolean;

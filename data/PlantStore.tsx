@@ -1,9 +1,10 @@
 "use client";
 
+import type { User } from "@supabase/supabase-js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { mockCareEvents, mockMilestones, mockPhotos, mockPlants } from "@/data/mockPlants";
 import { addDays, toDateKey } from "@/lib/date-format";
-import { PhotoStorageRepository } from "@/lib/photo-storage";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase/client";
+import { createRepositories } from "@/lib/repositories/supabase-repositories";
 import type { PhotoType, Plant, PlantCareEvent, PlantMilestone, PlantPhoto, Room } from "@/types/plant";
 
 type PlantState = {
@@ -14,99 +15,147 @@ type PlantState = {
   rooms: Room[];
 };
 
+type StoreStatus = "loading" | "ready" | "error";
+
+type AddPlantInput = {
+  homeName?: string;
+  speciesName: string;
+  scientificName?: string;
+  roomKey?: Plant["roomKey"];
+  coverPhotoUrl?: string;
+  notes?: string;
+  photos?: { url: string; type: PhotoType; isCover?: boolean }[];
+  analysis?: {
+    detectedSpecies?: string | null;
+    confidence?: number | null;
+    condition?: Plant["status"];
+    nextAction?: Plant["nextAction"];
+    nextCheckInDays?: number | null;
+    summary?: { en?: string | null; ru?: string | null };
+    recommendations?: unknown;
+    rawResult?: unknown;
+    model?: string | null;
+  };
+};
+
 type PlantStoreValue = PlantState & {
+  status: StoreStatus;
+  error: string | null;
+  userId: string | null;
+  retry: () => Promise<void>;
   getPlant: (id: string) => Plant | undefined;
   getPlantPhotos: (plantId: string) => PlantPhoto[];
   getCoverPhoto: (plantId: string) => PlantPhoto | undefined;
   getPlantCareEvents: (plantId: string) => PlantCareEvent[];
   getPlantMilestones: (plantId: string) => PlantMilestone[];
-  addPlant: (input: {
-    homeName?: string;
-    speciesName: string;
-    roomKey?: Plant["roomKey"];
-    coverPhotoUrl?: string;
-    notes?: string;
-    photos?: { url: string; type: PhotoType; isCover?: boolean }[];
-  }) => string;
-  updatePlant: (plantId: string, input: { homeName?: string; roomKey?: Plant["roomKey"]; notes?: string }) => void;
-  addRoom: (name: string) => Room;
+  addPlant: (input: AddPlantInput) => Promise<string>;
+  updatePlant: (plantId: string, input: { homeName?: string; roomKey?: Plant["roomKey"]; notes?: string }) => Promise<void>;
+  addRoom: (name: string) => Promise<Room>;
   roomExists: (name: string) => boolean;
-  addPlantPhoto: (plantId: string, input: { url: string; type: PhotoType; isCover?: boolean }) => PlantPhoto;
-  addPlantPhotos: (plantId: string, inputs: { url: string; type: PhotoType; isCover?: boolean }[]) => PlantPhoto[];
-  setCoverPhoto: (plantId: string, photoId: string) => void;
-  updatePhotoType: (photoId: string, type: PhotoType) => void;
+  addPlantPhoto: (plantId: string, input: { url: string; type: PhotoType; isCover?: boolean }) => Promise<PlantPhoto | undefined>;
+  addPlantPhotos: (plantId: string, inputs: { url: string; type: PhotoType; isCover?: boolean }[]) => Promise<PlantPhoto[]>;
+  setCoverPhoto: (plantId: string, photoId: string) => Promise<void>;
+  updatePhotoType: (photoId: string, type: PhotoType) => Promise<void>;
   deletePlantPhoto: (plantId: string, photoId: string) => Promise<"deleted" | "only-photo">;
   addMilestone: (
     plantId: string,
     input: { type: PlantMilestone["type"]; eventDate: string; note?: string; photoId?: string }
-  ) => PlantMilestone;
+  ) => Promise<PlantMilestone>;
   updateMilestone: (
     milestoneId: string,
     input: { type: PlantMilestone["type"]; eventDate: string; note?: string; photoId?: string }
-  ) => void;
-  deleteMilestone: (milestoneId: string) => void;
-  waterPlant: (plantId: string) => void;
-  recordSoilChecked: (plantId: string, result: string) => void;
-  deletePlant: (plantId: string) => void;
+  ) => Promise<void>;
+  deleteMilestone: (milestoneId: string) => Promise<void>;
+  waterPlant: (plantId: string) => Promise<void>;
+  recordSoilChecked: (plantId: string, result: string) => Promise<void>;
+  deletePlant: (plantId: string) => Promise<void>;
 };
 
+type Repositories = Awaited<ReturnType<typeof createRepositories>>;
+
 const PlantStoreContext = createContext<PlantStoreValue | null>(null);
-const storageKey = "my-plants-store-v4";
 
-function createInitialState(): PlantState {
-  return {
-    plants: mockPlants,
-    photos: mockPhotos,
-    careEvents: mockCareEvents,
-    milestones: mockMilestones,
-    rooms: []
-  };
-}
+const emptyState: PlantState = {
+  plants: [],
+  photos: [],
+  careEvents: [],
+  milestones: [],
+  rooms: []
+};
 
-function readStoredState(): PlantState {
-  if (typeof window === "undefined") {
-    return createInitialState();
-  }
-
-  try {
-    const storedValue = window.localStorage.getItem(storageKey);
-    if (!storedValue) {
-      return createInitialState();
-    }
-
-    const parsed = JSON.parse(storedValue) as PlantState;
-    if (
-      !Array.isArray(parsed.plants) ||
-      !Array.isArray(parsed.photos) ||
-      !Array.isArray(parsed.careEvents) ||
-      !Array.isArray(parsed.milestones)
-    ) {
-      return createInitialState();
-    }
-
-    return {
-      ...parsed,
-      rooms: Array.isArray(parsed.rooms) ? parsed.rooms : []
-    };
-  } catch {
-    return createInitialState();
-  }
+function builtInRoomExists(name: string) {
+  const normalized = name.trim().toLocaleLowerCase();
+  return ["living room", "bedroom", "kitchen", "bathroom", "office", "balcony", "гостиная", "спальня", "кухня", "ванная", "кабинет", "балкон"].includes(
+    normalized
+  );
 }
 
 export function PlantStoreProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<PlantState>(createInitialState);
-  const [hasLoaded, setHasLoaded] = useState(false);
+  const [state, setState] = useState<PlantState>(emptyState);
+  const [status, setStatus] = useState<StoreStatus>("loading");
+  const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [repositories, setRepositories] = useState<Repositories | null>(null);
 
-  useEffect(() => {
-    setState(readStoredState());
-    setHasLoaded(true);
+  const loadData = useCallback(async (nextRepositories: Repositories) => {
+    const [plants, photos, rooms, milestones, careEvents] = await Promise.all([
+      nextRepositories.plants.listPlants(),
+      nextRepositories.photos.listPhotos(),
+      nextRepositories.rooms.listRooms(),
+      nextRepositories.milestones.listMilestones(),
+      nextRepositories.careEvents.listCareEvents()
+    ]);
+
+    setState({ plants, photos, rooms, milestones, careEvents });
   }, []);
 
-  useEffect(() => {
-    if (hasLoaded) {
-      window.localStorage.setItem(storageKey, JSON.stringify(state));
+  const bootstrap = useCallback(async () => {
+    setStatus("loading");
+    setError(null);
+
+    try {
+      if (!isSupabaseConfigured || !supabase) {
+        throw new Error("Supabase is not configured.");
+      }
+
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      let nextUser = sessionData.session?.user ?? null;
+      if (!nextUser) {
+        const { data, error: signInError } = await supabase.auth.signInAnonymously();
+        if (signInError) {
+          throw signInError;
+        }
+        nextUser = data.user;
+      }
+
+      if (!nextUser) {
+        throw new Error("Anonymous session was not created.");
+      }
+
+      await Promise.all([
+        supabase.from("profiles").upsert({ id: nextUser.id }, { onConflict: "id" }),
+        supabase.from("user_settings").upsert({ user_id: nextUser.id }, { onConflict: "user_id" })
+      ]);
+
+      const nextRepositories = await createRepositories(supabase, nextUser);
+      setUser(nextUser);
+      setRepositories(nextRepositories);
+      await loadData(nextRepositories);
+      setStatus("ready");
+    } catch (nextError) {
+      setState(emptyState);
+      setStatus("error");
+      setError(nextError instanceof Error ? nextError.message : "Unknown error");
     }
-  }, [hasLoaded, state]);
+  }, [loadData]);
+
+  useEffect(() => {
+    void bootstrap();
+  }, [bootstrap]);
 
   const getPlant = useCallback((id: string) => state.plants.find((plant) => plant.id === id), [state.plants]);
 
@@ -140,191 +189,41 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
   );
 
   const roomExists = useCallback(
-    (name: string) => {
-      const normalized = name.trim().toLocaleLowerCase();
-      const builtInRooms = [
-        "living room",
-        "bedroom",
-        "kitchen",
-        "bathroom",
-        "office",
-        "balcony",
-        "гостиная",
-        "спальня",
-        "кухня",
-        "ванная",
-        "кабинет",
-        "балкон"
-      ];
-      return builtInRooms.includes(normalized) || state.rooms.some((room) => room.name.trim().toLocaleLowerCase() === normalized);
-    },
+    (name: string) => builtInRoomExists(name) || state.rooms.some((room) => room.name.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase()),
     [state.rooms]
   );
 
-  const addRoom = useCallback((name: string) => {
-    const room: Room = {
-      id: `room-${Date.now()}`,
-      name: name.trim(),
-      isCustom: true,
-      createdAt: toDateKey(new Date())
-    };
+  const addRoom = useCallback(
+    async (name: string) => {
+      if (!repositories) {
+        throw new Error("Plant collection is not ready.");
+      }
 
-    setState((current) => ({
-      ...current,
-      rooms: [...current.rooms, room]
-    }));
+      const room = await repositories.rooms.addRoom(name.trim());
+      setState((current) => ({ ...current, rooms: [...current.rooms, room] }));
+      return room;
+    },
+    [repositories]
+  );
 
-    return room;
-  }, []);
+  const addPlantPhotos = useCallback(
+    async (plantId: string, inputs: { url: string; type: PhotoType; isCover?: boolean }[]) => {
+      if (!repositories || !inputs.length) {
+        return [];
+      }
 
-  const addPlant = useCallback((input: {
-    homeName?: string;
-    speciesName: string;
-    roomKey?: Plant["roomKey"];
-    coverPhotoUrl?: string;
-    notes?: string;
-    photos?: { url: string; type: PhotoType; isCover?: boolean }[];
-  }) => {
-    const plantId = `plant-${Date.now()}`;
-    const todayKey = toDateKey(new Date());
-    const photoInputs = input.photos?.length ? input.photos : [{ url: input.coverPhotoUrl ?? "/plants/martha.png", type: "overview" as PhotoType, isCover: true }];
-    const selectedCoverIndex = Math.max(0, photoInputs.findIndex((photo) => photo.isCover));
-    const plantPhotos = photoInputs.map((photo, index) => ({
-      id: `${plantId}-photo-${Date.now()}-${index}`,
-      plantId,
-      url: photo.url,
-      storageId: photo.url.startsWith("photo://") ? photo.url.replace("photo://", "") : undefined,
-      type: photo.type,
-      createdAt: todayKey,
-      isCover: index === selectedCoverIndex,
-      analysis: { status: "pending" as const }
-    }));
+      const hasExistingPhotos = state.photos.some((photo) => photo.plantId === plantId);
+      const photos = await repositories.photos.addPhotos(plantId, inputs, hasExistingPhotos);
+      const shouldAssignCover = photos.some((photo) => photo.isCover);
 
-    setState((current) => ({
-      ...current,
-      plants: [
-        {
-          id: plantId,
-          homeName: input.homeName || undefined,
-          speciesName: input.speciesName,
-          status: "healthy",
-          messageKey: "plants.new.message",
-          statusLabelKey: "status.doingGreat",
-          nextAction: null,
-          nextCheckAt: toDateKey(addDays(new Date(), 4)),
-          roomKey: input.roomKey,
-          lightConditionKey: "light.mediumIndirect",
-          notes: input.notes
-        },
-        ...current.plants
-      ],
-      photos: [...plantPhotos, ...current.photos],
-      milestones: [
-        {
-          id: `${plantId}-added-${Date.now()}`,
-          plantId,
-          type: "plant_added",
-          createdAt: todayKey,
-          titleKey: "milestones.plant_added.title",
-          descriptionKey: "milestones.new.plant_added.description"
-        },
-        ...current.milestones
-      ]
-    }));
-    return plantId;
-  }, []);
-
-  const updatePlant = useCallback((plantId: string, input: { homeName?: string; roomKey?: Plant["roomKey"]; notes?: string }) => {
-    setState((current) => ({
-      ...current,
-      plants: current.plants.map((plant) =>
-        plant.id === plantId
-          ? {
-              ...plant,
-              homeName: input.homeName || undefined,
-              roomKey: input.roomKey,
-              notes: input.notes
-            }
-          : plant
-      )
-    }));
-  }, []);
-
-  const addPlantPhoto = useCallback((plantId: string, input: { url: string; type: PhotoType; isCover?: boolean }) => {
-    let createdPhoto: PlantPhoto;
-
-    setState((current) => {
-      const shouldBeCover = Boolean(input.isCover) || !current.photos.some((photo) => photo.plantId === plantId);
-      createdPhoto = {
-        id: `${plantId}-photo-${Date.now()}`,
-        plantId,
-        url: input.url,
-        storageId: input.url.startsWith("photo://") ? input.url.replace("photo://", "") : undefined,
-        type: input.type,
-        createdAt: toDateKey(new Date()),
-        isCover: shouldBeCover,
-        analysis: { status: "pending" }
-      };
-
-      return {
+      setState((current) => ({
         ...current,
         photos: [
-          createdPhoto,
-          ...current.photos.map((existingPhoto) =>
-            shouldBeCover && existingPhoto.plantId === plantId ? { ...existingPhoto, isCover: false } : existingPhoto
-          )
+          ...photos,
+          ...current.photos.map((photo) => (shouldAssignCover && photo.plantId === plantId ? { ...photo, isCover: false } : photo))
         ],
         careEvents: [
-          {
-            id: `${plantId}-photo-event-${Date.now()}`,
-            plantId,
-            type: "photo_added",
-            createdAt: createdPhoto.createdAt,
-            metadata: { photoType: input.type }
-          },
-          ...current.careEvents
-        ]
-      };
-    });
-
-    return createdPhoto!;
-  }, []);
-
-  const addPlantPhotos = useCallback((plantId: string, inputs: { url: string; type: PhotoType; isCover?: boolean }[]) => {
-    if (!inputs.length) {
-      return [];
-    }
-
-    let createdPhotos: PlantPhoto[] = [];
-
-    setState((current) => {
-      const hasExistingPhotos = current.photos.some((photo) => photo.plantId === plantId);
-      const selectedCoverIndex = inputs.findIndex((photo) => photo.isCover);
-      const shouldAssignCover = selectedCoverIndex >= 0 || !hasExistingPhotos;
-      const coverIndex = selectedCoverIndex >= 0 ? selectedCoverIndex : 0;
-      const todayKey = toDateKey(new Date());
-
-      createdPhotos = inputs.map((input, index) => ({
-        id: `${plantId}-photo-${Date.now()}-${index}`,
-        plantId,
-        url: input.url,
-        storageId: input.url.startsWith("photo://") ? input.url.replace("photo://", "") : undefined,
-        type: input.type,
-        createdAt: todayKey,
-        isCover: shouldAssignCover && index === coverIndex,
-        analysis: { status: "pending" as const }
-      }));
-
-      return {
-        ...current,
-        photos: [
-          ...createdPhotos,
-          ...current.photos.map((existingPhoto) =>
-            shouldAssignCover && existingPhoto.plantId === plantId ? { ...existingPhoto, isCover: false } : existingPhoto
-          )
-        ],
-        careEvents: [
-          ...createdPhotos.map((photo) => ({
+          ...photos.map((photo) => ({
             id: `${photo.id}-event`,
             plantId,
             type: "photo_added" as const,
@@ -333,133 +232,171 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           })),
           ...current.careEvents
         ]
-      };
-    });
+      }));
 
-    return createdPhotos;
-  }, []);
+      return photos;
+    },
+    [repositories, state.photos]
+  );
 
-  const setCoverPhoto = useCallback((plantId: string, photoId: string) => {
-    setState((current) => ({
-      ...current,
-      photos: current.photos.map((photo) =>
-        photo.plantId === plantId ? { ...photo, isCover: photo.id === photoId } : photo
-      )
-    }));
-  }, []);
-
-  const updatePhotoType = useCallback((photoId: string, type: PhotoType) => {
-    setState((current) => ({
-      ...current,
-      photos: current.photos.map((photo) => (photo.id === photoId ? { ...photo, type } : photo))
-    }));
-  }, []);
-
-  const deletePlantPhoto = useCallback(async (plantId: string, photoId: string) => {
-    let storageIdToDelete: string | undefined;
-    let deleted = false;
-
-    setState((current) => {
-      const plantPhotos = current.photos
-        .filter((photo) => photo.plantId === plantId)
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-
-      if (plantPhotos.length <= 1) {
-        return current;
+  const addPlant = useCallback(
+    async (input: AddPlantInput) => {
+      if (!repositories) {
+        throw new Error("Plant collection is not ready.");
       }
 
-      const deletedPhoto = plantPhotos.find((photo) => photo.id === photoId);
-      if (!deletedPhoto) {
-        return current;
+      const nextCheckAt = input.analysis?.nextCheckInDays != null ? toDateKey(addDays(new Date(), input.analysis.nextCheckInDays)) : undefined;
+      const plant = await repositories.plants.createPlant({
+        homeName: input.homeName,
+        speciesName: input.speciesName,
+        scientificName: input.scientificName,
+        roomKey: input.roomKey,
+        notes: input.notes,
+        status: input.analysis?.condition ?? "unknown",
+        nextAction: input.analysis?.nextAction ?? null,
+        nextCheckAt
+      });
+
+      const photos = await repositories.photos.addPhotos(plant.id, input.photos ?? [], false);
+      const milestone = await repositories.milestones.addMilestone(plant.id, {
+        type: "plant_added",
+        eventDate: toDateKey(new Date())
+      });
+
+      if (input.analysis) {
+        await repositories.analyses.addAnalysis({
+          plantId: plant.id,
+          sourcePhotoIds: photos.map((photo) => photo.id),
+          detectedSpecies: input.analysis.detectedSpecies,
+          confidence: input.analysis.confidence,
+          condition: input.analysis.condition,
+          nextAction: input.analysis.nextAction,
+          summaryEn: input.analysis.summary?.en,
+          summaryRu: input.analysis.summary?.ru,
+          recommendations: input.analysis.recommendations,
+          rawResult: input.analysis.rawResult,
+          model: input.analysis.model
+        });
       }
-
-      storageIdToDelete = deletedPhoto.storageId ?? (deletedPhoto.url.startsWith("photo://") ? deletedPhoto.url.replace("photo://", "") : undefined);
-      deleted = true;
-
-      const remainingPlantPhotos = plantPhotos.filter((photo) => photo.id !== photoId);
-      const promotedCover =
-        deletedPhoto.isCover
-          ? remainingPlantPhotos.find((photo) => photo.type === "overview") ?? remainingPlantPhotos[0]
-          : remainingPlantPhotos.find((photo) => photo.isCover);
-
-      return {
-        ...current,
-        photos: current.photos
-          .filter((photo) => photo.id !== photoId)
-          .map((photo) =>
-            photo.plantId === plantId && promotedCover ? { ...photo, isCover: photo.id === promotedCover.id } : photo
-          )
-      };
-    });
-
-    if (!deleted) {
-      return "only-photo";
-    }
-
-    if (storageIdToDelete) {
-      await PhotoStorageRepository.deletePhoto(storageIdToDelete);
-    }
-
-    return "deleted";
-  }, []);
-
-  const addMilestone = useCallback(
-    (plantId: string, input: { type: PlantMilestone["type"]; eventDate: string; note?: string; photoId?: string }) => {
-      const milestone: PlantMilestone = {
-        id: `${plantId}-milestone-${Date.now()}`,
-        plantId,
-        type: input.type,
-        createdAt: toDateKey(new Date()),
-        eventDate: input.eventDate,
-        note: input.note?.trim() || undefined,
-        photoId: input.photoId,
-        isManual: true
-      };
 
       setState((current) => ({
         ...current,
+        plants: [plant, ...current.plants],
+        photos: [...photos, ...current.photos],
         milestones: [milestone, ...current.milestones]
       }));
 
+      return plant.id;
+    },
+    [repositories]
+  );
+
+  const updatePlant = useCallback(
+    async (plantId: string, input: { homeName?: string; roomKey?: Plant["roomKey"]; notes?: string }) => {
+      await repositories?.plants.updatePlant(plantId, input);
+      setState((current) => ({
+        ...current,
+        plants: current.plants.map((plant) =>
+          plant.id === plantId ? { ...plant, homeName: input.homeName || undefined, roomKey: input.roomKey, notes: input.notes } : plant
+        )
+      }));
+    },
+    [repositories]
+  );
+
+  const addPlantPhoto = useCallback(
+    async (plantId: string, input: { url: string; type: PhotoType; isCover?: boolean }) => {
+      const photos = await addPlantPhotos(plantId, [input]);
+      return photos[0];
+    },
+    [addPlantPhotos]
+  );
+
+  const setCoverPhoto = useCallback(
+    async (plantId: string, photoId: string) => {
+      await repositories?.photos.setCoverPhoto(plantId, photoId);
+      setState((current) => ({
+        ...current,
+        photos: current.photos.map((photo) => (photo.plantId === plantId ? { ...photo, isCover: photo.id === photoId } : photo))
+      }));
+    },
+    [repositories]
+  );
+
+  const updatePhotoType = useCallback(
+    async (photoId: string, type: PhotoType) => {
+      await repositories?.photos.updatePhotoType(photoId, type);
+      setState((current) => ({ ...current, photos: current.photos.map((photo) => (photo.id === photoId ? { ...photo, type } : photo)) }));
+    },
+    [repositories]
+  );
+
+  const deletePlantPhoto = useCallback(
+    async (plantId: string, photoId: string) => {
+      if (!repositories) return "only-photo";
+
+      const plantPhotos = getPlantPhotos(plantId);
+      const result = await repositories.photos.deletePhoto(plantId, photoId, plantPhotos);
+      if (result === "only-photo") {
+        return result;
+      }
+
+      const deletedPhoto = plantPhotos.find((photo) => photo.id === photoId);
+      const remaining = plantPhotos.filter((photo) => photo.id !== photoId);
+      const promoted = deletedPhoto?.isCover ? remaining.find((photo) => photo.type === "overview") ?? remaining[0] : remaining.find((photo) => photo.isCover);
+
+      setState((current) => ({
+        ...current,
+        photos: current.photos
+          .filter((photo) => photo.id !== photoId)
+          .map((photo) => (photo.plantId === plantId && promoted ? { ...photo, isCover: photo.id === promoted.id } : photo))
+      }));
+
+      return result;
+    },
+    [getPlantPhotos, repositories]
+  );
+
+  const addMilestone = useCallback(
+    async (plantId: string, input: { type: PlantMilestone["type"]; eventDate: string; note?: string; photoId?: string }) => {
+      if (!repositories) throw new Error("Plant collection is not ready.");
+      const milestone = await repositories.milestones.addMilestone(plantId, input);
+      setState((current) => ({ ...current, milestones: [milestone, ...current.milestones] }));
       return milestone;
     },
-    []
+    [repositories]
   );
 
   const updateMilestone = useCallback(
-    (milestoneId: string, input: { type: PlantMilestone["type"]; eventDate: string; note?: string; photoId?: string }) => {
+    async (milestoneId: string, input: { type: PlantMilestone["type"]; eventDate: string; note?: string; photoId?: string }) => {
+      await repositories?.milestones.updateMilestone(milestoneId, input);
       setState((current) => ({
         ...current,
         milestones: current.milestones.map((milestone) =>
           milestone.id === milestoneId && milestone.isManual
-            ? {
-                ...milestone,
-                type: input.type,
-                eventDate: input.eventDate,
-                note: input.note?.trim() || undefined,
-                photoId: input.photoId
-              }
+            ? { ...milestone, type: input.type, eventDate: input.eventDate, note: input.note?.trim() || undefined, photoId: input.photoId }
             : milestone
         )
       }));
     },
-    []
+    [repositories]
   );
 
-  const deleteMilestone = useCallback((milestoneId: string) => {
-    setState((current) => ({
-      ...current,
-      milestones: current.milestones.filter((milestone) => milestone.id !== milestoneId || !milestone.isManual)
-    }));
-  }, []);
+  const deleteMilestone = useCallback(
+    async (milestoneId: string) => {
+      await repositories?.milestones.deleteMilestone(milestoneId);
+      setState((current) => ({ ...current, milestones: current.milestones.filter((milestone) => milestone.id !== milestoneId || !milestone.isManual) }));
+    },
+    [repositories]
+  );
 
-  const waterPlant = useCallback((plantId: string) => {
-    setState((current) => {
-      const today = new Date();
-      const todayKey = toDateKey(today);
-      const nextCheckAt = toDateKey(addDays(today, 4));
-
-      return {
+  const waterPlant = useCallback(
+    async (plantId: string) => {
+      const nextCheckAt = toDateKey(addDays(new Date(), 4));
+      await repositories?.plants.markWatered(plantId, nextCheckAt);
+      await repositories?.careEvents.addCareEvent(plantId, { type: "watered" });
+      setState((current) => ({
+        ...current,
         plants: current.plants.map((plant) =>
           plant.id === plantId
             ? {
@@ -468,56 +405,54 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
                 statusLabelKey: "status.doingGreat",
                 messageKey: "plants.afterWatering.message",
                 nextAction: null,
-                lastWateredAt: todayKey,
+                lastWateredAt: toDateKey(new Date()),
                 nextCheckAt
               }
             : plant
         ),
+        careEvents: [{ id: `${plantId}-watered-${Date.now()}`, plantId, type: "watered", createdAt: toDateKey(new Date()) }, ...current.careEvents]
+      }));
+    },
+    [repositories]
+  );
+
+  const recordSoilChecked = useCallback(
+    async (plantId: string, result: string) => {
+      await repositories?.careEvents.addCareEvent(plantId, { type: "soil_checked", metadata: { result } });
+      setState((current) => ({
+        ...current,
         careEvents: [
-          {
-            id: `${plantId}-watered-${Date.now()}`,
-            plantId,
-            type: "watered",
-            createdAt: todayKey
-          },
+          { id: `${plantId}-soil-${Date.now()}`, plantId, type: "soil_checked", createdAt: toDateKey(new Date()), metadata: { result } },
           ...current.careEvents
-        ],
-        photos: current.photos,
-        milestones: current.milestones,
+        ]
+      }));
+    },
+    [repositories]
+  );
+
+  const deletePlant = useCallback(
+    async (plantId: string) => {
+      if (!repositories) return;
+      const storagePaths = state.photos.filter((photo) => photo.plantId === plantId).map((photo) => photo.storagePath).filter(Boolean) as string[];
+      await repositories.plants.deletePlant(plantId, storagePaths);
+      setState((current) => ({
+        plants: current.plants.filter((plant) => plant.id !== plantId),
+        photos: current.photos.filter((photo) => photo.plantId !== plantId),
+        careEvents: current.careEvents.filter((event) => event.plantId !== plantId),
+        milestones: current.milestones.filter((milestone) => milestone.plantId !== plantId),
         rooms: current.rooms
-      };
-    });
-  }, []);
-
-  const recordSoilChecked = useCallback((plantId: string, result: string) => {
-    setState((current) => ({
-      ...current,
-      careEvents: [
-        {
-          id: `${plantId}-soil-${Date.now()}`,
-          plantId,
-          type: "soil_checked",
-          createdAt: toDateKey(new Date()),
-          metadata: { result }
-        },
-        ...current.careEvents
-      ]
-    }));
-  }, []);
-
-  const deletePlant = useCallback((plantId: string) => {
-    setState((current) => ({
-      plants: current.plants.filter((plant) => plant.id !== plantId),
-      photos: current.photos.filter((photo) => photo.plantId !== plantId),
-      careEvents: current.careEvents.filter((event) => event.plantId !== plantId),
-      milestones: current.milestones.filter((milestone) => milestone.plantId !== plantId),
-      rooms: current.rooms
-    }));
-  }, []);
+      }));
+    },
+    [repositories, state.photos]
+  );
 
   const value = useMemo(
     () => ({
       ...state,
+      status,
+      error,
+      userId: user?.id ?? null,
+      retry: bootstrap,
       getPlant,
       getPlantPhotos,
       getCoverPhoto,
@@ -540,26 +475,30 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       deletePlant
     }),
     [
+      addMilestone,
       addPlant,
       addPlantPhoto,
       addPlantPhotos,
-      addMilestone,
+      addRoom,
+      bootstrap,
+      deleteMilestone,
       deletePlant,
       deletePlantPhoto,
-      deleteMilestone,
+      error,
       getCoverPhoto,
       getPlant,
       getPlantCareEvents,
       getPlantMilestones,
       getPlantPhotos,
       recordSoilChecked,
-      addRoom,
       roomExists,
       setCoverPhoto,
       state,
-      updatePlant,
+      status,
       updateMilestone,
       updatePhotoType,
+      updatePlant,
+      user?.id,
       waterPlant
     ]
   );

@@ -21,6 +21,11 @@ const cardStyles: Record<PlantStatus, { card: string; image: string; fade: strin
     card: "border-[#d26478]/20 bg-gradient-to-br from-[#fdeaf0] to-[#fef5f7]",
     image: "bg-[#eadde0]",
     fade: "from-transparent to-[#fdeaf0]/95"
+  },
+  unknown: {
+    card: "border-[#b9a98d]/20 bg-gradient-to-br from-[#fffaf3] to-[#f8f1e6]",
+    image: "bg-[#dde8dc]",
+    fade: "from-transparent to-[#fffaf3]/95"
   }
 };
 

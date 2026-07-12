@@ -3,7 +3,8 @@ import type { Plant, PlantCareEvent, PlantMilestone, PlantPhoto, PlantStatus } f
 export const statusPriority: Record<PlantStatus, number> = {
   needs_attention: 0,
   check_soon: 1,
-  healthy: 2
+  unknown: 2,
+  healthy: 3
 };
 
 export const mockPlants: Plant[] = [

@@ -21,7 +21,7 @@ export function RoomPicker({ value, onChange }: { value?: string; onChange: (val
   const [roomName, setRoomName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const saveRoom = () => {
+  const saveRoom = async () => {
     const trimmedName = roomName.trim();
     if (!trimmedName) {
       setError(t("rooms.nameRequired"));
@@ -32,7 +32,7 @@ export function RoomPicker({ value, onChange }: { value?: string; onChange: (val
       return;
     }
 
-    const room = addRoom(trimmedName);
+    const room = await addRoom(trimmedName);
     onChange(room.id);
     setRoomName("");
     setError(null);
@@ -91,7 +91,7 @@ export function RoomPicker({ value, onChange }: { value?: string; onChange: (val
               <button type="button" onClick={() => setIsAddingRoom(false)} className="min-h-12 rounded-[18px] bg-white px-4 text-sm font-extrabold text-[#5f594f]">
                 {t("plantDetail.cancel")}
               </button>
-              <button type="button" onClick={saveRoom} className="min-h-12 rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]">
+              <button type="button" onClick={() => void saveRoom()} className="min-h-12 rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]">
                 {t("rooms.addRoomAction")}
               </button>
             </div>

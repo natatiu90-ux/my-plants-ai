@@ -5,7 +5,8 @@ import type { PlantStatus } from "@/types/plant";
 const badgeStyles: Record<PlantStatus, string> = {
   healthy: "bg-[#ddf2dc] text-[#2d7a4f]",
   check_soon: "bg-[#fdecd3] text-[#8b5e14]",
-  needs_attention: "bg-[#fcdde3] text-[#9b2c3e]"
+  needs_attention: "bg-[#fcdde3] text-[#9b2c3e]",
+  unknown: "bg-[#f1eadf] text-[#6b6256]"
 };
 
 export function StatusBadge({ label, status }: { label: string; status: PlantStatus }) {
