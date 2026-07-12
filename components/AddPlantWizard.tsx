@@ -24,6 +24,17 @@ type PlantAnalysis = {
   model?: string | null;
   rawResult?: unknown;
 };
+type ImageAnalysisDiagnostic = {
+  source: "camera" | "gallery";
+  fileName: string;
+  detectedFormat: string;
+  conversionStatus: string;
+  finalFormat: string | null;
+  finalSize: number | null;
+  includedInOpenAIRequest: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+};
 
 export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const router = useRouter();
@@ -37,6 +48,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [roomKey, setRoomKey] = useState<string | undefined>();
   const [analysis, setAnalysis] = useState<PlantAnalysis | null>(null);
   const [analysisFailed, setAnalysisFailed] = useState(false);
+  const [analysisDiagnostics, setAnalysisDiagnostics] = useState<ImageAnalysisDiagnostic[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [showToast, setShowToast] = useState(false);
 
@@ -56,8 +68,16 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         for (const photo of selectedPhotos.slice(0, 5)) {
           const blob = await PhotoStorageRepository.getPhoto(photo.storageId);
           if (blob) {
-            formData.append("photos", blob, `${photo.id}.jpg`);
+            formData.append("photos", blob, photo.originalName || `${photo.id}.${photo.originalExtension ?? "jpg"}`);
             formData.append("photoTypes", photo.type);
+            formData.append("photoSources", photo.source);
+            formData.append("clientFileNames", photo.originalName);
+            formData.append("clientMimeTypes", photo.originalType);
+            formData.append("clientExtensions", photo.originalExtension ?? "");
+            formData.append("clientByteSizes", String(photo.originalSize));
+            formData.append("clientDecodeSucceeded", String(photo.decode.succeeded));
+            formData.append("clientWidths", String(photo.decode.width ?? ""));
+            formData.append("clientHeights", String(photo.decode.height ?? ""));
           }
         }
 
@@ -67,6 +87,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           body: formData
         });
         const payload = await response.json();
+
+        if (payload.diagnostics && process.env.NODE_ENV !== "production") {
+          setAnalysisDiagnostics(payload.diagnostics);
+        }
 
         if (!response.ok || !payload.ok) {
           throw new Error("Analysis failed");
@@ -185,6 +209,21 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         ) : null}
         {analysisFailed ? (
           <p className="mt-4 rounded-[18px] bg-[#fff1d8] p-3 text-sm font-bold leading-5 text-[#8a6230]">{t("addPlant.analysisFailed")}</p>
+        ) : null}
+        {process.env.NODE_ENV !== "production" && analysisDiagnostics.length ? (
+          <div className="mt-4 rounded-[18px] bg-white/75 p-3 text-left text-[11px] font-bold leading-5 text-[#5f594f]">
+            <p className="mb-2 text-xs font-extrabold text-ink">Development image diagnostics</p>
+            {analysisDiagnostics.map((diagnostic, index) => (
+              <div key={`${diagnostic.fileName}-${index}`} className="border-t border-[#eee7dc] py-2 first:border-t-0 first:pt-0">
+                <p>source: {diagnostic.source}</p>
+                <p>format: {diagnostic.detectedFormat}</p>
+                <p>conversion: {diagnostic.conversionStatus}</p>
+                <p>final: {diagnostic.finalFormat ?? "none"} / {diagnostic.finalSize ?? 0} bytes</p>
+                <p>included: {String(diagnostic.includedInOpenAIRequest)}</p>
+                {diagnostic.errorCode ? <p>error: {diagnostic.errorCode}</p> : null}
+              </div>
+            ))}
+          </div>
         ) : null}
         {analysis?.summary ? <p className="mt-4 text-sm font-bold leading-6 text-[#5f594f]">{analysis.summary[locale]}</p> : null}
         <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">

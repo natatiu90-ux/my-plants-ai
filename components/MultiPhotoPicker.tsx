@@ -6,6 +6,37 @@ import { useI18n } from "@/i18n/I18nProvider";
 import { PhotoStorageRepository, validateImageFile } from "@/lib/photo-storage";
 import type { PendingPhotoUpload } from "./photo-upload-types";
 
+function getFileExtension(fileName: string) {
+  return fileName.includes(".") ? fileName.split(".").pop()?.toLocaleLowerCase() ?? null : null;
+}
+
+async function inspectImageFile(file: File): Promise<PendingPhotoUpload["decode"]> {
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    const image = new Image();
+    const dimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+      image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+      image.onerror = () => reject(new Error("decode_failed"));
+      image.src = objectUrl;
+    });
+
+    return {
+      succeeded: true,
+      width: dimensions.width,
+      height: dimensions.height
+    };
+  } catch {
+    return {
+      succeeded: false,
+      width: null,
+      height: null
+    };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 export function MultiPhotoPicker({
   title,
   onCancel,
@@ -21,7 +52,7 @@ export function MultiPhotoPicker({
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  const handleFiles = async (files: FileList | null | undefined) => {
+  const handleFiles = async (files: FileList | null | undefined, source: PendingPhotoUpload["source"]) => {
     setError(null);
 
     const selectedFiles = Array.from(files ?? []);
@@ -37,9 +68,16 @@ export function MultiPhotoPicker({
       const savedPhotos = await Promise.all(
         validFiles.map(async (file, index) => {
           const storedPhoto = await PhotoStorageRepository.savePhoto(file);
+          const decode = await inspectImageFile(file);
           return {
             id: storedPhoto.id,
             storageId: storedPhoto.id,
+            source,
+            originalName: file.name,
+            originalType: file.type,
+            originalSize: file.size,
+            originalExtension: getFileExtension(file.name),
+            decode,
             url: `photo://${storedPhoto.id}`,
             type: index === 0 ? "overview" : "other",
             isCover: false
@@ -80,7 +118,7 @@ export function MultiPhotoPicker({
             accept="image/*"
             capture="environment"
             className="hidden"
-            onChange={(event) => handleFiles(event.target.files)}
+            onChange={(event) => handleFiles(event.target.files, "camera")}
           />
           <input
             ref={galleryInputRef}
@@ -88,7 +126,7 @@ export function MultiPhotoPicker({
             accept="image/*"
             multiple
             className="hidden"
-            onChange={(event) => handleFiles(event.target.files)}
+            onChange={(event) => handleFiles(event.target.files, "gallery")}
           />
           <button
             type="button"
