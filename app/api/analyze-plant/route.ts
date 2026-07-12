@@ -10,6 +10,7 @@ const maxPhotoSize = 10 * 1024 * 1024;
 const optimizedImageMaxSide = 1200;
 const optimizedJpegQuality = 82;
 const targetOptimizedBytes = 600 * 1024;
+const openAIRequestTimeoutMs = 90_000;
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 const allowedExtensions = new Set(["jpg", "jpeg", "png", "heic", "heif"]);
 const model = process.env.OPENAI_MODEL ?? "gpt-5-mini";
@@ -284,7 +285,12 @@ export async function POST(request: Request) {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
+  let didOpenAITimeOut = false;
+  let openAIRequestStartedAt: number | null = null;
+  const timeout = setTimeout(() => {
+    didOpenAITimeOut = true;
+    controller.abort();
+  }, openAIRequestTimeoutMs);
 
   try {
     const client = new OpenAI({ apiKey });
@@ -343,6 +349,13 @@ export async function POST(request: Request) {
       ...optimizedImages.map((image) => ({ type: "input_image", image_url: image.dataUrl }))
     ];
 
+    openAIRequestStartedAt = Date.now();
+    console.info("openai_request_started", {
+      model,
+      imageCount: optimizedImages.length,
+      timeoutMs: openAIRequestTimeoutMs
+    });
+
     const response = await client.responses.create(
       {
         model,
@@ -356,6 +369,11 @@ export async function POST(request: Request) {
       } as never,
       { signal: controller.signal }
     );
+    console.info("openai_request_completed", {
+      model: response.model ?? model,
+      imageCount: optimizedImages.length,
+      durationMs: Date.now() - openAIRequestStartedAt
+    });
 
     const text = response.output_text;
     const analysis = JSON.parse(text);
@@ -369,15 +387,33 @@ export async function POST(request: Request) {
   } catch (error) {
     const status = typeof error === "object" && error && "status" in error ? (error as { status?: unknown }).status : undefined;
     const code = typeof error === "object" && error && "code" in error ? (error as { code?: unknown }).code : undefined;
+    const isOpenAITimeout =
+      didOpenAITimeOut ||
+      (error instanceof Error &&
+        (error.name === "AbortError" || error.message.toLocaleLowerCase().includes("aborted")));
+    const durationMs = openAIRequestStartedAt ? Date.now() - openAIRequestStartedAt : null;
+    if (isOpenAITimeout) {
+      console.warn("openai_request_timed_out", {
+        model,
+        timeoutMs: openAIRequestTimeoutMs,
+        durationMs,
+        imageCount: diagnostics.filter((diagnostic) => diagnostic.includedInOpenAIRequest).length
+      });
+    }
     console.error("Plant analysis failed", {
       name: error instanceof Error ? error.name : "UnknownError",
       message: error instanceof Error ? error.message : "Unknown error",
       openAIStatus: status,
       openAIErrorCode: code,
+      durationMs,
       diagnostics
     });
     const hasConversionFailure = diagnostics.some((diagnostic) => diagnostic.errorCode === "image_conversion_failed" || diagnostic.errorCode === "invalid_output");
-    return diagnosticResponse(hasConversionFailure ? "image_conversion_failed" : "Plant analysis failed.", hasConversionFailure ? 422 : 502, diagnostics);
+    return diagnosticResponse(
+      hasConversionFailure ? "image_conversion_failed" : isOpenAITimeout ? "ai_analysis_timed_out" : "Plant analysis failed.",
+      hasConversionFailure ? 422 : isOpenAITimeout ? 504 : 502,
+      diagnostics
+    );
   } finally {
     clearTimeout(timeout);
   }

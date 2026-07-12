@@ -36,6 +36,8 @@ type ImageAnalysisDiagnostic = {
   errorMessage?: string;
 };
 
+const analysisStageCount = 4;
+
 export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const { locale, t } = useI18n();
@@ -49,6 +51,9 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [analysis, setAnalysis] = useState<PlantAnalysis | null>(null);
   const [analysisFailed, setAnalysisFailed] = useState(false);
   const [analysisDiagnostics, setAnalysisDiagnostics] = useState<ImageAnalysisDiagnostic[]>([]);
+  const [analysisErrorCode, setAnalysisErrorCode] = useState<string | null>(null);
+  const [analysisStageIndex, setAnalysisStageIndex] = useState(0);
+  const [showLongAnalysisHint, setShowLongAnalysisHint] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showToast, setShowToast] = useState(false);
 
@@ -58,6 +63,35 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     }
 
     let isMounted = true;
+    setAnalysisStageIndex(0);
+    setShowLongAnalysisHint(false);
+    setAnalysisErrorCode(null);
+    const stageTimers = [
+      window.setTimeout(() => {
+        if (isMounted) setAnalysisStageIndex(1);
+      }, 1200),
+      window.setTimeout(() => {
+        if (isMounted) setAnalysisStageIndex(2);
+      }, 4500),
+      window.setTimeout(() => {
+        if (isMounted) setAnalysisStageIndex(3);
+      }, 9000)
+    ];
+    const longAnalysisTimer = window.setTimeout(() => {
+      if (isMounted) setShowLongAnalysisHint(true);
+    }, 15000);
+
+    async function finishAnalysisSheet() {
+      if (!isMounted) {
+        return;
+      }
+
+      setAnalysisStageIndex(analysisStageCount);
+      await new Promise((resolve) => window.setTimeout(resolve, 450));
+      if (isMounted) {
+        setStep("form");
+      }
+    }
 
     async function analyzePhotos() {
       setAnalysisFailed(false);
@@ -93,7 +127,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         }
 
         if (!response.ok || !payload.ok) {
-          throw new Error("Analysis failed");
+          throw new Error(typeof payload.error === "string" ? payload.error : "analysis_failed");
         }
 
         if (!isMounted) {
@@ -108,14 +142,13 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         setAnalysis(nextAnalysis);
         setSpeciesName(nextAnalysis.detectedSpecies ?? "");
         setScientificName(nextAnalysis.scientificName ?? "");
-      } catch {
+      } catch (error) {
         if (isMounted) {
           setAnalysisFailed(true);
+          setAnalysisErrorCode(error instanceof Error ? error.message : "analysis_failed");
         }
       } finally {
-        if (isMounted) {
-          setStep("form");
-        }
+        await finishAnalysisSheet();
       }
     }
 
@@ -123,8 +156,17 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
 
     return () => {
       isMounted = false;
+      stageTimers.forEach((timer) => window.clearTimeout(timer));
+      window.clearTimeout(longAnalysisTimer);
     };
   }, [locale, selectedPhotos, step]);
+
+  const analysisStages = [
+    t("addPlant.uploadingPhotos"),
+    t("addPlant.identifying"),
+    t("addPlant.checking"),
+    t("addPlant.preparing")
+  ];
 
   if (step === "pick") {
     return (
@@ -143,14 +185,41 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   if (step === "analysis") {
     return (
       <div className="fixed inset-0 z-40 flex items-end justify-center bg-[#1c1c1e]/20 px-4 pb-4 backdrop-blur-[2px] sm:items-center sm:pb-0">
-        <div className="w-full max-w-[390px] rounded-[28px] bg-[#fffaf3] p-6 shadow-[0_20px_60px_rgba(0,0,0,0.16)]">
+        <div role="status" aria-live="polite" className="w-full max-w-[390px] rounded-[28px] bg-[#fffaf3] p-6 shadow-[0_20px_60px_rgba(0,0,0,0.16)]">
           <h2 className="font-rounded text-2xl font-extrabold text-ink">{t("addPlant.analysisTitle")}</h2>
-          <div className="mt-5 grid gap-3 text-[15px] font-bold text-[#5f594f]">
-            <p>🌿 {t("addPlant.meeting")}</p>
-            <p>✓ {t("addPlant.identifying")}</p>
-            <p>… {t("addPlant.checking")}</p>
-            <p>… {t("addPlant.preparing")}</p>
+          <div className="mt-5 h-1 overflow-hidden rounded-full bg-[#e8ddce]" aria-hidden="true">
+            <div className="analysis-progress-bar h-full w-1/2 rounded-full bg-[#7cab73]" />
           </div>
+          <div className="mt-5 grid gap-3 text-[15px]">
+            {analysisStages.map((stage, index) => {
+              const isCompleted = index < analysisStageIndex;
+              const isActive = index === analysisStageIndex && analysisStageIndex < analysisStages.length;
+              return (
+                <p
+                  key={stage}
+                  className={[
+                    "flex items-center gap-3 font-bold leading-5 transition-colors",
+                    isCompleted ? "text-[#4f7f48]" : isActive ? "text-ink" : "text-[#9b9387]"
+                  ].join(" ")}
+                >
+                  <span className="flex size-5 shrink-0 items-center justify-center" aria-hidden="true">
+                    {isCompleted ? (
+                      <span className="text-sm">✓</span>
+                    ) : isActive ? (
+                      <span className="analysis-spinner size-4 rounded-full border-2 border-[#d7cdbf] border-t-[#6b8f5f]" />
+                    ) : (
+                      <span className="size-1.5 rounded-full bg-[#c7bcae]" />
+                    )}
+                  </span>
+                  <span className={isActive ? "font-extrabold" : undefined}>
+                    {stage}
+                    {isActive ? <span className="motion-safe:animate-pulse">...</span> : null}
+                  </span>
+                </p>
+              );
+            })}
+          </div>
+          {showLongAnalysisHint ? <p className="mt-5 text-sm font-bold leading-5 text-[#7a6f61]">{t("addPlant.analysisLong")}</p> : null}
         </div>
       </div>
     );
@@ -209,6 +278,9 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         ) : null}
         {analysisFailed ? (
           <p className="mt-4 rounded-[18px] bg-[#fff1d8] p-3 text-sm font-bold leading-5 text-[#8a6230]">{t("addPlant.analysisFailed")}</p>
+        ) : null}
+        {process.env.NODE_ENV !== "production" && analysisErrorCode ? (
+          <p className="mt-3 rounded-[18px] bg-white/75 p-3 text-left text-[11px] font-bold leading-5 text-[#5f594f]">analysis error: {analysisErrorCode}</p>
         ) : null}
         {process.env.NODE_ENV !== "production" && analysisDiagnostics.length ? (
           <div className="mt-4 rounded-[18px] bg-white/75 p-3 text-left text-[11px] font-bold leading-5 text-[#5f594f]">

@@ -39,3 +39,34 @@ a {
   outline: 3px solid rgba(107, 163, 105, 0.45);
   outline-offset: 3px;
 }
+
+@keyframes analysis-progress {
+  0% {
+    transform: translateX(-110%);
+  }
+
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+@keyframes analysis-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.analysis-progress-bar {
+  animation: analysis-progress 1.5s ease-in-out infinite;
+}
+
+.analysis-spinner {
+  animation: analysis-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analysis-progress-bar,
+  .analysis-spinner {
+    animation: none;
+  }
+}
