@@ -36,6 +36,7 @@ export type PlantPhotoRow = {
   is_cover: boolean;
   created_at: string;
   signed_url?: string | null;
+  thumbnail_url?: string | null;
 };
 
 export type RoomRow = {
@@ -105,6 +106,7 @@ export function mapPhoto(row: PlantPhotoRow): PlantPhoto {
     id: row.id,
     plantId: row.plant_id,
     url: row.signed_url ?? "",
+    thumbnailUrl: row.thumbnail_url ?? row.signed_url ?? "",
     storageId: row.storage_path,
     storagePath: row.storage_path,
     type: row.photo_type,

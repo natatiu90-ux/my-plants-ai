@@ -34,9 +34,17 @@ async function withSignedPhotoUrls(supabase: SupabaseClient, rows: PlantPhotoRow
   return Promise.all(
     rows.map(async (row) => {
       const { data } = await supabase.storage.from(photoBucket).createSignedUrl(row.storage_path, signedUrlTtlSeconds);
+      const { data: thumbnailData } = await supabase.storage.from(photoBucket).createSignedUrl(row.storage_path, signedUrlTtlSeconds, {
+        transform: {
+          width: 320,
+          height: 320,
+          resize: "cover"
+        }
+      });
       return {
         ...row,
-        signed_url: data?.signedUrl ?? null
+        signed_url: data?.signedUrl ?? null,
+        thumbnail_url: thumbnailData?.signedUrl ?? data?.signedUrl ?? null
       };
     })
   );

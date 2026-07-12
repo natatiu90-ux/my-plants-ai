@@ -70,6 +70,7 @@ export interface PlantPhoto {
   id: string;
   plantId: string;
   url: string;
+  thumbnailUrl?: string;
   storageId?: string;
   storagePath?: string;
   type: PhotoType;
