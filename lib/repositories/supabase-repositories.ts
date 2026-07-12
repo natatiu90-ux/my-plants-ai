@@ -73,7 +73,7 @@ export class PlantRepository {
         room_id: input.roomKey && !isBuiltInRoomKey(input.roomKey) ? input.roomKey : null,
         room_key: isBuiltInRoomKey(input.roomKey) ? input.roomKey : null,
         home_name: input.homeName || null,
-        species_name: input.speciesName || "Unknown plant",
+        species_name: input.speciesName || null,
         scientific_name: input.scientificName || null,
         notes: input.notes || null,
         status: input.status ?? "unknown",
@@ -87,11 +87,13 @@ export class PlantRepository {
     return mapPlant(data);
   }
 
-  async updatePlant(plantId: string, input: { homeName?: string; roomKey?: string; notes?: string }) {
+  async updatePlant(plantId: string, input: { homeName?: string; speciesName?: string; scientificName?: string; roomKey?: string; notes?: string }) {
     const { error } = await this.supabase
       .from("plants")
       .update({
         home_name: input.homeName || null,
+        species_name: input.speciesName || null,
+        scientific_name: input.scientificName || null,
         room_id: input.roomKey && !isBuiltInRoomKey(input.roomKey) ? input.roomKey : null,
         room_key: isBuiltInRoomKey(input.roomKey) ? input.roomKey : null,
         notes: input.notes || null

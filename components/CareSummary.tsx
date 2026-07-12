@@ -17,7 +17,7 @@ export function CareSummary({ plant }: { plant: Plant }) {
     ? builtInRoomKeys.includes(plant.roomKey)
       ? t(plant.roomKey as TranslationKey)
       : rooms.find((room) => room.id === plant.roomKey)?.name ?? t("plantDetail.notYet")
-    : t("plantDetail.notYet");
+    : t("plantDetail.noRoom");
 
   const rows = [
     {
@@ -30,11 +30,15 @@ export function CareSummary({ plant }: { plant: Plant }) {
       value: formatRelativeDate(plant.nextCheckAt, locale, t("plantDetail.notYet")),
       icon: <CalendarCheck aria-hidden="true" size={18} />
     },
-    {
-      label: t("plantDetail.location"),
-      value: roomValue,
-      icon: <MapPin aria-hidden="true" size={18} />
-    },
+    ...(plant.roomKey
+      ? [
+          {
+            label: t("plantDetail.location"),
+            value: roomValue,
+            icon: <MapPin aria-hidden="true" size={18} />
+          }
+        ]
+      : []),
     {
       label: t("plantDetail.light"),
       value: plant.lightConditionKey ? t(plant.lightConditionKey) : t("plantDetail.notYet"),

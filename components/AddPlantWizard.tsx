@@ -5,14 +5,16 @@ import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
+import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
 import { PhotoImage } from "./PhotoImage";
 import { PhotoUploadFlow } from "./PhotoUploadFlow";
 import { RoomPicker } from "./RoomPicker";
 import type { PendingPhotoUpload } from "./photo-upload-types";
 
-type Step = "pick" | "analysis" | "form";
+type Step = "pick" | "analysis" | "confirm" | "details";
 type PlantAnalysis = {
+  commonName?: { en?: string | null; ru?: string | null } | string | null;
   detectedSpecies: string | null;
   scientificName: string | null;
   confidence: number;
@@ -55,17 +57,29 @@ const analysisImageMaxSide = 1600;
 const analysisImageTargetBytes = 500 * 1024;
 const analysisRequestTargetBytes = 3 * 1024 * 1024;
 const analysisJpegQualities = [0.78, 0.75, 0.72, 0.68];
+const defaultNicknames = {
+  en: ["Sprout", "Leafy", "Bud", "Green Buddy", "Mister Leaf", "Professor Chlorophyll", "Sunny", "Little Green"],
+  ru: ["Кустик", "Листик", "Ростик", "Зелёныш", "Плюш", "Листун", "Зелёный друг", "Мистер Лист", "Профессор Хлорофилл"]
+};
 
-function cleanCommonPlantName(value: string | null | undefined) {
-  return (value ?? "")
-    .replace(/\([^)]*(confidence|уверен|пример|approx|possible|likely)[^)]*\)/gi, "")
-    .replace(/\b(confidence|approx\.?|approximately|possibly|likely)\b.*$/gi, "")
-    .trim();
+function localizedCommonName(analysis: PlantAnalysis, locale: "en" | "ru") {
+  if (typeof analysis.commonName === "string") {
+    return cleanPlantName(analysis.commonName);
+  }
+
+  return (
+    cleanPlantName(analysis.commonName?.[locale]) ||
+    cleanPlantName(analysis.commonName?.en) ||
+    cleanPlantName(analysis.commonName?.ru) ||
+    cleanPlantName(analysis.detectedSpecies) ||
+    commonNameFromScientificName(analysis.scientificName)
+  );
 }
 
-function cleanScientificPlantName(value: string | null | undefined) {
-  const match = (value ?? "").match(/[A-Z][a-z]+(?:\s(?:x\s)?[a-z][a-z-]+){1,3}/);
-  return match?.[0].trim() ?? "";
+function suggestedNickname(locale: "en" | "ru", existingNames: string[]) {
+  const names = defaultNicknames[locale];
+  const normalizedExisting = new Set(existingNames.map((name) => name.trim().toLocaleLowerCase()).filter(Boolean));
+  return names.find((name) => !normalizedExisting.has(name.toLocaleLowerCase())) ?? names[0];
 }
 
 function loadImageFromBlob(blob: Blob): Promise<{ image: HTMLImageElement; objectUrl: string }> {
@@ -152,12 +166,13 @@ async function prepareImageForAnalysis(blob: Blob, fileName: string) {
 export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const { locale, t } = useI18n();
-  const { addPlant } = usePlantStore();
+  const { addPlant, plants, rooms } = usePlantStore();
   const [step, setStep] = useState<Step>("pick");
   const [selectedPhotos, setSelectedPhotos] = useState<PendingPhotoUpload[]>([]);
   const [homeName, setHomeName] = useState("");
   const [speciesName, setSpeciesName] = useState("");
   const [scientificName, setScientificName] = useState("");
+  const [notes, setNotes] = useState("");
   const [roomKey, setRoomKey] = useState<string | undefined>();
   const [analysis, setAnalysis] = useState<PlantAnalysis | null>(null);
   const [analysisFailed, setAnalysisFailed] = useState(false);
@@ -211,7 +226,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       setAnalysisStageIndex(analysisStageCount);
       await new Promise((resolve) => window.setTimeout(resolve, 450));
       if (isMounted) {
-        setStep("form");
+        setStep("confirm");
       }
     }
 
@@ -315,8 +330,11 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           rawResult: payload.analysis
         } as PlantAnalysis;
         setAnalysis(nextAnalysis);
-        setSpeciesName(cleanCommonPlantName(nextAnalysis.detectedSpecies));
-        setScientificName(cleanScientificPlantName(nextAnalysis.scientificName));
+        const nextScientificName = cleanScientificName(nextAnalysis.scientificName);
+        const nextSpeciesName = localizedCommonName(nextAnalysis, locale) || commonNameFromScientificName(nextScientificName);
+        setSpeciesName(nextSpeciesName);
+        setScientificName(nextScientificName);
+        setHomeName((current) => current || suggestedNickname(locale, plants.map((plant) => plant.homeName ?? "")));
       } catch (error) {
         if (isMounted) {
           setAnalysisFailed(true);
@@ -334,7 +352,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       stageTimers.forEach((timer) => window.clearTimeout(timer));
       window.clearTimeout(longAnalysisTimer);
     };
-  }, [locale, selectedPhotos, step]);
+  }, [locale, plants, selectedPhotos, step]);
 
   const analysisStages = [
     t("addPlant.uploadingPhotos"),
@@ -401,6 +419,14 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   }
 
   const coverPhoto = selectedPhotos.find((photo) => photo.isCover) ?? selectedPhotos[0];
+  const selectedRoomName = roomKey
+    ? roomKey.startsWith("rooms.")
+      ? t(roomKey as never)
+      : rooms.find((room) => room.id === roomKey)?.name ?? t("addPlant.noRoomSelected")
+    : t("addPlant.noRoomSelected");
+  const displayCommonName = cleanPlantName(speciesName) || commonNameFromScientificName(scientificName) || t("plants.unknownName");
+  const displayScientificName = cleanScientificName(scientificName);
+  const uncertaintyMessage = analysis?.uncertainties?.[0]?.[locale];
 
   const save = async () => {
     if (isSaving || !selectedPhotos.length || !coverPhoto) {
@@ -419,18 +445,21 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       console.info("plant_save_started", {
         photoCount: selectedPhotos.length,
         roomKey,
-        speciesName: speciesName.trim(),
-        hasScientificName: Boolean(scientificName.trim())
+        speciesName: displayCommonName,
+        hasScientificName: Boolean(displayScientificName)
       });
+      const savedNickname = cleanPlantName(homeName) || suggestedNickname(locale, plants.map((plant) => plant.homeName ?? ""));
+      const savedCommonName = cleanPlantName(speciesName) || commonNameFromScientificName(displayScientificName);
       const plantId = await addPlant({
-        homeName: homeName.trim() || undefined,
-        speciesName: speciesName.trim() || t("plants.unknownName"),
-        scientificName: cleanScientificPlantName(scientificName) || undefined,
+        homeName: savedNickname,
+        speciesName: savedCommonName,
+        scientificName: displayScientificName || undefined,
         roomKey,
+        notes: notes.trim() || undefined,
         photos: selectedPhotos,
         analysis: analysis
           ? {
-              detectedSpecies: cleanCommonPlantName(speciesName) || analysis.detectedSpecies,
+              detectedSpecies: savedCommonName || analysis.detectedSpecies,
               confidence: analysis.confidence,
               condition: analysis.condition,
               nextAction: analysis.nextAction === "none" ? null : analysis.nextAction,
@@ -470,17 +499,8 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
           {coverPhoto ? (
-            <div className="relative mt-1 h-48 overflow-hidden rounded-[24px] bg-[#dde8dc]">
+            <div className={step === "confirm" ? "relative mt-1 h-64 overflow-hidden rounded-[24px] bg-[#dde8dc]" : "relative mt-1 h-48 overflow-hidden rounded-[24px] bg-[#dde8dc]"}>
               <PhotoImage src={coverPhoto.url} alt={t("photos.photoAlt")} className="h-full w-full object-cover" />
-            </div>
-          ) : null}
-          {selectedPhotos.length > 1 ? (
-            <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-              {selectedPhotos.map((photo) => (
-                <div key={photo.id} className="relative size-16 shrink-0 overflow-hidden rounded-[16px] bg-[#dde8dc]">
-                  <PhotoImage src={photo.url} alt={t("photos.photoAlt")} className="h-full w-full object-cover" />
-                </div>
-              ))}
             </div>
           ) : null}
           {analysisFailed ? (
@@ -489,71 +509,95 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           {submitError ? (
             <p className="mt-4 rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{submitError}</p>
           ) : null}
-          {process.env.NODE_ENV !== "production" && analysisErrorCode ? (
-            <p className="mt-3 rounded-[18px] bg-white/75 p-3 text-left text-[11px] font-bold leading-5 text-[#5f594f]">analysis error: {analysisErrorCode}</p>
-          ) : null}
-          {process.env.NODE_ENV !== "production" && clientPreparationDiagnostics.length ? (
-            <div className="mt-4 rounded-[18px] bg-white/75 p-3 text-left text-[11px] font-bold leading-5 text-[#5f594f]">
-              <p className="mb-2 text-xs font-extrabold text-ink">Development client image preparation</p>
-              {clientPreparationDiagnostics.map((diagnostic, index) => (
-                <div key={`${diagnostic.fileName}-${index}`} className="border-t border-[#eee7dc] py-2 first:border-t-0 first:pt-0">
-                  <p>source: {diagnostic.source}</p>
-                  <p>original: {diagnostic.originalSize} bytes / {diagnostic.originalWidth ?? "unknown"}x{diagnostic.originalHeight ?? "unknown"}</p>
-                  <p>compressed: {diagnostic.compressedSize ?? 0} bytes / {diagnostic.finalWidth ?? "unknown"}x{diagnostic.finalHeight ?? "unknown"}</p>
-                  <p>total request images: {diagnostic.totalOutgoingRequestSize ?? 0} bytes</p>
-                  <p>included: {String(diagnostic.includedInRequest)}</p>
-                  {diagnostic.errorCode ? <p>error: {diagnostic.errorCode}</p> : null}
+          {step === "confirm" ? (
+            <div className="pt-5">
+              <h3 className="font-rounded text-[30px] font-black leading-tight text-ink">{displayCommonName}</h3>
+              {displayScientificName ? <p className="mt-1 text-sm italic leading-5 text-[#8e867b]">{displayScientificName}</p> : null}
+              {uncertaintyMessage ? <p className="mt-4 rounded-[18px] bg-white/70 p-3 text-sm font-bold leading-5 text-[#7a6f61]">{uncertaintyMessage}</p> : null}
+              <div className="mt-5 grid gap-2">
+                <div className="rounded-[20px] bg-white/70 p-3">
+                  <p className="text-xs font-bold uppercase text-[#a09a90]">{t("addPlant.nickname")}</p>
+                  <div className="mt-1 flex items-center justify-between gap-3">
+                    <p className="font-rounded text-xl font-extrabold text-[#3f3b35]">{homeName}</p>
+                    <button type="button" onClick={() => setStep("details")} className="shrink-0 text-sm font-extrabold text-[#2d7a4f]">
+                      {t("addPlant.rename")}
+                    </button>
+                  </div>
                 </div>
-              ))}
-            </div>
-          ) : null}
-          {process.env.NODE_ENV !== "production" && analysisDiagnostics.length ? (
-            <div className="mt-4 rounded-[18px] bg-white/75 p-3 text-left text-[11px] font-bold leading-5 text-[#5f594f]">
-              <p className="mb-2 text-xs font-extrabold text-ink">Development image diagnostics</p>
-              {analysisDiagnostics.map((diagnostic, index) => (
-                <div key={`${diagnostic.fileName}-${index}`} className="border-t border-[#eee7dc] py-2 first:border-t-0 first:pt-0">
-                  <p>source: {diagnostic.source}</p>
-                  <p>format: {diagnostic.detectedFormat}</p>
-                  <p>conversion: {diagnostic.conversionStatus}</p>
-                  <p>final: {diagnostic.finalFormat ?? "none"} / {diagnostic.finalSize ?? 0} bytes</p>
-                  <p>included: {String(diagnostic.includedInOpenAIRequest)}</p>
-                  {diagnostic.errorCode ? <p>error: {diagnostic.errorCode}</p> : null}
+                <div className="rounded-[20px] bg-white/70 p-3">
+                  <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantDetail.location")}</p>
+                  <p className="mt-1 font-extrabold text-[#3f3b35]">{selectedRoomName}</p>
                 </div>
-              ))}
+              </div>
             </div>
-          ) : null}
-          {analysis?.summary ? <p className="mt-4 text-sm font-bold leading-6 text-[#5f594f]">{analysis.summary[locale]}</p> : null}
-          {analysis?.uncertainties?.length ? (
-            <p className="mt-3 rounded-[18px] bg-white/70 p-3 text-sm font-bold leading-5 text-[#7a6f61]">{analysis.uncertainties[0][locale]}</p>
-          ) : null}
-          <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
-            {t("addPlant.nickname")}
-            <input
-              value={homeName}
-              onChange={(event) => setHomeName(event.target.value)}
-              className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none"
-            />
-          </label>
-          <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
-            {t("addPlant.commonName")}
-            <input
-              value={speciesName}
-              onChange={(event) => setSpeciesName(event.target.value)}
-              className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none"
-            />
-          </label>
-          <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
-            {t("addPlant.scientificName")}
-            <input
-              value={scientificName}
-              onChange={(event) => setScientificName(cleanScientificPlantName(event.target.value))}
-              className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none"
-            />
-          </label>
-          <div className="mt-4">
-            <p className="mb-2 text-sm font-extrabold text-[#4f4940]">{t("plantDetail.location")}</p>
-            <RoomPicker value={roomKey} onChange={setRoomKey} />
-          </div>
+          ) : (
+            <>
+              {selectedPhotos.length > 1 ? (
+                <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                  {selectedPhotos.map((photo) => (
+                    <div key={photo.id} className="relative size-16 shrink-0 overflow-hidden rounded-[16px] bg-[#dde8dc]">
+                      <PhotoImage src={photo.url} alt={t("photos.photoAlt")} className="h-full w-full object-cover" />
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {process.env.NODE_ENV !== "production" && analysisErrorCode ? (
+                <p className="mt-3 rounded-[18px] bg-white/75 p-3 text-left text-[11px] font-bold leading-5 text-[#5f594f]">analysis error: {analysisErrorCode}</p>
+              ) : null}
+              {process.env.NODE_ENV !== "production" && clientPreparationDiagnostics.length ? (
+                <div className="mt-4 rounded-[18px] bg-white/75 p-3 text-left text-[11px] font-bold leading-5 text-[#5f594f]">
+                  <p className="mb-2 text-xs font-extrabold text-ink">Development client image preparation</p>
+                  {clientPreparationDiagnostics.map((diagnostic, index) => (
+                    <div key={`${diagnostic.fileName}-${index}`} className="border-t border-[#eee7dc] py-2 first:border-t-0 first:pt-0">
+                      <p>source: {diagnostic.source}</p>
+                      <p>original: {diagnostic.originalSize} bytes / {diagnostic.originalWidth ?? "unknown"}x{diagnostic.originalHeight ?? "unknown"}</p>
+                      <p>compressed: {diagnostic.compressedSize ?? 0} bytes / {diagnostic.finalWidth ?? "unknown"}x{diagnostic.finalHeight ?? "unknown"}</p>
+                      <p>total request images: {diagnostic.totalOutgoingRequestSize ?? 0} bytes</p>
+                      <p>included: {String(diagnostic.includedInRequest)}</p>
+                      {diagnostic.errorCode ? <p>error: {diagnostic.errorCode}</p> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {process.env.NODE_ENV !== "production" && analysisDiagnostics.length ? (
+                <div className="mt-4 rounded-[18px] bg-white/75 p-3 text-left text-[11px] font-bold leading-5 text-[#5f594f]">
+                  <p className="mb-2 text-xs font-extrabold text-ink">Development image diagnostics</p>
+                  {analysisDiagnostics.map((diagnostic, index) => (
+                    <div key={`${diagnostic.fileName}-${index}`} className="border-t border-[#eee7dc] py-2 first:border-t-0 first:pt-0">
+                      <p>source: {diagnostic.source}</p>
+                      <p>format: {diagnostic.detectedFormat}</p>
+                      <p>conversion: {diagnostic.conversionStatus}</p>
+                      <p>final: {diagnostic.finalFormat ?? "none"} / {diagnostic.finalSize ?? 0} bytes</p>
+                      <p>included: {String(diagnostic.includedInOpenAIRequest)}</p>
+                      {diagnostic.errorCode ? <p>error: {diagnostic.errorCode}</p> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {analysis?.summary ? <p className="mt-4 text-sm font-bold leading-6 text-[#5f594f]">{analysis.summary[locale]}</p> : null}
+              {uncertaintyMessage ? <p className="mt-3 rounded-[18px] bg-white/70 p-3 text-sm font-bold leading-5 text-[#7a6f61]">{uncertaintyMessage}</p> : null}
+              <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
+                {t("addPlant.nickname")}
+                <input value={homeName} onChange={(event) => setHomeName(event.target.value)} className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none" />
+              </label>
+              <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
+                {t("addPlant.commonName")}
+                <input value={speciesName} onChange={(event) => setSpeciesName(event.target.value)} className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none" />
+              </label>
+              <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
+                {t("addPlant.scientificName")}
+                <input value={scientificName} onChange={(event) => setScientificName(cleanScientificName(event.target.value))} className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none" />
+              </label>
+              <div className="mt-4">
+                <p className="mb-2 text-sm font-extrabold text-[#4f4940]">{t("plantDetail.location")}</p>
+                <RoomPicker value={roomKey} onChange={setRoomKey} />
+              </div>
+              <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
+                {t("edit.notes")}
+                <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder={t("edit.notesPlaceholder")} className="mt-2 min-h-28 w-full rounded-[18px] bg-white/80 p-4 text-sm leading-6 outline-none" />
+              </label>
+            </>
+          )}
         </div>
         <div className="shrink-0 border-t border-[#efe6d8] bg-[#fffaf3] px-5 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-3">
           <button
@@ -565,8 +609,13 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             {isSaving ? <Loader2 aria-hidden="true" size={16} className="animate-spin" /> : null}
             {isSaving ? t("addPlant.saving") : t("addPlant.save")}
           </button>
-          <button type="button" onClick={onClose} disabled={isSaving} className="mt-2 min-h-12 w-full rounded-[18px] px-4 text-sm font-extrabold text-[#777167] disabled:opacity-50">
-            {t("plantDetail.cancel")}
+          <button
+            type="button"
+            onClick={step === "confirm" ? () => setStep("details") : onClose}
+            disabled={isSaving}
+            className="mt-2 min-h-12 w-full rounded-[18px] px-4 text-sm font-extrabold text-[#777167] disabled:opacity-50"
+          >
+            {step === "confirm" ? t("addPlant.refineDetails") : t("plantDetail.cancel")}
           </button>
         </div>
       </div>

@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
+import { cleanScientificName, plantCommonName, plantDisplayName } from "@/lib/plant-display";
 import type { PlantMilestone } from "@/types/plant";
 import { CareHistoryItem } from "./CareHistoryItem";
 import { DeletePlantDialog } from "./DeletePlantDialog";
@@ -38,6 +39,8 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
   const photos = getPlantPhotos(plantId);
   const coverPhoto = getCoverPhoto(plantId);
   const [homeName, setHomeName] = useState(plant?.homeName ?? "");
+  const [speciesName, setSpeciesName] = useState(plant ? plantCommonName(plant) : "");
+  const [scientificName, setScientificName] = useState(plant?.scientificName ?? "");
   const [roomKey, setRoomKey] = useState<string | undefined>(plant?.roomKey);
   const [notes, setNotes] = useState(plant?.notes ?? "");
   const [isAddingPhoto, setIsAddingPhoto] = useState(false);
@@ -62,7 +65,7 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
   }
 
   const save = () => {
-    updatePlant(plant.id, { homeName, roomKey, notes });
+    updatePlant(plant.id, { homeName, speciesName, scientificName: cleanScientificName(scientificName), roomKey, notes });
     setToast(t("edit.saved"));
   };
 
@@ -105,8 +108,12 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
           <input value={homeName} onChange={(event) => setHomeName(event.target.value)} className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none" />
         </label>
         <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
-          {t("edit.species")}
-          <input value={plant.speciesName} readOnly className="mt-2 min-h-12 w-full rounded-[18px] bg-[#f4efe6] px-4 text-base text-[#776f64] outline-none" />
+          {t("addPlant.commonName")}
+          <input value={speciesName} onChange={(event) => setSpeciesName(event.target.value)} className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none" />
+        </label>
+        <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
+          {t("addPlant.scientificName")}
+          <input value={scientificName} onChange={(event) => setScientificName(event.target.value)} className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none" />
         </label>
         <div className="mt-4">
           <p className="mb-2 text-sm font-extrabold text-[#4f4940]">{t("plantDetail.location")}</p>
@@ -212,7 +219,7 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
           }}
         />
       ) : null}
-      {isDeleteOpen ? <DeletePlantDialog plantName={plant.homeName ?? plant.speciesName} onCancel={() => setIsDeleteOpen(false)} onConfirm={confirmDelete} /> : null}
+      {isDeleteOpen ? <DeletePlantDialog plantName={plantDisplayName(plant, t("plants.unknownName"))} onCancel={() => setIsDeleteOpen(false)} onConfirm={confirmDelete} /> : null}
       {toast ? <Toast message={toast} /> : null}
     </main>
   );

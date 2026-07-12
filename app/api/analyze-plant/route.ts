@@ -49,6 +49,12 @@ const schema = {
     additionalProperties: false,
     properties: {
       detectedSpecies: { type: ["string", "null"] },
+      commonName: {
+        type: ["object", "null"],
+        additionalProperties: false,
+        properties: { en: { type: ["string", "null"] }, ru: { type: ["string", "null"] } },
+        required: ["en", "ru"]
+      },
       scientificName: { type: ["string", "null"] },
       confidence: { type: "number", minimum: 0, maximum: 1 },
       condition: { type: "string", enum: ["healthy", "check_soon", "needs_attention", "unknown"] },
@@ -101,6 +107,7 @@ const schema = {
     },
     required: [
       "detectedSpecies",
+      "commonName",
       "scientificName",
       "confidence",
       "condition",
@@ -340,6 +347,7 @@ export async function POST(request: Request) {
         text: [
           "You are helping with houseplant care from user-provided photos.",
           "Return only cautious, advisory plant-care analysis.",
+          "When possible, provide commonName as a short human-readable plant name in English and Russian, and scientificName as Latin botanical name only.",
           "Separate visible observations from cautious inferences and user actions needed to verify.",
           "Do not claim measured soil moisture, root health when roots are not visible, pests that are not clearly visible, or exact disease diagnoses without sufficient visual evidence.",
           "For watering, prefer nextAction check_soil over water unless dry soil is directly visible or user-provided context confirms dryness.",

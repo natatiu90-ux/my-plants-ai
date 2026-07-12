@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
+import { plantDisplayName } from "@/lib/plant-display";
 import { CareHistory } from "./CareHistory";
 import { CareSummary } from "./CareSummary";
 import { CheckSoilSheet } from "./CheckSoilSheet";
@@ -51,7 +52,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     );
   }
 
-  const plantName = plant.homeName ?? plant.speciesName;
+  const plantName = plantDisplayName(plant, t("plants.unknownName"));
 
   const completeWatering = () => {
     waterPlant(plant.id);

@@ -11,6 +11,7 @@ import type {
   Room
 } from "@/types/plant";
 import type { TranslationKey } from "@/i18n/dictionaries";
+import { commonNameFromScientificName } from "@/lib/plant-display";
 
 export type PlantRow = {
   id: string;
@@ -72,8 +73,8 @@ const statusLabelKeys: Record<PlantStatus, TranslationKey> = {
 
 const messageKeys: Record<PlantStatus, TranslationKey> = {
   healthy: "plants.afterWatering.message",
-  check_soon: "plants.luna.checkMessage",
-  needs_attention: "plants.franklin.message",
+  check_soon: "plants.checkSoon.message",
+  needs_attention: "plants.needsAttention.message",
   unknown: "plants.new.message"
 };
 
@@ -85,7 +86,7 @@ export function mapPlant(row: PlantRow): Plant {
   return {
     id: row.id,
     homeName: row.home_name ?? undefined,
-    speciesName: row.species_name || row.scientific_name || "Unknown plant",
+    speciesName: row.species_name || commonNameFromScientificName(row.scientific_name),
     scientificName: row.scientific_name ?? undefined,
     status: row.status,
     statusLabelKey: statusLabelKeys[row.status],

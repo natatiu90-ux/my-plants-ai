@@ -5,6 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { addDays, toDateKey } from "@/lib/date-format";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/client";
 import { createRepositories } from "@/lib/repositories/supabase-repositories";
+import { commonNameFromScientificName } from "@/lib/plant-display";
 import type { PhotoType, Plant, PlantCareEvent, PlantMilestone, PlantPhoto, Room } from "@/types/plant";
 
 type PlantState = {
@@ -49,7 +50,7 @@ type PlantStoreValue = PlantState & {
   getPlantCareEvents: (plantId: string) => PlantCareEvent[];
   getPlantMilestones: (plantId: string) => PlantMilestone[];
   addPlant: (input: AddPlantInput) => Promise<string>;
-  updatePlant: (plantId: string, input: { homeName?: string; roomKey?: Plant["roomKey"]; notes?: string }) => Promise<void>;
+  updatePlant: (plantId: string, input: { homeName?: string; speciesName?: string; scientificName?: string; roomKey?: Plant["roomKey"]; notes?: string }) => Promise<void>;
   addRoom: (name: string) => Promise<Room>;
   deleteRoom: (roomId: string, replacementRoomKey?: Plant["roomKey"]) => Promise<void>;
   roomExists: (name: string) => boolean;
@@ -321,12 +322,21 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
   );
 
   const updatePlant = useCallback(
-    async (plantId: string, input: { homeName?: string; roomKey?: Plant["roomKey"]; notes?: string }) => {
+    async (plantId: string, input: { homeName?: string; speciesName?: string; scientificName?: string; roomKey?: Plant["roomKey"]; notes?: string }) => {
       await repositories?.plants.updatePlant(plantId, input);
       setState((current) => ({
         ...current,
         plants: current.plants.map((plant) =>
-          plant.id === plantId ? { ...plant, homeName: input.homeName || undefined, roomKey: input.roomKey, notes: input.notes } : plant
+          plant.id === plantId
+            ? {
+                ...plant,
+                homeName: input.homeName || undefined,
+                speciesName: input.speciesName || commonNameFromScientificName(input.scientificName),
+                scientificName: input.scientificName || undefined,
+                roomKey: input.roomKey,
+                notes: input.notes
+              }
+            : plant
         )
       }));
     },

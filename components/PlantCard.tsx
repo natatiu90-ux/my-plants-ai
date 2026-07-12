@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useI18n } from "@/i18n/I18nProvider";
+import { plantCommonName, plantDisplayName } from "@/lib/plant-display";
 import type { Plant, PlantStatus } from "@/types/plant";
 import { PhotoImage } from "./PhotoImage";
 import { StatusBadge } from "./StatusBadge";
@@ -32,18 +33,20 @@ const cardStyles: Record<PlantStatus, { card: string; image: string; fade: strin
 export function PlantCard({ plant, coverPhotoUrl }: { plant: Plant; coverPhotoUrl: string }) {
   const { t } = useI18n();
   const styles = cardStyles[plant.status];
+  const displayName = plantDisplayName(plant, t("plants.unknownName"));
+  const commonName = plantCommonName(plant);
 
   return (
     <Link
       href={`/plants/${plant.id}`}
-      aria-label={`${t("plant.open")}: ${plant.homeName ?? plant.speciesName}`}
+      aria-label={`${t("plant.open")}: ${displayName}`}
       className={`block overflow-hidden rounded-[28px] border-[1.5px] shadow-soft transition duration-200 hover:-translate-y-1 focus-visible:-translate-y-1 ${styles.card}`}
     >
       <article>
         <div className={`relative h-[224px] overflow-hidden rounded-t-[27px] ${styles.image}`}>
           <PhotoImage
             src={coverPhotoUrl}
-            alt={`${plant.homeName ?? plant.speciesName}, ${plant.speciesName}`}
+            alt={`${displayName}, ${commonName}`}
             className="h-full w-full object-cover"
           />
           <div className={`pointer-events-none absolute inset-x-0 bottom-0 h-[72px] bg-gradient-to-b ${styles.fade}`} />
@@ -53,9 +56,9 @@ export function PlantCard({ plant, coverPhotoUrl }: { plant: Plant; coverPhotoUr
         </div>
         <div className="px-5 pb-5 pt-3.5">
           <h2 className="font-rounded text-[22px] font-extrabold leading-[1.15] tracking-normal text-ink">
-            {plant.homeName ?? plant.speciesName}
+            {displayName}
           </h2>
-          <p className="mt-0.5 text-[13px] italic leading-5 text-[#9a9aa3]">{plant.speciesName}</p>
+          {commonName ? <p className="mt-0.5 text-[13px] italic leading-5 text-[#9a9aa3]">{commonName}</p> : null}
           <p className="mt-2 line-clamp-3 text-[14.5px] leading-[1.55] text-[#4a4a54]">
             {t(plant.messageKey)}
           </p>
