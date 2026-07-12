@@ -115,7 +115,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       ) : null}
       {sheet === "add_photo" ? (
         <PhotoUploadFlow
-          title={t("photos.addPhoto")}
+          title={t("photos.addPhotos")}
           hasExistingCover={photos.some((photo) => photo.isCover)}
           onCancel={() => setSheet(null)}
           onSave={(selectedPhotos) => {
