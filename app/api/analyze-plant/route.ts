@@ -1,12 +1,16 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import sharp from "sharp";
 
 export const runtime = "nodejs";
 
 const maxPhotos = 5;
 const maxPhotoSize = 10 * 1024 * 1024;
+const optimizedImageMaxSide = 1200;
+const optimizedJpegQuality = 82;
+const targetOptimizedBytes = 600 * 1024;
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
-const model = process.env.OPENAI_PLANT_MODEL ?? "gpt-4.1-mini";
+const model = process.env.OPENAI_MODEL ?? "gpt-5-mini";
 
 const schema = {
   name: "plant_analysis",
@@ -82,9 +86,41 @@ const schema = {
   strict: true
 };
 
-async function fileToDataUrl(file: File) {
-  const buffer = Buffer.from(await file.arrayBuffer());
-  return `data:${file.type || "image/jpeg"};base64,${buffer.toString("base64")}`;
+async function optimizeImageForAnalysis(file: File) {
+  const inputBuffer = Buffer.from(await file.arrayBuffer());
+  const candidates = [
+    { maxSide: optimizedImageMaxSide, quality: optimizedJpegQuality },
+    { maxSide: optimizedImageMaxSide, quality: 80 },
+    { maxSide: 1000, quality: 80 }
+  ];
+  let optimizedBuffer: Buffer | null = null;
+
+  for (const candidate of candidates) {
+    optimizedBuffer = await sharp(inputBuffer, { failOn: "none" })
+      .rotate()
+      .resize({
+        width: candidate.maxSide,
+        height: candidate.maxSide,
+        fit: "inside",
+        withoutEnlargement: true
+      })
+      .flatten({ background: "#ffffff" })
+      .jpeg({
+        quality: candidate.quality,
+        mozjpeg: true
+      })
+      .toBuffer();
+
+    if (optimizedBuffer.byteLength <= targetOptimizedBytes) {
+      break;
+    }
+  }
+
+  return {
+    dataUrl: `data:image/jpeg;base64,${optimizedBuffer!.toString("base64")}`,
+    originalBytes: file.size,
+    optimizedBytes: optimizedBuffer!.byteLength
+  };
 }
 
 function safeError(message: string, status = 400) {
@@ -122,7 +158,12 @@ export async function POST(request: Request) {
 
   try {
     const client = new OpenAI({ apiKey });
-    const imageInputs = await Promise.all(files.map(fileToDataUrl));
+    const optimizedImages = await Promise.all(files.map(optimizeImageForAnalysis));
+    console.info("Plant analysis images optimized", {
+      count: optimizedImages.length,
+      originalBytes: optimizedImages.reduce((total, image) => total + image.originalBytes, 0),
+      optimizedBytes: optimizedImages.reduce((total, image) => total + image.optimizedBytes, 0)
+    });
     const inputContent = [
       {
         type: "input_text",
@@ -135,7 +176,7 @@ export async function POST(request: Request) {
           `User locale: ${locale}. Photo types in order: ${photoTypes.join(", ") || "unknown"}.`
         ].join("\n")
       },
-      ...imageInputs.map((imageUrl) => ({ type: "input_image", image_url: imageUrl }))
+      ...optimizedImages.map((image) => ({ type: "input_image", image_url: image.dataUrl }))
     ];
 
     const response = await client.responses.create(

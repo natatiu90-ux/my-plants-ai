@@ -15,6 +15,7 @@ Required local variables:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `OPENAI_API_KEY`
+- `OPENAI_MODEL`
 
 `OPENAI_API_KEY` is server-only. Never prefix it with `NEXT_PUBLIC_`, print it, or commit `.env.local`.
 
@@ -79,14 +80,15 @@ The plant analysis endpoint is:
 POST /api/analyze-plant
 ```
 
-It accepts up to 5 images, 10 MB each, and calls OpenAI from the server only. If `OPENAI_API_KEY` is missing, development returns a controlled configuration error and production returns a generic failure.
+It accepts up to 5 images, 10 MB each, optimizes image copies server-side, and calls OpenAI from the server only. The model is read from `OPENAI_MODEL` and falls back to `gpt-5-mini`. If `OPENAI_API_KEY` is missing, development returns a controlled configuration error and production returns a generic failure.
 
 To configure Vercel:
 
 1. Open the Vercel project.
 2. Go to Settings → Environment Variables.
 3. Add `OPENAI_API_KEY`.
-4. Redeploy after saving.
+4. Add `OPENAI_MODEL` with `gpt-5-mini`.
+5. Redeploy after saving.
 
 ## Testing
 
