@@ -35,8 +35,106 @@ type ImageAnalysisDiagnostic = {
   errorCode?: string;
   errorMessage?: string;
 };
+type ClientImagePreparationDiagnostic = {
+  source: "camera" | "gallery";
+  fileName: string;
+  originalSize: number;
+  compressedSize: number | null;
+  originalWidth: number | null;
+  originalHeight: number | null;
+  finalWidth: number | null;
+  finalHeight: number | null;
+  totalOutgoingRequestSize: number | null;
+  includedInRequest: boolean;
+  errorCode?: string;
+};
 
 const analysisStageCount = 4;
+const analysisImageMaxSide = 1600;
+const analysisImageTargetBytes = 500 * 1024;
+const analysisRequestTargetBytes = 3 * 1024 * 1024;
+const analysisJpegQualities = [0.78, 0.75, 0.72, 0.68];
+
+function loadImageFromBlob(blob: Blob): Promise<{ image: HTMLImageElement; objectUrl: string }> {
+  const objectUrl = URL.createObjectURL(blob);
+  const image = new Image();
+
+  return new Promise((resolve, reject) => {
+    image.onload = () => resolve({ image, objectUrl });
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("image_preparation_failed"));
+    };
+    image.src = objectUrl;
+  });
+}
+
+function canvasToJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("image_preparation_failed"));
+          return;
+        }
+        resolve(blob);
+      },
+      "image/jpeg",
+      quality
+    );
+  });
+}
+
+async function prepareImageForAnalysis(blob: Blob, fileName: string) {
+  const { image, objectUrl } = await loadImageFromBlob(blob);
+
+  try {
+    const originalWidth = image.naturalWidth;
+    const originalHeight = image.naturalHeight;
+    if (!originalWidth || !originalHeight) {
+      throw new Error("image_preparation_failed");
+    }
+
+    const scale = Math.min(1, analysisImageMaxSide / Math.max(originalWidth, originalHeight));
+    const finalWidth = Math.max(1, Math.round(originalWidth * scale));
+    const finalHeight = Math.max(1, Math.round(originalHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = finalWidth;
+    canvas.height = finalHeight;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("image_preparation_failed");
+    }
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, finalWidth, finalHeight);
+    context.drawImage(image, 0, 0, finalWidth, finalHeight);
+
+    let bestBlob: Blob | null = null;
+    for (const quality of analysisJpegQualities) {
+      const candidate = await canvasToJpeg(canvas, quality);
+      bestBlob = candidate;
+      if (candidate.size <= analysisImageTargetBytes) {
+        break;
+      }
+    }
+
+    if (!bestBlob) {
+      throw new Error("image_preparation_failed");
+    }
+
+    const safeName = `${fileName.replace(/\.[^.]+$/, "") || "plant-photo"}-analysis.jpg`;
+    return {
+      file: new File([bestBlob], safeName, { type: "image/jpeg" }),
+      originalWidth,
+      originalHeight,
+      finalWidth,
+      finalHeight
+    };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
 
 export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const router = useRouter();
@@ -51,6 +149,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [analysis, setAnalysis] = useState<PlantAnalysis | null>(null);
   const [analysisFailed, setAnalysisFailed] = useState(false);
   const [analysisDiagnostics, setAnalysisDiagnostics] = useState<ImageAnalysisDiagnostic[]>([]);
+  const [clientPreparationDiagnostics, setClientPreparationDiagnostics] = useState<ClientImagePreparationDiagnostic[]>([]);
   const [analysisErrorCode, setAnalysisErrorCode] = useState<string | null>(null);
   const [analysisStageIndex, setAnalysisStageIndex] = useState(0);
   const [showLongAnalysisHint, setShowLongAnalysisHint] = useState(false);
@@ -66,6 +165,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     setAnalysisStageIndex(0);
     setShowLongAnalysisHint(false);
     setAnalysisErrorCode(null);
+    setClientPreparationDiagnostics([]);
     const stageTimers = [
       window.setTimeout(() => {
         if (isMounted) setAnalysisStageIndex(1);
@@ -98,22 +198,75 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
 
       try {
         const formData = new FormData();
+        const nextPreparationDiagnostics: ClientImagePreparationDiagnostic[] = [];
+        let totalOutgoingRequestSize = 0;
 
         for (const photo of selectedPhotos.slice(0, 5)) {
           const blob = await PhotoStorageRepository.getPhoto(photo.storageId);
           if (blob) {
-            formData.append("photos", blob, photo.originalName || `${photo.id}.${photo.originalExtension ?? "jpg"}`);
+            const fileName = photo.originalName || `${photo.id}.${photo.originalExtension ?? "jpg"}`;
+            const diagnostic: ClientImagePreparationDiagnostic = {
+              source: photo.source,
+              fileName,
+              originalSize: blob.size,
+              compressedSize: null,
+              originalWidth: null,
+              originalHeight: null,
+              finalWidth: null,
+              finalHeight: null,
+              totalOutgoingRequestSize: null,
+              includedInRequest: false
+            };
+            nextPreparationDiagnostics.push(diagnostic);
+
+            let preparedImage: Awaited<ReturnType<typeof prepareImageForAnalysis>>;
+            try {
+              preparedImage = await prepareImageForAnalysis(blob, fileName);
+            } catch {
+              diagnostic.errorCode = "image_preparation_failed";
+              setClientPreparationDiagnostics(nextPreparationDiagnostics);
+              throw new Error("image_preparation_failed");
+            }
+
+            totalOutgoingRequestSize += preparedImage.file.size;
+            if (preparedImage.file.size > analysisImageTargetBytes || totalOutgoingRequestSize > analysisRequestTargetBytes) {
+              diagnostic.compressedSize = preparedImage.file.size;
+              diagnostic.originalWidth = preparedImage.originalWidth;
+              diagnostic.originalHeight = preparedImage.originalHeight;
+              diagnostic.finalWidth = preparedImage.finalWidth;
+              diagnostic.finalHeight = preparedImage.finalHeight;
+              diagnostic.totalOutgoingRequestSize = totalOutgoingRequestSize;
+              diagnostic.errorCode = "image_preparation_failed";
+              setClientPreparationDiagnostics(nextPreparationDiagnostics);
+              throw new Error("image_preparation_failed");
+            }
+
+            diagnostic.compressedSize = preparedImage.file.size;
+            diagnostic.originalWidth = preparedImage.originalWidth;
+            diagnostic.originalHeight = preparedImage.originalHeight;
+            diagnostic.finalWidth = preparedImage.finalWidth;
+            diagnostic.finalHeight = preparedImage.finalHeight;
+            diagnostic.includedInRequest = true;
+            formData.append("photos", preparedImage.file, preparedImage.file.name);
             formData.append("photoTypes", photo.type);
             formData.append("photoSources", photo.source);
             formData.append("clientFileNames", photo.originalName);
-            formData.append("clientMimeTypes", photo.originalType);
-            formData.append("clientExtensions", photo.originalExtension ?? "");
-            formData.append("clientByteSizes", String(photo.originalSize));
-            formData.append("clientDecodeSucceeded", String(photo.decode.succeeded));
-            formData.append("clientWidths", String(photo.decode.width ?? ""));
-            formData.append("clientHeights", String(photo.decode.height ?? ""));
+            formData.append("clientMimeTypes", preparedImage.file.type);
+            formData.append("clientExtensions", "jpg");
+            formData.append("clientByteSizes", String(preparedImage.file.size));
+            formData.append("clientDecodeSucceeded", "true");
+            formData.append("clientWidths", String(preparedImage.finalWidth));
+            formData.append("clientHeights", String(preparedImage.finalHeight));
           }
         }
+        nextPreparationDiagnostics.forEach((diagnostic) => {
+          diagnostic.totalOutgoingRequestSize = totalOutgoingRequestSize;
+        });
+        setClientPreparationDiagnostics(nextPreparationDiagnostics);
+        console.info("Plant analysis client images prepared", {
+          totalOutgoingRequestSize,
+          images: nextPreparationDiagnostics
+        });
 
         formData.append("locale", locale);
         const response = await fetch("/api/analyze-plant", {
@@ -281,6 +434,21 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         ) : null}
         {process.env.NODE_ENV !== "production" && analysisErrorCode ? (
           <p className="mt-3 rounded-[18px] bg-white/75 p-3 text-left text-[11px] font-bold leading-5 text-[#5f594f]">analysis error: {analysisErrorCode}</p>
+        ) : null}
+        {process.env.NODE_ENV !== "production" && clientPreparationDiagnostics.length ? (
+          <div className="mt-4 rounded-[18px] bg-white/75 p-3 text-left text-[11px] font-bold leading-5 text-[#5f594f]">
+            <p className="mb-2 text-xs font-extrabold text-ink">Development client image preparation</p>
+            {clientPreparationDiagnostics.map((diagnostic, index) => (
+              <div key={`${diagnostic.fileName}-${index}`} className="border-t border-[#eee7dc] py-2 first:border-t-0 first:pt-0">
+                <p>source: {diagnostic.source}</p>
+                <p>original: {diagnostic.originalSize} bytes / {diagnostic.originalWidth ?? "unknown"}x{diagnostic.originalHeight ?? "unknown"}</p>
+                <p>compressed: {diagnostic.compressedSize ?? 0} bytes / {diagnostic.finalWidth ?? "unknown"}x{diagnostic.finalHeight ?? "unknown"}</p>
+                <p>total request images: {diagnostic.totalOutgoingRequestSize ?? 0} bytes</p>
+                <p>included: {String(diagnostic.includedInRequest)}</p>
+                {diagnostic.errorCode ? <p>error: {diagnostic.errorCode}</p> : null}
+              </div>
+            ))}
+          </div>
         ) : null}
         {process.env.NODE_ENV !== "production" && analysisDiagnostics.length ? (
           <div className="mt-4 rounded-[18px] bg-white/75 p-3 text-left text-[11px] font-bold leading-5 text-[#5f594f]">
