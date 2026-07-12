@@ -25,6 +25,7 @@ type AddPlantInput = {
   roomKey?: Plant["roomKey"];
   coverPhotoUrl?: string;
   notes?: string;
+  lastWateredAt?: string;
   photos?: { url: string; type: PhotoType; isCover?: boolean }[];
   analysis?: {
     detectedSpecies?: string | null;
@@ -275,7 +276,13 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         throw new Error("Plant collection is not ready.");
       }
 
-      const nextCheckAt = input.analysis?.nextCheckInDays != null ? toDateKey(addDays(new Date(), input.analysis.nextCheckInDays)) : undefined;
+      const reminderStartDate = input.lastWateredAt ? new Date(`${input.lastWateredAt}T12:00:00`) : new Date();
+      const nextCheckAt =
+        input.analysis?.nextCheckInDays != null
+          ? toDateKey(addDays(reminderStartDate, input.analysis.nextCheckInDays))
+          : input.lastWateredAt
+            ? toDateKey(addDays(reminderStartDate, 4))
+            : undefined;
       const plant = await repositories.plants.createPlant({
         homeName: input.homeName,
         speciesName: input.speciesName,
@@ -284,6 +291,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         notes: input.notes,
         status: input.analysis?.condition ?? "unknown",
         nextAction: input.analysis?.nextAction ?? null,
+        lastWateredAt: input.lastWateredAt,
         nextCheckAt
       });
 
@@ -292,6 +300,15 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         type: "plant_added",
         eventDate: toDateKey(new Date())
       });
+      const wateringMilestone = input.lastWateredAt
+        ? await repositories.milestones.addMilestone(plant.id, {
+            type: "watered",
+            eventDate: input.lastWateredAt
+          })
+        : null;
+      if (input.lastWateredAt) {
+        await repositories.careEvents.addCareEvent(plant.id, { type: "watered", eventDate: input.lastWateredAt });
+      }
 
       if (input.analysis) {
         await repositories.analyses.addAnalysis({
@@ -313,7 +330,13 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         ...current,
         plants: [plant, ...current.plants],
         photos: [...photos, ...current.photos],
-        milestones: [milestone, ...current.milestones]
+        milestones: [milestone, ...(wateringMilestone ? [wateringMilestone] : []), ...current.milestones],
+        careEvents: [
+          ...(input.lastWateredAt
+            ? [{ id: `${plant.id}-watered-${Date.now()}`, plantId: plant.id, type: "watered" as const, createdAt: input.lastWateredAt }]
+            : []),
+          ...current.careEvents
+        ]
       }));
 
       return plant.id;

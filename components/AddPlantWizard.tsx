@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
+import { addDays, formatRelativeDate, formatShortDate, toDateKey } from "@/lib/date-format";
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
 import { PhotoImage } from "./PhotoImage";
@@ -13,6 +14,7 @@ import { RoomPicker } from "./RoomPicker";
 import type { PendingPhotoUpload } from "./photo-upload-types";
 
 type Step = "pick" | "analysis" | "confirm" | "details";
+type ConfirmationPicker = "room" | "watering" | null;
 type PlantAnalysis = {
   commonName?: { en?: string | null; ru?: string | null } | string | null;
   detectedSpecies: string | null;
@@ -174,6 +176,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [scientificName, setScientificName] = useState("");
   const [notes, setNotes] = useState("");
   const [roomKey, setRoomKey] = useState<string | undefined>();
+  const [lastWateredAt, setLastWateredAt] = useState<string | undefined>();
+  const [activePicker, setActivePicker] = useState<ConfirmationPicker>(null);
+  const [isChoosingWaterDate, setIsChoosingWaterDate] = useState(false);
+  const [customWaterDate, setCustomWaterDate] = useState(toDateKey(new Date()));
   const [analysis, setAnalysis] = useState<PlantAnalysis | null>(null);
   const [analysisFailed, setAnalysisFailed] = useState(false);
   const [analysisDiagnostics, setAnalysisDiagnostics] = useState<ImageAnalysisDiagnostic[]>([]);
@@ -424,9 +430,24 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       ? t(roomKey as never)
       : rooms.find((room) => room.id === roomKey)?.name ?? t("addPlant.noRoomSelected")
     : t("addPlant.noRoomSelected");
+  const lastWateredValue = lastWateredAt
+    ? `${formatRelativeDate(lastWateredAt, locale, t("addPlant.lastWateringEmpty"))} · ${formatShortDate(lastWateredAt, locale)}`
+    : t("addPlant.lastWateringEmpty");
   const displayCommonName = cleanPlantName(speciesName) || commonNameFromScientificName(scientificName) || t("plants.unknownName");
   const displayScientificName = cleanScientificName(scientificName);
   const uncertaintyMessage = analysis?.uncertainties?.[0]?.[locale];
+  const todayDateKey = toDateKey(new Date());
+
+  const openPicker = (picker: ConfirmationPicker) => {
+    setIsChoosingWaterDate(false);
+    setActivePicker(picker);
+  };
+
+  const selectLastWateredDate = (dateKey: string | undefined) => {
+    setLastWateredAt(dateKey);
+    setIsChoosingWaterDate(false);
+    setActivePicker(null);
+  };
 
   const save = async () => {
     if (isSaving || !selectedPhotos.length || !coverPhoto) {
@@ -436,6 +457,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     console.info("plant_submit_started", {
       photoCount: selectedPhotos.length,
       hasRoom: Boolean(roomKey),
+      hasLastWateredAt: Boolean(lastWateredAt),
       hasAnalysis: Boolean(analysis)
     });
     setIsSaving(true);
@@ -445,6 +467,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       console.info("plant_save_started", {
         photoCount: selectedPhotos.length,
         roomKey,
+        lastWateredAt,
         speciesName: displayCommonName,
         hasScientificName: Boolean(displayScientificName)
       });
@@ -455,6 +478,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         speciesName: savedCommonName,
         scientificName: displayScientificName || undefined,
         roomKey,
+        lastWateredAt,
         notes: notes.trim() || undefined,
         photos: selectedPhotos,
         analysis: analysis
@@ -524,10 +548,32 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                     </button>
                   </div>
                 </div>
-                <div className="rounded-[20px] bg-white/70 p-3">
-                  <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantDetail.location")}</p>
-                  <p className="mt-1 font-extrabold text-[#3f3b35]">{selectedRoomName}</p>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => openPicker("room")}
+                  className="rounded-[20px] bg-white/70 p-3 text-left"
+                >
+                  <p className="text-xs font-bold uppercase text-[#a09a90]">{t("addPlant.locationLabel")}</p>
+                  <div className="mt-1 flex items-center justify-between gap-3">
+                    <p className="font-extrabold text-[#3f3b35]">{selectedRoomName}</p>
+                    <span className="shrink-0 text-sm font-extrabold text-[#2d7a4f]">
+                      {roomKey ? t("addPlant.change") : t("addPlant.select")}
+                    </span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openPicker("watering")}
+                  className="rounded-[20px] bg-white/70 p-3 text-left"
+                >
+                  <p className="text-xs font-bold uppercase text-[#a09a90]">{t("addPlant.lastWateringLabel")}</p>
+                  <div className="mt-1 flex items-center justify-between gap-3">
+                    <p className="font-extrabold text-[#3f3b35]">{lastWateredValue}</p>
+                    <span className="shrink-0 text-sm font-extrabold text-[#2d7a4f]">
+                      {lastWateredAt ? t("addPlant.change") : t("addPlant.add")}
+                    </span>
+                  </div>
+                </button>
               </div>
             </div>
           ) : (
@@ -619,6 +665,88 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </div>
+      {activePicker === "room" ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#1c1c1e]/20 px-4 pb-4 backdrop-blur-[2px] sm:items-center sm:pb-0">
+          <div role="dialog" aria-modal="true" className="w-full max-w-[390px] rounded-[28px] bg-[#fffaf3] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]">
+            <h2 className="font-rounded text-2xl font-extrabold text-ink">{t("addPlant.locationLabel")}</h2>
+            <div className="mt-4">
+              <RoomPicker
+                value={roomKey}
+                onChange={(value) => {
+                  setRoomKey(value);
+                  setActivePicker(null);
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setRoomKey(undefined);
+                setActivePicker(null);
+              }}
+              className="mt-3 min-h-12 w-full rounded-[18px] bg-white/75 px-4 text-sm font-extrabold text-[#5f594f]"
+            >
+              {t("addPlant.noRoomSelected")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActivePicker(null)}
+              className="mt-2 min-h-12 w-full rounded-[18px] px-4 text-sm font-extrabold text-[#777167]"
+            >
+              {t("plantDetail.cancel")}
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {activePicker === "watering" ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#1c1c1e]/20 px-4 pb-4 backdrop-blur-[2px] sm:items-center sm:pb-0">
+          <div role="dialog" aria-modal="true" className="w-full max-w-[390px] rounded-[28px] bg-[#fffaf3] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]">
+            <h2 className="font-rounded text-2xl font-extrabold text-ink">{t("addPlant.lastWateringLabel")}</h2>
+            <div className="mt-4 grid gap-2">
+              <button type="button" onClick={() => selectLastWateredDate(todayDateKey)} className="min-h-12 rounded-[18px] bg-white/75 px-4 text-left text-sm font-extrabold text-[#3f3b35]">
+                {t("addPlant.waterToday")}
+              </button>
+              <button type="button" onClick={() => selectLastWateredDate(toDateKey(addDays(new Date(), -1)))} className="min-h-12 rounded-[18px] bg-white/75 px-4 text-left text-sm font-extrabold text-[#3f3b35]">
+                {t("addPlant.waterYesterday")}
+              </button>
+              <button type="button" onClick={() => selectLastWateredDate(toDateKey(addDays(new Date(), -3)))} className="min-h-12 rounded-[18px] bg-white/75 px-4 text-left text-sm font-extrabold text-[#3f3b35]">
+                {t("addPlant.waterFewDaysAgo")}
+              </button>
+              <button type="button" onClick={() => setIsChoosingWaterDate(true)} className="min-h-12 rounded-[18px] bg-white/75 px-4 text-left text-sm font-extrabold text-[#3f3b35]">
+                {t("addPlant.waterChooseDate")}
+              </button>
+              {isChoosingWaterDate ? (
+                <div className="rounded-[18px] bg-white/75 p-3">
+                  <input
+                    type="date"
+                    value={customWaterDate}
+                    max={todayDateKey}
+                    onChange={(event) => setCustomWaterDate(event.target.value)}
+                    className="min-h-12 w-full rounded-[16px] bg-[#fffaf3] px-3 text-base font-bold text-[#3f3b35] outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => selectLastWateredDate(customWaterDate)}
+                    className="mt-2 min-h-11 w-full rounded-[16px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]"
+                  >
+                    {t("story.saveEvent")}
+                  </button>
+                </div>
+              ) : null}
+              <button type="button" onClick={() => selectLastWateredDate(undefined)} className="min-h-12 rounded-[18px] bg-white/75 px-4 text-left text-sm font-extrabold text-[#777167]">
+                {t("addPlant.waterUnknown")}
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActivePicker(null)}
+              className="mt-3 min-h-12 w-full rounded-[18px] px-4 text-sm font-extrabold text-[#777167]"
+            >
+              {t("plantDetail.cancel")}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -72,6 +72,7 @@ export class PlantRepository {
     notes?: string;
     status?: Plant["status"];
     nextAction?: Plant["nextAction"];
+    lastWateredAt?: string;
     nextCheckAt?: string;
   }) {
     const { data, error } = await this.supabase
@@ -86,6 +87,7 @@ export class PlantRepository {
         notes: input.notes || null,
         status: input.status ?? "unknown",
         next_action: normalizeAction(input.nextAction),
+        last_watered_at: input.lastWateredAt ? `${input.lastWateredAt}T12:00:00.000Z` : null,
         next_check_at: input.nextCheckAt ? `${input.nextCheckAt}T12:00:00.000Z` : null
       })
       .select("*")
@@ -398,12 +400,12 @@ export class CareEventRepository {
     return (data ?? []).map(mapCareEvent);
   }
 
-  async addCareEvent(plantId: string, input: { type: PlantCareEvent["type"]; metadata?: Record<string, string> }) {
+  async addCareEvent(plantId: string, input: { type: PlantCareEvent["type"]; eventDate?: string; metadata?: Record<string, string> }) {
     const { error } = await this.supabase.from("care_events").insert({
       user_id: this.user.id,
       plant_id: plantId,
       type: input.type,
-      event_date: new Date().toISOString(),
+      event_date: input.eventDate ? `${input.eventDate}T12:00:00.000Z` : new Date().toISOString(),
       metadata: input.metadata ?? {}
     });
 
