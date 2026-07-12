@@ -10,10 +10,14 @@ export type PlantCareEventType = "watered" | "soil_checked" | "photo_added";
 
 export type PlantMilestoneType =
   | "plant_added"
+  | "watered"
+  | "soil_checked"
   | "moved_home"
   | "repotted"
+  | "fertilized"
   | "new_leaf"
   | "bloomed"
+  | "pruned"
   | "damaged"
   | "recovered"
   | "treatment_started"

@@ -7,22 +7,29 @@ import type { TranslationKey } from "@/i18n/dictionaries";
 import type { PlantMilestone, PlantMilestoneType } from "@/types/plant";
 
 const milestoneTypes: PlantMilestoneType[] = [
+  "watered",
   "repotted",
+  "soil_checked",
+  "fertilized",
   "moved_home",
   "new_leaf",
   "bloomed",
+  "pruned",
   "damaged",
-  "treatment_started",
   "recovered",
   "custom_note"
 ];
 
 const milestoneTitleKeys: Record<PlantMilestoneType, TranslationKey> = {
   plant_added: "milestones.plant_added.title",
+  watered: "milestones.watered.title",
+  soil_checked: "milestones.soil_checked.title",
   moved_home: "milestones.moved_home.title",
   repotted: "milestones.repotted.title",
+  fertilized: "milestones.fertilized.title",
   new_leaf: "milestones.new_leaf.title",
   bloomed: "milestones.bloomed.title",
+  pruned: "milestones.pruned.title",
   damaged: "milestones.damaged.title",
   recovered: "milestones.recovered.title",
   treatment_started: "milestones.treatment_started.title",

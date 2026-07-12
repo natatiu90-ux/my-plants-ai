@@ -1,17 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Pencil, Plus, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ArrowLeft, Plus } from "lucide-react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
 import { cleanScientificName, plantCommonName, plantDisplayName } from "@/lib/plant-display";
-import type { PlantMilestone } from "@/types/plant";
-import { CareHistoryItem } from "./CareHistoryItem";
 import { DeletePlantDialog } from "./DeletePlantDialog";
 import { DeletePhotoDialog } from "./DeletePhotoDialog";
-import { MilestoneEditor } from "./MilestoneEditor";
 import { PhotoUploadFlow } from "./PhotoUploadFlow";
 import { PhotoReviewGrid } from "./PhotoReviewGrid";
 import { RoomPicker } from "./RoomPicker";
@@ -21,16 +18,12 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
   const router = useRouter();
   const { t } = useI18n();
   const {
-    addMilestone,
     addPlantPhotos,
-    deleteMilestone,
     deletePlantPhoto,
     deletePlant,
     getPlant,
-    getPlantMilestones,
     getPlantPhotos,
     setCoverPhoto,
-    updateMilestone,
     updatePhotoType,
     updatePlant
   } = usePlantStore();
@@ -42,18 +35,9 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
   const [roomKey, setRoomKey] = useState<string | undefined>(plant?.roomKey);
   const [notes, setNotes] = useState(plant?.notes ?? "");
   const [isAddingPhoto, setIsAddingPhoto] = useState(false);
-  const [editingMilestone, setEditingMilestone] = useState<PlantMilestone | null>(null);
-  const [isAddingMilestone, setIsAddingMilestone] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [deletingPhotoId, setDeletingPhotoId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const milestones = useMemo(
-    () =>
-      getPlantMilestones(plantId).sort((a, b) =>
-        (b.eventDate ?? b.createdAt).localeCompare(a.eventDate ?? a.createdAt)
-      ),
-    [getPlantMilestones, plantId]
-  );
 
   if (!plant) {
     return (
@@ -132,53 +116,6 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
       </section>
 
       <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
-        <div className="mb-3 flex items-center justify-between gap-3 px-1">
-          <h2 className="font-rounded text-xl font-extrabold text-ink">{t("plantDetail.story")}</h2>
-          <button
-            type="button"
-            onClick={() => setIsAddingMilestone(true)}
-            className="flex min-h-10 items-center gap-1 rounded-[16px] bg-[#ddf2dc] px-3 text-xs font-extrabold text-[#2d7a4f]"
-          >
-            <Plus aria-hidden="true" size={15} />
-            {t("story.addEvent")}
-          </button>
-        </div>
-        {milestones.length ? (
-          <div className="grid gap-2">
-            {milestones.map((milestone) => (
-              <div key={milestone.id} className="rounded-[24px] bg-white/40 p-2">
-                <ul>
-                  <CareHistoryItem milestone={milestone} />
-                </ul>
-                {milestone.isManual ? (
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setEditingMilestone(milestone)}
-                      className="flex min-h-10 items-center justify-center gap-2 rounded-[16px] bg-white/75 px-3 text-xs font-extrabold text-[#5f594f]"
-                    >
-                      <Pencil aria-hidden="true" size={14} />
-                      {t("story.editEvent")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => deleteMilestone(milestone.id)}
-                      className="flex min-h-10 items-center justify-center gap-2 rounded-[16px] bg-[#f4d7dc] px-3 text-xs font-extrabold text-[#a13445]"
-                    >
-                      <Trash2 aria-hidden="true" size={14} />
-                      {t("story.deleteEvent")}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="rounded-[22px] bg-white/55 p-4 text-sm font-bold leading-6 text-[#676157]">{t("plantDetail.storyEmpty")}</p>
-        )}
-      </section>
-
-      <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
         <h2 className="mb-3 px-1 font-rounded text-xl font-extrabold text-ink">{t("edit.notes")}</h2>
         <textarea
           value={notes}
@@ -205,27 +142,6 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
             addPlantPhotos(plant.id, selectedPhotos);
             setIsAddingPhoto(false);
             setToast(t("toast.photoSaved"));
-          }}
-        />
-      ) : null}
-      {isAddingMilestone ? (
-        <MilestoneEditor
-          onCancel={() => setIsAddingMilestone(false)}
-          onSave={(input) => {
-            addMilestone(plant.id, input);
-            setIsAddingMilestone(false);
-            setToast(t("edit.saved"));
-          }}
-        />
-      ) : null}
-      {editingMilestone ? (
-        <MilestoneEditor
-          milestone={editingMilestone}
-          onCancel={() => setEditingMilestone(null)}
-          onSave={(input) => {
-            updateMilestone(editingMilestone.id, input);
-            setEditingMilestone(null);
-            setToast(t("edit.saved"));
           }}
         />
       ) : null}

@@ -9,6 +9,7 @@ import { CareHistory } from "./CareHistory";
 import { CareSummary } from "./CareSummary";
 import { CheckSoilSheet } from "./CheckSoilSheet";
 import { DeletePlantDialog } from "./DeletePlantDialog";
+import { MilestoneEditor } from "./MilestoneEditor";
 import { PhotoGallery } from "./PhotoGallery";
 import { PhotoUploadFlow } from "./PhotoUploadFlow";
 import { PlantDetailHeader } from "./PlantDetailHeader";
@@ -17,17 +18,20 @@ import { PlantStatusSection } from "./PlantStatusSection";
 import { PrimaryCareAction } from "./PrimaryCareAction";
 import { Toast } from "./Toast";
 
-type Sheet = "check_soil" | "add_photo" | null;
+type Sheet = "check_soil" | "add_photo" | "add_event" | null;
 
 export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const router = useRouter();
   const { t } = useI18n();
-  const { addPlantPhotos, deletePlant, getCoverPhoto, getPlant, getPlantMilestones, getPlantPhotos, recordSoilChecked, waterPlant } =
+  const { addMilestone, addPlantPhotos, deletePlant, getCoverPhoto, getPlant, getPlantMilestones, getPlantPhotos, recordSoilChecked, waterPlant } =
     usePlantStore();
   const plant = getPlant(plantId);
   const coverPhoto = getCoverPhoto(plantId);
   const photos = getPlantPhotos(plantId);
-  const milestones = useMemo(() => getPlantMilestones(plantId), [getPlantMilestones, plantId]);
+  const milestones = useMemo(
+    () => getPlantMilestones(plantId).sort((a, b) => (b.eventDate ?? b.createdAt).localeCompare(a.eventDate ?? a.createdAt)),
+    [getPlantMilestones, plantId]
+  );
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [sheet, setSheet] = useState<Sheet>(null);
@@ -101,7 +105,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       </button>
       <CareSummary plant={plant} />
       <PhotoGallery photos={photos} onAddPhoto={() => setSheet("add_photo")} />
-      <CareHistory milestones={milestones} />
+      <CareHistory milestones={milestones} onAddEvent={() => setSheet("add_event")} />
 
       <PrimaryCareAction plant={plant} onAction={openPrimaryAction} />
       {sheet === "check_soil" ? (
@@ -123,6 +127,16 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
             addPlantPhotos(plant.id, selectedPhotos);
             setSheet(null);
             setToast(t("toast.photoSaved"));
+          }}
+        />
+      ) : null}
+      {sheet === "add_event" ? (
+        <MilestoneEditor
+          onCancel={() => setSheet(null)}
+          onSave={(input) => {
+            addMilestone(plant.id, input);
+            setSheet(null);
+            setToast(t("edit.saved"));
           }}
         />
       ) : null}

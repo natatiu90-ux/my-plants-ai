@@ -4,15 +4,26 @@ import { useI18n } from "@/i18n/I18nProvider";
 import type { PlantMilestone } from "@/types/plant";
 import { CareHistoryItem } from "./CareHistoryItem";
 
-export function CareHistory({ milestones }: { milestones: PlantMilestone[] }) {
+export function CareHistory({ milestones, onAddEvent }: { milestones: PlantMilestone[]; onAddEvent?: () => void }) {
   const { t } = useI18n();
 
   return (
     <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
-      <h2 className="mb-3 px-1 font-rounded text-xl font-extrabold text-ink">{t("plantDetail.story")}</h2>
+      <div className="mb-3 flex items-center justify-between gap-3 px-1">
+        <h2 className="font-rounded text-xl font-extrabold text-ink">{t("plantDetail.story")}</h2>
+        {onAddEvent ? (
+          <button
+            type="button"
+            onClick={onAddEvent}
+            className="flex min-h-10 items-center gap-1 rounded-[16px] bg-[#ddf2dc] px-3 text-xs font-extrabold text-[#2d7a4f]"
+          >
+            {t("story.addEvent")}
+          </button>
+        ) : null}
+      </div>
       {milestones.length > 0 ? (
         <ol className="grid gap-3">
-          {milestones.slice(0, 5).map((milestone) => (
+          {milestones.map((milestone) => (
             <CareHistoryItem key={milestone.id} milestone={milestone} />
           ))}
         </ol>
