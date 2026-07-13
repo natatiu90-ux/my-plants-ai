@@ -14,6 +14,15 @@ export type PendingPhotoUpload = {
     width: number | null;
     height: number | null;
   };
+  orientation: {
+    exifOrientation: number | null;
+    orientationSource: "raw_pixels" | "browser_display" | "unknown";
+    physicallyRotated: boolean;
+    storedWidth: number | null;
+    storedHeight: number | null;
+    displayedWidth: number | null;
+    displayedHeight: number | null;
+  };
   type: PhotoType;
   isCover: boolean;
 };

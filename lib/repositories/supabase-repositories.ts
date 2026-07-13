@@ -1,6 +1,7 @@
 "use client";
 
 import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { inspectImageDisplay, readJpegExifOrientation } from "@/lib/client-image-normalization";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
 import type { CareScheduleStatus, PhotoType, Plant, PlantCareEvent, PlantHypothesis, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
 import { mapAnalysis, mapCareEvent, mapHypothesisResolution, mapMilestone, mapPhoto, mapPlant, mapRoom, type PlantPhotoRow } from "./mappers";
@@ -274,8 +275,20 @@ export class PhotoRepository {
         continue;
       }
 
+      const [display, exifOrientation] = await Promise.all([inspectImageDisplay(blob), readJpegExifOrientation(blob)]);
       const photoId = crypto.randomUUID();
       const storagePath = `${this.user.id}/${plantId}/${photoId}.${extensionForBlob(blob)}`;
+      console.info("photo_orientation_stage", {
+        stage: "supabase_storage_upload",
+        photoId,
+        mimeType: blob.type,
+        byteSize: blob.size,
+        width: display.width,
+        height: display.height,
+        exifOrientation,
+        physicallyRotated: exifOrientation == null || exifOrientation === 1,
+        displayedInUi: display.succeeded ? `${display.width}x${display.height}` : "decode_failed"
+      });
       const { error: uploadError } = await this.supabase.storage.from(photoBucket).upload(storagePath, blob, {
         contentType: blob.type || "image/jpeg",
         upsert: false

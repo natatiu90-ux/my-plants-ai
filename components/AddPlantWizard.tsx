@@ -9,12 +9,13 @@ import { normalizeImageBlob } from "@/lib/client-image-normalization";
 import { addDays, formatRelativeDate, formatShortDate, toDateKey } from "@/lib/date-format";
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
+import { MultiPhotoPicker } from "./MultiPhotoPicker";
+import { PhotoBatchReview } from "./PhotoBatchReview";
 import { PhotoImage } from "./PhotoImage";
-import { PhotoUploadFlow } from "./PhotoUploadFlow";
 import { RoomPicker } from "./RoomPicker";
 import type { PendingPhotoUpload } from "./photo-upload-types";
 
-type Step = "pick" | "analysis" | "confirm" | "details";
+type Step = "pick" | "pick_more" | "review" | "analysis" | "confirm" | "details";
 type ConfirmationPicker = "room" | "watering" | null;
 type AnalysisFailureKind = "technical" | null;
 type PlantAnalysis = {
@@ -35,10 +36,22 @@ type ImageAnalysisDiagnostic = {
   source: "camera" | "gallery";
   fileName: string;
   detectedFormat: string;
+  decodedWidth?: number | null;
+  decodedHeight?: number | null;
+  exifOrientation?: number | null;
+  normalizedWidth?: number | null;
+  normalizedHeight?: number | null;
   conversionStatus: string;
-  finalFormat: string | null;
-  finalSize: number | null;
+  finalMimeType: string | null;
+  finalByteSize: number | null;
   includedInOpenAIRequest: boolean;
+  client?: {
+    width?: number | null;
+    height?: number | null;
+    exifOrientation?: number | null;
+    physicallyRotated?: boolean | null;
+    orientationSource?: string | null;
+  };
   errorCode?: string;
   errorMessage?: string;
 };
@@ -53,6 +66,10 @@ type ClientImagePreparationDiagnostic = {
   originalHeight: number | null;
   finalWidth: number | null;
   finalHeight: number | null;
+  orientationSource?: "raw_pixels" | "browser_display" | "unknown";
+  physicallyRotated?: boolean;
+  displayedWidth?: number | null;
+  displayedHeight?: number | null;
   totalOutgoingRequestSize: number | null;
   includedInRequest: boolean;
   requestDurationMs?: number | null;
@@ -66,6 +83,7 @@ const analysisStageCount = 4;
 const analysisImageMaxSide = 1600;
 const analysisImageTargetBytes = 500 * 1024;
 const analysisRequestTargetBytes = 3 * 1024 * 1024;
+const maxSelectedPhotos = 5;
 const analysisJpegQualities = [0.78, 0.75, 0.72, 0.68];
 const defaultNicknames = {
   en: ["Sprout", "Pebble", "Mochi", "Button", "Pickle", "Clover", "Poppy", "Bean", "Sunny", "Olive", "Noodle", "Dot", "Minty", "Pumpkin", "Biscuit", "Twiggy"],
@@ -114,7 +132,9 @@ async function prepareImageForAnalysis(blob: Blob, fileName: string) {
     originalHeight: normalized.originalHeight,
     finalWidth: normalized.normalizedWidth,
     finalHeight: normalized.normalizedHeight,
-    exifOrientation: normalized.exifOrientation
+    exifOrientation: normalized.exifOrientation,
+    orientationSource: normalized.orientationSource,
+    physicallyRotated: normalized.physicallyRotated
   };
 }
 
@@ -124,6 +144,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const { addPlant, plants, rooms } = usePlantStore();
   const [step, setStep] = useState<Step>("pick");
   const [selectedPhotos, setSelectedPhotos] = useState<PendingPhotoUpload[]>([]);
+  const [rejectedPhotoCount, setRejectedPhotoCount] = useState(0);
   const [homeName, setHomeName] = useState("");
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [isEditingNickname, setIsEditingNickname] = useState(false);
@@ -157,6 +178,69 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   }, [locale, plants]);
 
   const ensureSuggestedNickname = useCallback(() => generatedNicknameRef.current ?? generateNicknameOnce(), [generateNicknameOnce]);
+
+  const cleanupTemporaryPhotos = useCallback(async (photos: PendingPhotoUpload[]) => {
+    await Promise.allSettled(photos.map((photo) => PhotoStorageRepository.deletePhoto(photo.storageId)));
+  }, []);
+
+  const cancelAddPlant = useCallback(() => {
+    if (selectedPhotos.length) {
+      const shouldDiscard = window.confirm(t("addPlant.discardPhotosConfirm"));
+      if (!shouldDiscard) {
+        return;
+      }
+    }
+
+    void cleanupTemporaryPhotos(selectedPhotos);
+    setSelectedPhotos([]);
+    onClose();
+  }, [cleanupTemporaryPhotos, onClose, selectedPhotos, t]);
+
+  const photoDuplicateKey = (photo: PendingPhotoUpload) => `${photo.originalName.trim().toLocaleLowerCase()}::${photo.originalType}::${photo.originalSize}`;
+
+  const appendSelectedPhotos = useCallback(
+    (photos: PendingPhotoUpload[], rejectedFiles: number) => {
+      setSelectedPhotos((current) => {
+        const existingKeys = new Set(current.map(photoDuplicateKey));
+        const nextPhotos = [...current];
+        let rejectedNext = rejectedFiles;
+
+        for (const photo of photos) {
+          const duplicate = existingKeys.has(photoDuplicateKey(photo));
+          const overLimit = nextPhotos.length >= maxSelectedPhotos;
+          if (duplicate || overLimit) {
+            rejectedNext += 1;
+            void PhotoStorageRepository.deletePhoto(photo.storageId);
+            continue;
+          }
+
+          existingKeys.add(photoDuplicateKey(photo));
+          nextPhotos.push({
+            ...photo,
+            isCover: current.some((item) => item.isCover) || nextPhotos.some((item) => item.isCover) ? photo.isCover : nextPhotos.length === 0
+          });
+        }
+
+        setRejectedPhotoCount(rejectedNext);
+        if (nextPhotos.length && !nextPhotos.some((photo) => photo.isCover)) {
+          const preferredCover = nextPhotos.find((photo) => photo.type === "overview") ?? nextPhotos[0];
+          return nextPhotos.map((photo) => ({ ...photo, isCover: photo.id === preferredCover.id }));
+        }
+
+        return nextPhotos;
+      });
+      setStep("review");
+    },
+    []
+  );
+
+  const updateSelectedPhotos = useCallback((photos: PendingPhotoUpload[]) => {
+    setSelectedPhotos(photos);
+  }, []);
+
+  const discardSelectedPhoto = useCallback((photo: PendingPhotoUpload) => {
+    void PhotoStorageRepository.deletePhoto(photo.storageId);
+  }, []);
 
   useEffect(() => {
     const originalOverflow = document.body.style.overflow;
@@ -236,16 +320,32 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
               fileName,
               originalMimeType: blob.type,
               originalSize: blob.size,
-              exifOrientation: null,
+              exifOrientation: photo.orientation.exifOrientation,
               compressedSize: null,
-              originalWidth: null,
-              originalHeight: null,
+              originalWidth: photo.orientation.storedWidth,
+              originalHeight: photo.orientation.storedHeight,
               finalWidth: null,
               finalHeight: null,
+              orientationSource: photo.orientation.orientationSource,
+              physicallyRotated: photo.orientation.physicallyRotated,
+              displayedWidth: photo.orientation.displayedWidth,
+              displayedHeight: photo.orientation.displayedHeight,
               totalOutgoingRequestSize: null,
               includedInRequest: false
             };
             nextPreparationDiagnostics.push(diagnostic);
+            console.info("photo_orientation_stage", {
+              stage: "analysis_indexeddb_read",
+              source: photo.source,
+              fileName,
+              mimeType: blob.type,
+              byteSize: blob.size,
+              width: photo.orientation.storedWidth,
+              height: photo.orientation.storedHeight,
+              exifOrientation: photo.orientation.exifOrientation,
+              physicallyRotated: photo.orientation.physicallyRotated,
+              displayedInUi: `${photo.orientation.displayedWidth ?? "unknown"}x${photo.orientation.displayedHeight ?? "unknown"}`
+            });
 
             let preparedImage: Awaited<ReturnType<typeof prepareImageForAnalysis>>;
             try {
@@ -280,7 +380,22 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             diagnostic.finalWidth = preparedImage.finalWidth;
             diagnostic.finalHeight = preparedImage.finalHeight;
             diagnostic.exifOrientation = preparedImage.exifOrientation;
+            diagnostic.orientationSource = preparedImage.orientationSource;
+            diagnostic.physicallyRotated = preparedImage.physicallyRotated;
             diagnostic.includedInRequest = true;
+            console.info("photo_orientation_stage", {
+              stage: "formdata_openai_upload",
+              source: photo.source,
+              fileName: preparedImage.file.name,
+              mimeType: preparedImage.file.type,
+              byteSize: preparedImage.file.size,
+              width: preparedImage.finalWidth,
+              height: preparedImage.finalHeight,
+              exifOrientation: preparedImage.exifOrientation,
+              orientationSource: preparedImage.orientationSource,
+              physicallyRotated: preparedImage.physicallyRotated,
+              displayedInUi: `${preparedImage.finalWidth}x${preparedImage.finalHeight}`
+            });
             formData.append("photos", preparedImage.file, preparedImage.file.name);
             formData.append("photoTypes", photo.type);
             formData.append("photoSources", photo.source);
@@ -291,6 +406,9 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             formData.append("clientDecodeSucceeded", "true");
             formData.append("clientWidths", String(preparedImage.finalWidth));
             formData.append("clientHeights", String(preparedImage.finalHeight));
+            formData.append("clientExifOrientations", String(preparedImage.exifOrientation ?? ""));
+            formData.append("clientPhysicallyRotated", String(preparedImage.physicallyRotated));
+            formData.append("clientOrientationSources", preparedImage.orientationSource);
           }
         }
         nextPreparationDiagnostics.forEach((diagnostic) => {
@@ -394,10 +512,41 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
 
   if (step === "pick") {
     return (
-      <PhotoUploadFlow
+      <MultiPhotoPicker
         title={t("addPlant.title")}
+        onCancel={cancelAddPlant}
+        onSelect={appendSelectedPhotos}
+      />
+    );
+  }
+
+  if (step === "pick_more") {
+    return (
+      <MultiPhotoPicker
+        title={t("photos.addPhotos")}
+        onCancel={() => setStep("review")}
+        onSelect={appendSelectedPhotos}
+      />
+    );
+  }
+
+  if (step === "review") {
+    return (
+      <PhotoBatchReview
+        initialPhotos={selectedPhotos}
+        photos={selectedPhotos}
         hasExistingCover={false}
-        onCancel={onClose}
+        rejectedCount={rejectedPhotoCount}
+        maxPhotos={maxSelectedPhotos}
+        primaryLabel={t("addPlant.analyzePhotos")}
+        addMoreLabel={selectedPhotos.length ? t("addPlant.addMorePhotos") : t("photos.addPhotos")}
+        emptyTitle={t("addPlant.noPhotosSelected")}
+        emptyText={t("addPlant.noPhotosSelectedText")}
+        limitReachedText={t("addPlant.photoLimitReached")}
+        onPhotosChange={updateSelectedPhotos}
+        onDiscardPhoto={discardSelectedPhoto}
+        onAddMore={() => setStep("pick_more")}
+        onCancel={cancelAddPlant}
         onSave={(photos) => {
           setSelectedPhotos(photos);
           setStep("analysis");
@@ -592,6 +741,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           : undefined
       });
       console.info("plant_save_completed", { plantId });
+      void cleanupTemporaryPhotos(selectedPhotos);
       router.push(`/plants/${plantId}`);
       router.refresh();
       console.info("modal_close_started", { plantId });
@@ -782,7 +932,23 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                 <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
                   {selectedPhotos.map((photo) => (
                     <div key={photo.id} className="relative size-16 shrink-0 overflow-hidden rounded-[16px] bg-[#dde8dc]">
-                      <PhotoImage src={photo.url} alt={t("photos.photoAlt")} className="h-full w-full object-cover" />
+                      <PhotoImage
+                        src={photo.url}
+                        alt={t("photos.photoAlt")}
+                        className="h-full w-full object-cover"
+                        onLoad={() => {
+                          console.info("photo_orientation_stage", {
+                            stage: "add_plant_preview",
+                            source: photo.source,
+                            photoId: photo.id,
+                            width: photo.orientation.storedWidth,
+                            height: photo.orientation.storedHeight,
+                            exifOrientation: photo.orientation.exifOrientation,
+                            physicallyRotated: photo.orientation.physicallyRotated,
+                            displayedInUi: `${photo.orientation.displayedWidth ?? "unknown"}x${photo.orientation.displayedHeight ?? "unknown"}`
+                          });
+                        }}
+                      />
                     </div>
                   ))}
                 </div>
@@ -799,6 +965,9 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
 	                      <p>mime: {diagnostic.originalMimeType || "unknown"}</p>
 	                      <p>original: {diagnostic.originalSize} bytes / {diagnostic.originalWidth ?? "unknown"}x{diagnostic.originalHeight ?? "unknown"}</p>
 	                      <p>exif orientation: {diagnostic.exifOrientation ?? "none"}</p>
+	                      <p>orientation source: {diagnostic.orientationSource ?? "unknown"}</p>
+	                      <p>physically rotated: {String(Boolean(diagnostic.physicallyRotated))}</p>
+	                      <p>displayed: {diagnostic.displayedWidth ?? "unknown"}x{diagnostic.displayedHeight ?? "unknown"}</p>
 	                      <p>normalized: {diagnostic.compressedSize ?? 0} bytes / {diagnostic.finalWidth ?? "unknown"}x{diagnostic.finalHeight ?? "unknown"}</p>
 	                      <p>total request images: {diagnostic.totalOutgoingRequestSize ?? 0} bytes</p>
 	                      <p>request: {diagnostic.httpStatus ?? "none"} / {diagnostic.requestDurationMs ?? 0} ms</p>
@@ -815,8 +984,11 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                     <div key={`${diagnostic.fileName}-${index}`} className="border-t border-[#eee7dc] py-2 first:border-t-0 first:pt-0">
                       <p>source: {diagnostic.source}</p>
                       <p>format: {diagnostic.detectedFormat}</p>
+                      <p>client: {diagnostic.client?.width ?? "unknown"}x{diagnostic.client?.height ?? "unknown"} / exif {diagnostic.client?.exifOrientation ?? "none"} / rotated {String(Boolean(diagnostic.client?.physicallyRotated))}</p>
+                      <p>server decode: {diagnostic.decodedWidth ?? "unknown"}x{diagnostic.decodedHeight ?? "unknown"} / exif {diagnostic.exifOrientation ?? "none"}</p>
+                      <p>server normalized: {diagnostic.normalizedWidth ?? "unknown"}x{diagnostic.normalizedHeight ?? "unknown"}</p>
                       <p>conversion: {diagnostic.conversionStatus}</p>
-                      <p>final: {diagnostic.finalFormat ?? "none"} / {diagnostic.finalSize ?? 0} bytes</p>
+                      <p>final: {diagnostic.finalMimeType ?? "none"} / {diagnostic.finalByteSize ?? 0} bytes</p>
                       <p>included: {String(diagnostic.includedInOpenAIRequest)}</p>
                       {diagnostic.errorCode ? <p>error: {diagnostic.errorCode}</p> : null}
                     </div>
@@ -858,7 +1030,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           </button>
           <button
             type="button"
-            onClick={step === "confirm" ? () => setStep("details") : onClose}
+            onClick={step === "confirm" ? () => setStep("details") : cancelAddPlant}
             disabled={isSaving}
             className="mt-2 min-h-12 w-full rounded-[18px] px-4 text-sm font-extrabold text-[#777167] disabled:opacity-50"
           >

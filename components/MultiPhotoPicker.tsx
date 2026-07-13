@@ -3,7 +3,7 @@
 import { Camera, ImageIcon, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { useI18n } from "@/i18n/I18nProvider";
-import { normalizeImageBlob } from "@/lib/client-image-normalization";
+import { normalizeImageBlob, readJpegExifOrientation } from "@/lib/client-image-normalization";
 import { PhotoStorageRepository, validateImageFile } from "@/lib/photo-storage";
 import type { PendingPhotoUpload } from "./photo-upload-types";
 
@@ -38,6 +38,13 @@ async function inspectImageFile(file: File): Promise<PendingPhotoUpload["decode"
   }
 }
 
+function logPhotoStage(stage: string, payload: Record<string, unknown>) {
+  console.info("photo_orientation_stage", {
+    stage,
+    ...payload
+  });
+}
+
 export function MultiPhotoPicker({
   title,
   onCancel,
@@ -63,20 +70,66 @@ export function MultiPhotoPicker({
 
     setIsSaving(true);
     const validFiles = selectedFiles.filter(validateImageFile);
-    const rejectedCount = selectedFiles.length - validFiles.length;
+    let rejectedCount = selectedFiles.length - validFiles.length;
 
     try {
-      const savedPhotos = await Promise.all(
+      const savedPhotoResults: (PendingPhotoUpload | null)[] = await Promise.all(
         validFiles.map(async (file, index) => {
-          let fileToStore: File = file;
+          const [originalDecode, originalExifOrientation] = await Promise.all([inspectImageFile(file), readJpegExifOrientation(file)]);
+          logPhotoStage("photos_picker_selected", {
+            source,
+            fileName: file.name,
+            mimeType: file.type,
+            byteSize: file.size,
+            width: originalDecode.width,
+            height: originalDecode.height,
+            exifOrientation: originalExifOrientation,
+            physicallyRotated: false,
+            displayedInUi: originalDecode.succeeded ? `${originalDecode.width}x${originalDecode.height}` : "decode_failed"
+          });
+
+          let normalized: Awaited<ReturnType<typeof normalizeImageBlob>>;
           try {
-            const normalized = await normalizeImageBlob(file, { maxSide: 2400, qualities: [0.9, 0.86] });
-            fileToStore = new File([normalized.blob], `${file.name.replace(/\.[^.]+$/, "") || "plant-photo"}.jpg`, { type: "image/jpeg" });
-          } catch {
-            fileToStore = file;
+            normalized = await normalizeImageBlob(file, { maxSide: 2400, qualities: [0.9, 0.86] });
+          } catch (error) {
+            rejectedCount += 1;
+            console.warn("photo_orientation_stage", {
+              stage: "jpeg_normalization_failed",
+              source,
+              fileName: file.name,
+              message: error instanceof Error ? error.message : "image_preparation_failed"
+            });
+            return null;
           }
+
+          const fileToStore = new File([normalized.blob], `${file.name.replace(/\.[^.]+$/, "") || "plant-photo"}.jpg`, { type: "image/jpeg" });
+          logPhotoStage("jpeg_saved_for_storage", {
+            source,
+            fileName: fileToStore.name,
+            mimeType: fileToStore.type,
+            byteSize: fileToStore.size,
+            width: normalized.normalizedWidth,
+            height: normalized.normalizedHeight,
+            exifOrientation: normalized.exifOrientation,
+            orientationSource: normalized.orientationSource,
+            physicallyRotated: normalized.physicallyRotated,
+            displayedInUi: `${normalized.normalizedWidth}x${normalized.normalizedHeight}`
+          });
+
           const storedPhoto = await PhotoStorageRepository.savePhoto(fileToStore);
           const decode = await inspectImageFile(fileToStore);
+          logPhotoStage("indexeddb_saved_photo", {
+            source,
+            storageId: storedPhoto.id,
+            mimeType: fileToStore.type,
+            byteSize: fileToStore.size,
+            width: decode.width,
+            height: decode.height,
+            exifOrientation: null,
+            physicallyRotated: normalized.physicallyRotated,
+            displayedInUi: decode.succeeded ? `${decode.width}x${decode.height}` : "decode_failed"
+          });
+
           return {
             id: storedPhoto.id,
             storageId: storedPhoto.id,
@@ -86,12 +139,22 @@ export function MultiPhotoPicker({
             originalSize: file.size,
             originalExtension: getFileExtension(file.name),
             decode,
+            orientation: {
+              exifOrientation: normalized.exifOrientation,
+              orientationSource: normalized.orientationSource,
+              physicallyRotated: normalized.physicallyRotated,
+              storedWidth: normalized.normalizedWidth,
+              storedHeight: normalized.normalizedHeight,
+              displayedWidth: decode.width,
+              displayedHeight: decode.height
+            },
             url: `photo://${storedPhoto.id}`,
             type: index === 0 ? "overview" : "other",
             isCover: false
           } satisfies PendingPhotoUpload;
         })
       );
+      const savedPhotos = savedPhotoResults.filter((photo): photo is PendingPhotoUpload => photo !== null);
 
       if (!savedPhotos.length) {
         setError(t("photos.fileError"));

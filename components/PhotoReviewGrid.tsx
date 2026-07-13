@@ -10,6 +10,15 @@ export type PhotoReviewItem = {
   id: string;
   url: string;
   thumbnailUrl?: string;
+  source?: "camera" | "gallery";
+  orientation?: {
+    exifOrientation: number | null;
+    physicallyRotated: boolean;
+    storedWidth: number | null;
+    storedHeight: number | null;
+    displayedWidth: number | null;
+    displayedHeight: number | null;
+  };
   type: PhotoType;
   isCover: boolean;
 };
@@ -32,7 +41,24 @@ export function PhotoReviewGrid({
       {photos.map((photo) => (
         <div key={photo.id} className="rounded-[22px] bg-white/55 p-2 shadow-[0_1px_7px_rgba(0,0,0,0.035)]">
           <div className="relative aspect-square overflow-hidden rounded-[18px] bg-[#dde8dc]">
-            <PhotoImage src={photo.thumbnailUrl ?? photo.url} alt={t("photos.photoAlt")} className="h-full w-full object-cover" />
+            <PhotoImage
+              src={photo.thumbnailUrl ?? photo.url}
+              alt={t("photos.photoAlt")}
+              className="h-full w-full object-cover"
+              onLoad={() => {
+                if (!photo.orientation) return;
+                console.info("photo_orientation_stage", {
+                  stage: "photo_manager_preview",
+                  source: photo.source ?? "unknown",
+                  photoId: photo.id,
+                  width: photo.orientation.storedWidth,
+                  height: photo.orientation.storedHeight,
+                  exifOrientation: photo.orientation.exifOrientation,
+                  physicallyRotated: photo.orientation.physicallyRotated,
+                  displayedInUi: `${photo.orientation.displayedWidth ?? "unknown"}x${photo.orientation.displayedHeight ?? "unknown"}`
+                });
+              }}
+            />
             <button
               type="button"
               onClick={() => onRemovePhoto(photo.id)}

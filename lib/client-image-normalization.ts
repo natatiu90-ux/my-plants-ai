@@ -7,6 +7,8 @@ export type NormalizedImageResult = {
   normalizedWidth: number;
   normalizedHeight: number;
   exifOrientation: number | null;
+  orientationSource: "raw_pixels" | "browser_display";
+  physicallyRotated: boolean;
 };
 
 function getUint16(view: DataView, offset: number, littleEndian: boolean) {
@@ -83,6 +85,33 @@ export async function readJpegExifOrientation(blob: Blob): Promise<number | null
   return null;
 }
 
+export async function inspectImageDisplay(blob: Blob): Promise<{ succeeded: boolean; width: number | null; height: number | null }> {
+  const objectUrl = URL.createObjectURL(blob);
+  const image = new Image();
+
+  try {
+    const dimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+      image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+      image.onerror = () => reject(new Error("decode_failed"));
+      image.src = objectUrl;
+    });
+
+    return {
+      succeeded: true,
+      width: dimensions.width,
+      height: dimensions.height
+    };
+  } catch {
+    return {
+      succeeded: false,
+      width: null,
+      height: null
+    };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 function canvasToJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
@@ -99,12 +128,23 @@ function canvasToJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob>
   });
 }
 
-async function loadBitmap(blob: Blob) {
+type LoadedImage = {
+  image: ImageBitmap | HTMLImageElement;
+  orientationSource: "raw_pixels" | "browser_display";
+};
+
+async function loadBitmap(blob: Blob): Promise<LoadedImage> {
   if ("createImageBitmap" in window) {
     try {
-      return await createImageBitmap(blob, { imageOrientation: "none" });
+      return {
+        image: await createImageBitmap(blob, { imageOrientation: "none" }),
+        orientationSource: "raw_pixels"
+      };
     } catch {
-      return await createImageBitmap(blob);
+      return {
+        image: await createImageBitmap(blob),
+        orientationSource: "browser_display"
+      };
     }
   }
 
@@ -117,7 +157,7 @@ async function loadBitmap(blob: Blob) {
       image.onerror = () => reject(new Error("image_preparation_failed"));
       image.src = objectUrl;
     });
-    return image;
+    return { image, orientationSource: "browser_display" };
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
@@ -187,7 +227,8 @@ export async function normalizeImageBlob(
 ): Promise<NormalizedImageResult> {
   const exifOrientation = await readJpegExifOrientation(blob);
   const orientation = exifOrientation ?? 1;
-  const bitmap = await loadBitmap(blob);
+  const loaded = await loadBitmap(blob);
+  const bitmap = loaded.image;
 
   try {
     const { width: sourceWidth, height: sourceHeight } = imageDimensions(bitmap);
@@ -195,7 +236,8 @@ export async function normalizeImageBlob(
       throw new Error("image_preparation_failed");
     }
 
-    const swapsDimensions = orientation >= 5 && orientation <= 8;
+    const shouldApplyExifOrientation = loaded.orientationSource === "raw_pixels";
+    const swapsDimensions = shouldApplyExifOrientation && orientation >= 5 && orientation <= 8;
     const visualWidth = swapsDimensions ? sourceHeight : sourceWidth;
     const visualHeight = swapsDimensions ? sourceWidth : sourceHeight;
     const scale = Math.min(1, options.maxSide / Math.max(visualWidth, visualHeight));
@@ -213,7 +255,11 @@ export async function normalizeImageBlob(
     context.fillRect(0, 0, normalizedWidth, normalizedHeight);
     context.save();
     context.scale(scale, scale);
-    drawWithOrientation(context, bitmap, visualWidth, visualHeight, orientation);
+    if (shouldApplyExifOrientation) {
+      drawWithOrientation(context, bitmap, visualWidth, visualHeight, orientation);
+    } else {
+      context.drawImage(bitmap, 0, 0);
+    }
     context.restore();
 
     let bestBlob: Blob | null = null;
@@ -235,7 +281,9 @@ export async function normalizeImageBlob(
       originalHeight: sourceHeight,
       normalizedWidth,
       normalizedHeight,
-      exifOrientation
+      exifOrientation,
+      orientationSource: loaded.orientationSource,
+      physicallyRotated: true
     };
   } finally {
     closeBitmap(bitmap);

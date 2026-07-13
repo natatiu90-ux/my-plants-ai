@@ -42,6 +42,9 @@ type ImageDiagnostic = {
     decodingSucceeded: boolean | null;
     width: number | null;
     height: number | null;
+    exifOrientation: number | null;
+    physicallyRotated: boolean | null;
+    orientationSource: string | null;
   };
 };
 
@@ -250,6 +253,9 @@ export async function POST(request: Request) {
   const clientDecodeSucceeded = formData.getAll("clientDecodeSucceeded");
   const clientWidths = formData.getAll("clientWidths");
   const clientHeights = formData.getAll("clientHeights");
+  const clientExifOrientations = formData.getAll("clientExifOrientations");
+  const clientPhysicallyRotated = formData.getAll("clientPhysicallyRotated");
+  const clientOrientationSources = formData.getAll("clientOrientationSources").map(String);
   const diagnostics: ImageDiagnostic[] = files.map((file, index) => ({
     source: photoSources[index] ?? "unknown",
     fileName: file.name || clientFileNames[index] || "unknown",
@@ -274,7 +280,10 @@ export async function POST(request: Request) {
       byteSize: parseNumber(clientByteSizes[index] ?? null),
       decodingSucceeded: parseBoolean(clientDecodeSucceeded[index] ?? null),
       width: parseNumber(clientWidths[index] ?? null),
-      height: parseNumber(clientHeights[index] ?? null)
+      height: parseNumber(clientHeights[index] ?? null),
+      exifOrientation: parseNumber(clientExifOrientations[index] ?? null),
+      physicallyRotated: parseBoolean(clientPhysicallyRotated[index] ?? null),
+      orientationSource: clientOrientationSources[index] || null
     }
   }));
 
@@ -348,6 +357,9 @@ export async function POST(request: Request) {
         decodedWidth: diagnostic.decodedWidth,
         decodedHeight: diagnostic.decodedHeight,
         exifOrientation: diagnostic.exifOrientation,
+        clientExifOrientation: diagnostic.client?.exifOrientation,
+        clientPhysicallyRotated: diagnostic.client?.physicallyRotated,
+        clientOrientationSource: diagnostic.client?.orientationSource,
         normalizedWidth: diagnostic.normalizedWidth,
         normalizedHeight: diagnostic.normalizedHeight,
         conversionStatus: diagnostic.conversionStatus,
