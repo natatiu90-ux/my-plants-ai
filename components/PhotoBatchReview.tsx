@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useI18n } from "@/i18n/I18nProvider";
+import { rotateImageBlob, type ImageRotationDegrees } from "@/lib/client-image-normalization";
+import { PhotoStorageRepository } from "@/lib/photo-storage";
 import { PhotoReviewGrid } from "./PhotoReviewGrid";
 import type { PendingPhotoUpload } from "./photo-upload-types";
 
@@ -45,6 +47,7 @@ export function PhotoBatchReview({
       isCover: !hasExistingCover && index === 0
     }))
   );
+  const [rotatingPhotoId, setRotatingPhotoId] = useState<string | null>(null);
   const photos = controlledPhotos ?? internalPhotos;
   const isAtLimit = typeof maxPhotos === "number" && photos.length >= maxPhotos;
 
@@ -76,6 +79,68 @@ export function PhotoBatchReview({
 
   const selectCover = (photoId: string) => {
     applyPhotos((current) => current.map((photo) => ({ ...photo, isCover: photo.id === photoId })));
+  };
+
+  const rotatePhoto = async (photoId: string, degrees: ImageRotationDegrees) => {
+    if (rotatingPhotoId) {
+      return;
+    }
+
+    const photo = photos.find((item) => item.id === photoId);
+    if (!photo) {
+      return;
+    }
+
+    setRotatingPhotoId(photoId);
+    try {
+      const blob = await PhotoStorageRepository.getPhoto(photo.storageId);
+      if (!blob) {
+        return;
+      }
+
+      const rotated = await rotateImageBlob(blob, degrees);
+      const fileName = `${photo.originalName.replace(/\.[^.]+$/, "") || "plant-photo"}.jpg`;
+      const rotatedFile = new File([rotated.blob], fileName, { type: "image/jpeg" });
+      await PhotoStorageRepository.replacePhoto(photo.storageId, rotatedFile);
+      const nextUrl = `photo://${photo.storageId}?v=${Date.now()}`;
+
+      updatePhoto(photoId, {
+        url: nextUrl,
+        decode: {
+          succeeded: true,
+          width: rotated.width,
+          height: rotated.height
+        },
+        orientation: {
+          exifOrientation: rotated.exifOrientation,
+          orientationSource: "raw_pixels",
+          physicallyRotated: rotated.exifOrientation == null || rotated.exifOrientation === 1,
+          storedWidth: rotated.width,
+          storedHeight: rotated.height,
+          displayedWidth: rotated.width,
+          displayedHeight: rotated.height
+        }
+      });
+
+      if (process.env.NODE_ENV !== "production") {
+        console.info("photo_orientation_stage", {
+          stage: "manual_rotation_saved",
+          debugId: photo.debugId,
+          source: photo.source,
+          degrees,
+          storageId: photo.storageId,
+          mimeType: rotatedFile.type,
+          byteSize: rotatedFile.size,
+          width: rotated.width,
+          height: rotated.height,
+          exifOrientation: rotated.exifOrientation,
+          physicallyRotated: rotated.exifOrientation == null || rotated.exifOrientation === 1,
+          displayedInUi: `${rotated.width}x${rotated.height}`
+        });
+      }
+    } finally {
+      setRotatingPhotoId(null);
+    }
   };
 
   const removePhoto = (photoId: string) => {
@@ -118,6 +183,8 @@ export function PhotoBatchReview({
               onChangeType={(photoId, type) => updatePhoto(photoId, { type })}
               onRemovePhoto={removePhoto}
               onSelectCover={selectCover}
+              onRotatePhoto={rotatePhoto}
+              rotatingPhotoId={rotatingPhotoId}
             />
           ) : (
             <div className="rounded-[22px] bg-white/60 p-5 text-center">

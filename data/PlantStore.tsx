@@ -30,7 +30,7 @@ type AddPlantInput = {
   coverPhotoUrl?: string;
   notes?: string;
   lastWateredAt?: string;
-  photos?: { url: string; type: PhotoType; isCover?: boolean }[];
+  photos?: { url: string; type: PhotoType; isCover?: boolean; debugId?: string }[];
   analysis?: {
     detectedSpecies?: string | null;
     confidence?: number | null;
@@ -62,8 +62,8 @@ type PlantStoreValue = PlantState & {
   addRoom: (name: string) => Promise<Room>;
   deleteRoom: (roomId: string, replacementRoomKey?: Plant["roomKey"]) => Promise<void>;
   roomExists: (name: string) => boolean;
-  addPlantPhoto: (plantId: string, input: { url: string; type: PhotoType; isCover?: boolean }) => Promise<PlantPhoto | undefined>;
-  addPlantPhotos: (plantId: string, inputs: { url: string; type: PhotoType; isCover?: boolean }[]) => Promise<PlantPhoto[]>;
+  addPlantPhoto: (plantId: string, input: { url: string; type: PhotoType; isCover?: boolean; debugId?: string }) => Promise<PlantPhoto | undefined>;
+  addPlantPhotos: (plantId: string, inputs: { url: string; type: PhotoType; isCover?: boolean; debugId?: string }[]) => Promise<PlantPhoto[]>;
   setCoverPhoto: (plantId: string, photoId: string) => Promise<void>;
   updatePhotoType: (photoId: string, type: PhotoType) => Promise<void>;
   deletePlantPhoto: (plantId: string, photoId: string) => Promise<"deleted" | "only-photo">;

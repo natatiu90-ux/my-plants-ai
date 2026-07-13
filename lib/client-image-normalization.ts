@@ -319,3 +319,77 @@ export async function normalizeImageBlob(
     closeBitmap(bitmap);
   }
 }
+
+export type ImageRotationDegrees = -90 | 90 | 180 | 270;
+
+function normalizedRotation(degrees: ImageRotationDegrees) {
+  return ((degrees % 360) + 360) % 360;
+}
+
+export async function rotateImageBlob(blob: Blob, degrees: ImageRotationDegrees): Promise<{
+  blob: Blob;
+  width: number;
+  height: number;
+  exifOrientation: number | null;
+}> {
+  const normalized = await normalizeImageBlob(blob, {
+    maxSide: 1600,
+    qualities: [0.82, 0.78, 0.75, 0.7, 0.66, 0.62],
+    targetBytes: 500 * 1024
+  });
+  const baseBitmap = await loadBitmap(normalized.blob);
+  const bitmap = baseBitmap.image;
+
+  try {
+    const { width, height } = imageDimensions(bitmap);
+    if (!width || !height) {
+      throw new Error("image_preparation_failed");
+    }
+
+    const rotation = normalizedRotation(degrees);
+    const swapsDimensions = rotation === 90 || rotation === 270;
+    const canvas = document.createElement("canvas");
+    canvas.width = swapsDimensions ? height : width;
+    canvas.height = swapsDimensions ? width : height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("image_preparation_failed");
+    }
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    if (rotation === 90) {
+      context.translate(canvas.width, 0);
+      context.rotate(0.5 * Math.PI);
+    } else if (rotation === 180) {
+      context.translate(canvas.width, canvas.height);
+      context.rotate(Math.PI);
+    } else if (rotation === 270) {
+      context.translate(0, canvas.height);
+      context.rotate(-0.5 * Math.PI);
+    }
+    context.drawImage(bitmap, 0, 0);
+
+    let bestBlob: Blob | null = null;
+    for (const quality of [0.82, 0.78, 0.75, 0.7, 0.66, 0.62]) {
+      const candidate = await canvasToJpeg(canvas, quality);
+      bestBlob = candidate;
+      if (candidate.size <= 500 * 1024) {
+        break;
+      }
+    }
+
+    if (!bestBlob) {
+      throw new Error("image_preparation_failed");
+    }
+
+    return {
+      blob: bestBlob,
+      width: canvas.width,
+      height: canvas.height,
+      exifOrientation: await readJpegExifOrientation(bestBlob)
+    };
+  } finally {
+    closeBitmap(bitmap);
+  }
+}

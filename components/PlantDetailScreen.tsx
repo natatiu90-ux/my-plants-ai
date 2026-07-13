@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
 import { plantDisplayName } from "@/lib/plant-display";
+import { eligiblePrimaryCareAction, shouldShowSoilCheckAction } from "@/lib/plant-action-eligibility";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
 import { CareHistory } from "./CareHistory";
 import { CareSummary } from "./CareSummary";
@@ -61,14 +62,20 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     logNavigationEvent("detail", plantId, "detail_shell_rendered");
   }, [plantId]);
 
+  const primaryCareAction = plant ? eligiblePrimaryCareAction(plant, hypothesisResolutions) : null;
+  const primaryActionPlant = useMemo(() => (plant ? { ...plant, nextAction: primaryCareAction } : plant), [plant, primaryCareAction]);
+
   useEffect(() => {
     const action = searchParams.get("action");
     if (action !== "check_soil" || openedActionRef.current === `${plantId}:${action}`) {
       return;
     }
+    if (plant && !shouldShowSoilCheckAction(plant, hypothesisResolutions)) {
+      return;
+    }
     openedActionRef.current = `${plantId}:${action}`;
     setSheet("check_soil");
-  }, [plantId, searchParams]);
+  }, [hypothesisResolutions, plant, plantId, searchParams]);
 
   useEffect(() => {
     if (!plant || loggedEvents.current.has("plant_data_ready")) {
@@ -137,11 +144,11 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       return;
     }
 
-    if (plant.nextAction === "water") {
+    if (primaryCareAction === "water") {
       void completeWatering();
-    } else if (plant.nextAction === "check_soil") {
+    } else if (primaryCareAction === "check_soil") {
       setSheet("check_soil");
-    } else if (plant.nextAction === "take_photo") {
+    } else if (primaryCareAction === "take_photo") {
       setSheet("add_photo");
     }
   };
@@ -152,7 +159,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   };
 
   return (
-    <main className={`mx-auto min-h-screen w-full max-w-[430px] bg-cream px-5 ${plant.nextAction ? "pb-[calc(9rem+env(safe-area-inset-bottom))]" : "pb-10"}`}>
+    <main className={`mx-auto min-h-screen w-full max-w-[430px] bg-cream px-5 ${primaryCareAction ? "pb-[calc(9rem+env(safe-area-inset-bottom))]" : "pb-10"}`}>
       <PlantDetailHeader
         title={plantName}
         isMenuOpen={isMenuOpen}
@@ -194,7 +201,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       <PhotoGallery photos={photos} onAddPhoto={() => setSheet("add_photo")} />
       <CareHistory milestones={milestones} onAddEvent={() => setSheet("add_event")} />
 
-      <PrimaryCareAction plant={plant} onAction={openPrimaryAction} disabled={isCompletingAction} />
+      {primaryActionPlant ? <PrimaryCareAction plant={primaryActionPlant} onAction={openPrimaryAction} disabled={isCompletingAction} /> : null}
       {sheet === "check_soil" ? (
         <CheckSoilSheet
           onClose={() => setSheet(null)}

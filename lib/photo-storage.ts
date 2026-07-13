@@ -41,6 +41,17 @@ export const PhotoStorageRepository = {
     return { id, localUrl: URL.createObjectURL(file) };
   },
 
+  async replacePhoto(id: string, file: File): Promise<void> {
+    const db = await openDb();
+
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(storeName, "readwrite");
+      transaction.objectStore(storeName).put(file, id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  },
+
   async getPhoto(id: string): Promise<Blob | null> {
     const db = await openDb();
 

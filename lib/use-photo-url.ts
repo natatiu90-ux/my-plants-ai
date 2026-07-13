@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import { PhotoStorageRepository } from "./photo-storage";
 
+function storageIdFromPhotoUrl(url: string) {
+  return url.replace("photo://", "").split(/[?#]/)[0];
+}
+
 export function usePhotoUrl(url: string) {
   const [resolvedUrl, setResolvedUrl] = useState(url);
 
@@ -16,7 +20,7 @@ export function usePhotoUrl(url: string) {
         return;
       }
 
-      const blob = await PhotoStorageRepository.getPhoto(url.replace("photo://", ""));
+      const blob = await PhotoStorageRepository.getPhoto(storageIdFromPhotoUrl(url));
       if (!blob || !isMounted) {
         return;
       }

@@ -1,6 +1,7 @@
 "use client";
 
-import { Star, Trash2 } from "lucide-react";
+import { RotateCcw, RotateCw, Star, Trash2 } from "lucide-react";
+import type { ImageRotationDegrees } from "@/lib/client-image-normalization";
 import type { PhotoType } from "@/types/plant";
 import { useI18n } from "@/i18n/I18nProvider";
 import { PhotoImage } from "./PhotoImage";
@@ -8,6 +9,7 @@ import { PhotoTypeSelector } from "./PhotoTypeSelector";
 
 export type PhotoReviewItem = {
   id: string;
+  debugId?: string;
   url: string;
   thumbnailUrl?: string;
   source?: "camera" | "gallery";
@@ -27,14 +29,19 @@ export function PhotoReviewGrid({
   photos,
   onChangeType,
   onRemovePhoto,
-  onSelectCover
+  onSelectCover,
+  onRotatePhoto,
+  rotatingPhotoId
 }: {
   photos: PhotoReviewItem[];
   onChangeType: (photoId: string, type: PhotoType) => void;
   onRemovePhoto: (photoId: string) => void;
   onSelectCover: (photoId: string) => void;
+  onRotatePhoto?: (photoId: string, degrees: ImageRotationDegrees) => void;
+  rotatingPhotoId?: string | null;
 }) {
   const { t } = useI18n();
+  const isAnyPhotoRotating = rotatingPhotoId != null;
 
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -51,6 +58,7 @@ export function PhotoReviewGrid({
                   stage: "photo_manager_preview",
                   source: photo.source ?? "unknown",
                   photoId: photo.id,
+                  debugId: photo.debugId,
                   width: photo.orientation.storedWidth,
                   height: photo.orientation.storedHeight,
                   exifOrientation: photo.orientation.exifOrientation,
@@ -59,14 +67,43 @@ export function PhotoReviewGrid({
                 });
               }}
             />
-            <button
-              type="button"
-              onClick={() => onRemovePhoto(photo.id)}
-              aria-label={t("photos.removePhoto")}
-              className="absolute right-2 top-2 flex size-8 items-center justify-center rounded-full bg-white/90 text-[#a13445] shadow-[0_1px_8px_rgba(0,0,0,0.12)]"
-            >
-              <Trash2 aria-hidden="true" size={14} />
-            </button>
+            <div className="absolute right-2 top-2 flex gap-1.5">
+              {onRotatePhoto ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => onRotatePhoto(photo.id, -90)}
+                    disabled={isAnyPhotoRotating}
+                    aria-label={t("photos.rotateLeft")}
+                    className={`flex size-8 items-center justify-center rounded-full bg-white/90 text-[#4f6f58] shadow-[0_1px_8px_rgba(0,0,0,0.12)] disabled:opacity-60 ${
+                      rotatingPhotoId === photo.id ? "animate-pulse" : ""
+                    }`}
+                  >
+                    <RotateCcw aria-hidden="true" size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRotatePhoto(photo.id, 90)}
+                    disabled={isAnyPhotoRotating}
+                    aria-label={t("photos.rotateRight")}
+                    className={`flex size-8 items-center justify-center rounded-full bg-white/90 text-[#4f6f58] shadow-[0_1px_8px_rgba(0,0,0,0.12)] disabled:opacity-60 ${
+                      rotatingPhotoId === photo.id ? "animate-pulse" : ""
+                    }`}
+                  >
+                    <RotateCw aria-hidden="true" size={14} />
+                  </button>
+                </>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => onRemovePhoto(photo.id)}
+                disabled={rotatingPhotoId === photo.id}
+                aria-label={t("photos.removePhoto")}
+                className="flex size-8 items-center justify-center rounded-full bg-white/90 text-[#a13445] shadow-[0_1px_8px_rgba(0,0,0,0.12)] disabled:opacity-60"
+              >
+                <Trash2 aria-hidden="true" size={14} />
+              </button>
+            </div>
           </div>
           <div className="mt-2 grid gap-2">
             <PhotoTypeSelector value={photo.type} onChange={(type) => onChangeType(photo.id, type)} />
