@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
@@ -60,8 +60,8 @@ const analysisImageTargetBytes = 500 * 1024;
 const analysisRequestTargetBytes = 3 * 1024 * 1024;
 const analysisJpegQualities = [0.78, 0.75, 0.72, 0.68];
 const defaultNicknames = {
-  en: ["Sprout", "Leafy", "Bud", "Green Buddy", "Mister Leaf", "Professor Chlorophyll", "Sunny", "Little Green"],
-  ru: ["Кустик", "Листик", "Ростик", "Зелёныш", "Плюш", "Листун", "Зелёный друг", "Мистер Лист", "Профессор Хлорофилл"]
+  en: ["Sprout", "Pebble", "Mochi", "Button", "Pickle", "Clover", "Poppy", "Bean", "Sunny", "Olive", "Noodle", "Dot", "Minty", "Pumpkin", "Biscuit", "Twiggy"],
+  ru: ["Плюша", "Листик", "Кнопка", "Пышка", "Ростик", "Зелёныш", "Фисташка", "Плющинка", "Бублик", "Капля", "Мята", "Печенька", "Пуговка", "Тучка", "Крошка", "Лапка"]
 };
 
 function localizedCommonName(analysis: PlantAnalysis, locale: "en" | "ru") {
@@ -81,7 +81,16 @@ function localizedCommonName(analysis: PlantAnalysis, locale: "en" | "ru") {
 function suggestedNickname(locale: "en" | "ru", existingNames: string[]) {
   const names = defaultNicknames[locale];
   const normalizedExisting = new Set(existingNames.map((name) => name.trim().toLocaleLowerCase()).filter(Boolean));
-  return names.find((name) => !normalizedExisting.has(name.toLocaleLowerCase())) ?? names[0];
+  const startIndex = Math.floor(Math.random() * names.length);
+
+  for (let offset = 0; offset < names.length; offset += 1) {
+    const name = names[(startIndex + offset) % names.length];
+    if (!normalizedExisting.has(name.toLocaleLowerCase())) {
+      return name;
+    }
+  }
+
+  return names[Math.floor(Math.random() * names.length)];
 }
 
 function loadImageFromBlob(blob: Blob): Promise<{ image: HTMLImageElement; objectUrl: string }> {
@@ -174,6 +183,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [homeName, setHomeName] = useState("");
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [isEditingNickname, setIsEditingNickname] = useState(false);
+  const [isConfirmingNicknameRegeneration, setIsConfirmingNicknameRegeneration] = useState(false);
   const [speciesName, setSpeciesName] = useState("");
   const [scientificName, setScientificName] = useState("");
   const [roomKey, setRoomKey] = useState<string | undefined>();
@@ -191,6 +201,16 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [showLongAnalysisHint, setShowLongAnalysisHint] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const nicknameInputRef = useRef<HTMLInputElement>(null);
+  const generatedNicknameRef = useRef<string | null>(null);
+
+  const generateNicknameOnce = useCallback((extraExistingNames: string[] = []) => {
+    const existingNames = [...plants.map((plant) => plant.homeName ?? ""), ...extraExistingNames];
+    const nickname = suggestedNickname(locale, existingNames);
+    generatedNicknameRef.current = nickname;
+    return nickname;
+  }, [locale, plants]);
+
+  const ensureSuggestedNickname = useCallback(() => generatedNicknameRef.current ?? generateNicknameOnce(), [generateNicknameOnce]);
 
   useEffect(() => {
     const originalOverflow = document.body.style.overflow;
@@ -353,13 +373,16 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         const nextSpeciesName = localizedCommonName(nextAnalysis, locale) || commonNameFromScientificName(nextScientificName);
         setSpeciesName(nextSpeciesName);
         setScientificName(nextScientificName);
-        setHomeName((current) => current || suggestedNickname(locale, plants.map((plant) => plant.homeName ?? "")));
+        setHomeName((current) => current || ensureSuggestedNickname());
       } catch (error) {
         if (isMounted) {
           setAnalysisFailed(true);
           setAnalysisErrorCode(error instanceof Error ? error.message : "analysis_failed");
         }
       } finally {
+        if (isMounted) {
+          setHomeName((current) => current || ensureSuggestedNickname());
+        }
         await finishAnalysisSheet();
       }
     }
@@ -371,7 +394,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       stageTimers.forEach((timer) => window.clearTimeout(timer));
       window.clearTimeout(longAnalysisTimer);
     };
-  }, [locale, plants, selectedPhotos, step]);
+  }, [ensureSuggestedNickname, locale, selectedPhotos, step]);
 
   const analysisStages = [
     t("addPlant.uploadingPhotos"),
@@ -472,19 +495,35 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   };
 
   const startNicknameEdit = () => {
-    setNicknameDraft(homeName || suggestedNickname(locale, plants.map((plant) => plant.homeName ?? "")));
+    setNicknameDraft(homeName);
+    setIsConfirmingNicknameRegeneration(false);
     setIsEditingNickname(true);
   };
 
   const saveNicknameEdit = () => {
-    const nextNickname = cleanPlantName(nicknameDraft) || suggestedNickname(locale, plants.map((plant) => plant.homeName ?? ""));
+    const nextNickname = cleanPlantName(nicknameDraft);
+    if (!nextNickname) {
+      setIsConfirmingNicknameRegeneration(true);
+      return;
+    }
     setHomeName(nextNickname);
     setNicknameDraft(nextNickname);
+    setIsConfirmingNicknameRegeneration(false);
+    setIsEditingNickname(false);
+  };
+
+  const generateReplacementNickname = () => {
+    const previousNickname = cleanPlantName(homeName);
+    const nextNickname = generateNicknameOnce(previousNickname ? [previousNickname] : []);
+    setHomeName(nextNickname);
+    setNicknameDraft(nextNickname);
+    setIsConfirmingNicknameRegeneration(false);
     setIsEditingNickname(false);
   };
 
   const cancelNicknameEdit = () => {
     setNicknameDraft(homeName);
+    setIsConfirmingNicknameRegeneration(false);
     setIsEditingNickname(false);
   };
 
@@ -516,7 +555,17 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         speciesName: displayCommonName,
         hasScientificName: Boolean(displayScientificName)
       });
-      const savedNickname = cleanPlantName(homeName) || suggestedNickname(locale, plants.map((plant) => plant.homeName ?? ""));
+      let savedNickname = cleanPlantName(homeName);
+      if (!savedNickname) {
+        const shouldGenerateNickname = window.confirm(t("addPlant.generateNicknameConfirm"));
+        if (!shouldGenerateNickname) {
+          setSubmitError(t("addPlant.nicknameEmpty"));
+          setIsSaving(false);
+          return;
+        }
+        savedNickname = generateNicknameOnce();
+        setHomeName(savedNickname);
+      }
       const savedCommonName = cleanPlantName(speciesName) || commonNameFromScientificName(displayScientificName);
       const plantId = await addPlant({
         homeName: savedNickname,
@@ -615,6 +664,14 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                           {t("plantDetail.cancel")}
                         </button>
                       </div>
+                      {isConfirmingNicknameRegeneration ? (
+                        <div className="mt-3 rounded-[16px] bg-[#fff8e8] p-3">
+                          <p className="text-sm font-bold leading-5 text-[#7a623d]">{t("addPlant.nicknameEmptyPrompt")}</p>
+                          <button type="button" onClick={generateReplacementNickname} className="mt-2 min-h-10 rounded-[16px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
+                            {t("addPlant.generateNickname")}
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   ) : (
                     <div className="mt-1 flex items-center justify-between gap-3">
