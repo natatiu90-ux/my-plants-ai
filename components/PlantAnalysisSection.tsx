@@ -8,7 +8,7 @@ import type { TranslationKey } from "@/i18n/dictionaries";
 import type { Plant, PlantAnalysisRecord, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone } from "@/types/plant";
 
 type HypothesisView = {
-  id: PlantHypothesis;
+  id: PlantHypothesis | "recent_repotting_context";
   confidence: number;
   text: string;
   status: "active" | "confirmed" | "ruled_out";
@@ -97,13 +97,13 @@ function classifyObservation(item: string, t: (key: TranslationKey) => string) {
 function checkedFactForResolution(resolution: PlantHypothesisResolution | undefined, t: (key: TranslationKey) => string) {
   if (!resolution) return "";
 
-  if (resolution.hypothesis === "old_compacted_soil") {
+  if (resolution.hypothesis === "repotting") {
     if (resolution.userResult === "recently") return t("plantAnalysis.checkedRepotRecently");
     if (resolution.userResult === "long_ago") return t("plantAnalysis.checkedRepotLongAgo");
     return t("plantAnalysis.checkedRepotUnsure");
   }
 
-  if (resolution.hypothesis === "watering") {
+  if (resolution.hypothesis === "soil_condition") {
     if (resolution.userResult === "dry") return t("plantAnalysis.checkedSoilDry");
     if (resolution.userResult === "slightly_damp") return t("plantAnalysis.checkedSoilSlightlyDamp");
     if (resolution.userResult === "very_wet") return t("plantAnalysis.checkedSoilVeryWet");
@@ -116,7 +116,7 @@ function checkedFactForResolution(resolution: PlantHypothesisResolution | undefi
     return t("plantAnalysis.checkedDrainageUnsure");
   }
 
-  if (resolution.hypothesis === "sun_stress") {
+  if (resolution.hypothesis === "direct_sun") {
     if (resolution.userResult === "yes") return t("plantAnalysis.checkedDirectSun");
     if (resolution.userResult === "sometimes") return t("plantAnalysis.checkedSomeDirectSun");
     if (resolution.userResult === "no") return t("plantAnalysis.checkedNoDirectSun");
@@ -161,9 +161,9 @@ export function PlantAnalysisSection({
     const pestsResolution = resolutionFor(hypothesisResolutions, "pests");
     const noPests = pestsResolution?.status === "ruled_out";
     const pestsConfirmed = pestsResolution?.status === "confirmed";
-    const sunResolution = resolutionFor(hypothesisResolutions, "sun_stress");
-    const oldSoilResolution = resolutionFor(hypothesisResolutions, "old_compacted_soil");
-    const wateringResolution = resolutionFor(hypothesisResolutions, "watering");
+    const sunResolution = resolutionFor(hypothesisResolutions, "direct_sun");
+    const oldSoilResolution = resolutionFor(hypothesisResolutions, "repotting");
+    const wateringResolution = resolutionFor(hypothesisResolutions, "soil_condition");
     const drainageResolution = resolutionFor(hypothesisResolutions, "drainage");
     const rootResolution = resolutionFor(hypothesisResolutions, "root_condition");
     const rootsReportedNormal = rootResolution?.status === "ruled_out";
@@ -197,19 +197,19 @@ export function PlantAnalysisSection({
 
     const hypotheses: HypothesisView[] = [
       {
-        id: "sun_stress",
+        id: "direct_sun",
         confidence: sunResolution?.status === "confirmed" ? 0.9 : sunMentioned ? 0.72 : 0.2,
         text: t("plantAnalysis.causeSunStress"),
         status: statusFromResolution(sunResolution)
       },
       {
-        id: "recent_repotting",
+        id: "recent_repotting_context",
         confidence: wasRepottedRecently ? 0.68 : 0.18,
         text: t("plantAnalysis.causeRepotAdaptation"),
         status: wasRepottedRecently ? "confirmed" : "active"
       },
       {
-        id: "watering",
+        id: "soil_condition",
         confidence: plant.nextAction === "water" || plant.nextAction === "check_soil" ? 0.7 : wateringMentioned ? 0.58 : 0.25,
         text: t("plantAnalysis.causeWatering"),
         status: statusFromResolution(wateringResolution)
@@ -227,7 +227,7 @@ export function PlantAnalysisSection({
         status: rootsConcernConfirmed ? "confirmed" : rootsReportedNormal ? "ruled_out" : "active"
       },
       {
-        id: "old_compacted_soil",
+        id: "repotting",
         confidence: oldSoilResolution?.status === "confirmed" ? 0.72 : wasRepottedRecently ? 0.05 : oldSoilMentioned ? 0.48 : 0.15,
         text: t("plantAnalysis.causeOldSoil"),
         status: wasRepottedRecently ? "ruled_out" : statusFromResolution(oldSoilResolution)
@@ -264,13 +264,13 @@ export function PlantAnalysisSection({
               : t("plantAnalysis.statusStableWatch");
     const statusDetail = firstNonEmpty([
       wasRepottedRecently ? t("plantAnalysis.statusDetailRepot") : "",
-      activeHypotheses.some((hypothesis) => hypothesis.id === "sun_stress") ? t("plantAnalysis.statusDetailSun") : "",
+      activeHypotheses.some((hypothesis) => hypothesis.id === "direct_sun") ? t("plantAnalysis.statusDetailSun") : "",
       activeHypotheses.length === 0 ? t("plantAnalysis.statusDetailNoUrgent") : ""
     ]);
     const actions = unique([
-      activeHypotheses.some((hypothesis) => hypothesis.id === "sun_stress") && sunResolution?.status !== "ruled_out" ? t("plantAnalysis.actionBrightIndirect") : "",
+      activeHypotheses.some((hypothesis) => hypothesis.id === "direct_sun") && sunResolution?.status !== "ruled_out" ? t("plantAnalysis.actionBrightIndirect") : "",
       wasRepottedRecently ? t("plantAnalysis.actionDoNotRepot") : "",
-      !soilCheckedToday && !wateringResolution && (activeHypotheses.some((hypothesis) => hypothesis.id === "watering") || plant.nextAction === "check_soil") ? t("plantAnalysis.actionCheckSoil") : "",
+      !soilCheckedToday && !wateringResolution && (activeHypotheses.some((hypothesis) => hypothesis.id === "soil_condition") || plant.nextAction === "check_soil") ? t("plantAnalysis.actionCheckSoil") : "",
       activeHypotheses.some((hypothesis) => hypothesis.id === "pests") ? t("plantAnalysis.actionPests") : "",
       activeHypotheses.some((hypothesis) => hypothesis.id === "root_condition") ? t("plantAnalysis.actionRoots") : "",
       activeHypotheses.length || wasRepottedRecently ? t("plantAnalysis.actionWatchNewGrowth") : ""
@@ -302,14 +302,14 @@ export function PlantAnalysisSection({
           { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
         ] }
       : !sunResolution && sunMentioned
-        ? { hypothesis: "sun_stress" as const, question: t("plantAnalysis.questionSun"), options: [
+        ? { hypothesis: "direct_sun" as const, question: t("plantAnalysis.questionSun"), options: [
             { label: t("plantAnalysis.answerYes"), status: "confirmed" as const, result: "yes" },
             { label: t("plantAnalysis.answerNo"), status: "ruled_out" as const, result: "no" },
             { label: t("plantAnalysis.answerSometimes"), status: "confirmed" as const, result: "sometimes" },
             { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
           ] }
         : needsSoilQuestion
-          ? { hypothesis: "watering" as const, question: t("plantAnalysis.questionSoil"), options: [
+          ? { hypothesis: "soil_condition" as const, question: t("plantAnalysis.questionSoil"), options: [
               { label: t("plantAnalysis.answerSoilDry"), status: "confirmed" as const, result: "dry" },
               { label: t("plantAnalysis.answerSoilSlightlyDamp"), status: "ruled_out" as const, result: "slightly_damp" },
               { label: t("plantAnalysis.answerSoilVeryWet"), status: "confirmed" as const, result: "very_wet" },
@@ -323,7 +323,7 @@ export function PlantAnalysisSection({
                 { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
               ] }
             : !wasRepottedRecently && oldSoilMentioned && !oldSoilResolution
-              ? { hypothesis: "old_compacted_soil" as const, question: t("plantAnalysis.questionRepot"), options: [
+              ? { hypothesis: "repotting" as const, question: t("plantAnalysis.questionRepot"), options: [
                   { label: t("plantAnalysis.answerRecently"), status: "ruled_out" as const, result: "recently" },
                   { label: t("plantAnalysis.answerLongAgo"), status: "confirmed" as const, result: "long_ago" },
                   { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }

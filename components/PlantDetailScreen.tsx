@@ -200,6 +200,9 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           onClose={() => setSheet(null)}
           onWatered={() => void completeWatering()}
           isSaving={isCompletingAction}
+          plant={plant}
+          milestones={milestones}
+          hypothesisResolutions={hypothesisResolutions}
           onSoilChecked={async (result: SoilCheckResult, note) => {
             if (isCompletingAction) {
               return;

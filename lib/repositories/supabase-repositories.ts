@@ -616,22 +616,32 @@ export class HypothesisResolutionRepository {
     plantId: string,
     input: { hypothesis: PlantHypothesis; status: PlantHypothesisStatus; userResult: string; evidenceSource?: string }
   ) {
+    const payload = {
+      user_id: this.user.id,
+      plant_id: plantId,
+      hypothesis: input.hypothesis,
+      status: input.status,
+      user_result: input.userResult,
+      evidence_source: input.evidenceSource ?? "user_confirmation",
+      resolved_at: new Date().toISOString()
+    };
     const { data, error } = await this.supabase
       .from("plant_hypothesis_resolutions")
-      .upsert(
-        {
-          user_id: this.user.id,
-          plant_id: plantId,
-          hypothesis: input.hypothesis,
-          status: input.status,
-          user_result: input.userResult,
-          evidence_source: input.evidenceSource ?? "user_confirmation",
-          resolved_at: new Date().toISOString()
-        },
-        { onConflict: "user_id,plant_id,hypothesis" }
-      )
+      .upsert(payload, { onConflict: "user_id,plant_id,hypothesis" })
       .select("*")
       .single();
+
+    if (error) {
+      const safeError = error as { code?: string; message?: string; details?: string; hint?: string };
+      console.warn("plant_hypothesis_resolution_save_failed", {
+        hypothesis: input.hypothesis,
+        result: input.userResult,
+        code: safeError.code,
+        message: safeError.message,
+        details: safeError.details,
+        hint: safeError.hint
+      });
+    }
 
     assertNoError(error);
     return mapHypothesisResolution(data);

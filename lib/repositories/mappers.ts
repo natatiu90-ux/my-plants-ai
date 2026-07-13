@@ -94,7 +94,7 @@ export type PlantAnalysisRow = {
 export type PlantHypothesisResolutionRow = {
   id: string;
   plant_id: string;
-  hypothesis: PlantHypothesis;
+  hypothesis: string;
   status: PlantHypothesisStatus;
   user_result: string;
   evidence_source: string;
@@ -233,11 +233,21 @@ export function mapHypothesisResolution(row: PlantHypothesisResolutionRow): Plan
   return {
     id: row.id,
     plantId: row.plant_id,
-    hypothesis: row.hypothesis,
+    hypothesis: normalizeHypothesis(row.hypothesis),
     status: row.status,
     userResult: row.user_result,
     evidenceSource: row.evidence_source,
     resolvedAt: toDateKey(row.resolved_at) ?? row.resolved_at,
     createdAt: toDateKey(row.created_at) ?? row.created_at
   };
+}
+
+function normalizeHypothesis(hypothesis: string): PlantHypothesis {
+  if (hypothesis === "watering") return "soil_condition";
+  if (hypothesis === "old_compacted_soil" || hypothesis === "recent_repotting") return "repotting";
+  if (hypothesis === "sun_stress") return "direct_sun";
+  if (hypothesis === "soil_condition" || hypothesis === "repotting" || hypothesis === "root_condition" || hypothesis === "drainage" || hypothesis === "direct_sun" || hypothesis === "pests") {
+    return hypothesis;
+  }
+  return "soil_condition";
 }

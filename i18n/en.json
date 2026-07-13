@@ -143,7 +143,7 @@
   "checkSoil.ready": "It’s ready for watering.",
   "checkSoil.iWatered": "I watered it",
   "checkSoil.notNow": "Not now",
-  "checkSoil.wait": "No watering yet. We’ll check again in 2 days.",
+  "checkSoil.wait": "No watering yet. We’ll choose the next check based on this plant.",
   "checkSoil.wet": "The soil is still very wet. Avoid watering for now.",
   "checkSoil.wetWarning": "If it stays wet for a long time, check drainage and airflow.",
   "checkSoil.unsure": "Try checking the top 3–4 cm of soil with your finger.",

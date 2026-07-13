@@ -9,7 +9,7 @@ export type PhotoType = "overview" | "leaf" | "pot" | "roots" | "problem" | "oth
 export type PlantCareEventType = "watered" | "soil_checked" | "photo_added";
 export type SoilCheckResult = "dry" | "slightly_damp" | "very_wet" | "not_sure";
 export type CareScheduleStatus = "active" | "paused" | "needs_first_check";
-export type PlantHypothesis = "pests" | "sun_stress" | "old_compacted_soil" | "recent_repotting" | "watering" | "root_condition" | "drainage";
+export type PlantHypothesis = "soil_condition" | "repotting" | "root_condition" | "drainage" | "direct_sun" | "pests";
 export type PlantHypothesisStatus = "confirmed" | "ruled_out" | "unknown";
 
 export type PlantMilestoneType =

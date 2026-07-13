@@ -6,6 +6,7 @@ import { addDays, toDateKey } from "@/lib/date-format";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/client";
 import { createRepositories } from "@/lib/repositories/supabase-repositories";
 import { commonNameFromScientificName } from "@/lib/plant-display";
+import { calculateSoilCheckCareResolution } from "@/lib/soil-care";
 import type { PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
 
 type PlantState = {
@@ -585,43 +586,20 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
     [repositories]
   );
 
-  const soilCheckResolution = (result: SoilCheckResult) => {
-    if (result === "dry") {
-      return {
-        status: "check_soon" as const,
-        nextAction: "water" as const,
-        nextCheckAt: null,
-        careScheduleStatus: "active" as const,
-        replacementRecommendationId: "water_after_soil_check"
-      };
-    }
-
-    if (result === "not_sure") {
-      return {
-        status: "healthy" as const,
-        nextAction: null,
-        nextCheckAt: toDateKey(addDays(new Date(), 1)),
-        careScheduleStatus: "active" as const,
-        replacementRecommendationId: "soil_check_guidance"
-      };
-    }
-
-    return {
-      status: "healthy" as const,
-      nextAction: null,
-      nextCheckAt: toDateKey(addDays(new Date(), 2)),
-      careScheduleStatus: "active" as const,
-      replacementRecommendationId: null
-    };
-  };
-
   const recordSoilChecked = useCallback(
     async (plantId: string, result: SoilCheckResult, note?: string) => {
       if (!repositories) {
         return;
       }
 
-      const resolution = soilCheckResolution(result);
+      const currentPlant = state.plants.find((plant) => plant.id === plantId);
+      if (!currentPlant) {
+        throw new Error("Plant not found.");
+      }
+
+      const plantMilestones = state.milestones.filter((milestone) => milestone.plantId === plantId);
+      const plantHypothesisResolutions = state.hypothesisResolutions.filter((resolution) => resolution.plantId === plantId);
+      const resolution = calculateSoilCheckCareResolution(currentPlant, result, plantMilestones, plantHypothesisResolutions);
       await repositories.analyses.resolveLatestActiveRecommendation(plantId, {
         action: "soil_checked",
         result,
@@ -637,7 +615,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         notificationDueCycleKey: null
       });
       await repositories.careEvents.addCareEvent(plantId, { type: "soil_checked", metadata: { result, followUp: resolution.replacementRecommendationId ?? "next_check_scheduled" } });
-      console.info("care_schedule_recalculated", { plantId, result, nextCheckAt: resolution.nextCheckAt });
+      console.info("care_schedule_recalculated", { result, profile: resolution.profile, nextCheckAt: resolution.nextCheckAt, checkInDays: resolution.checkInDays });
       const milestone = await repositories.milestones.addMilestone(plantId, {
         type: "soil_checked",
         eventDate: toDateKey(new Date()),
@@ -676,7 +654,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         milestones: [milestone, ...current.milestones]
       }));
     },
-    [repositories]
+    [repositories, state.hypothesisResolutions, state.milestones, state.plants]
   );
 
   const resolvePlantHypothesis = useCallback(

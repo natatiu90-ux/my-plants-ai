@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, X } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
-import type { SoilCheckResult } from "@/types/plant";
+import { calculateSoilCheckCareResolution } from "@/lib/soil-care";
+import type { Plant, PlantHypothesisResolution, PlantMilestone, SoilCheckResult } from "@/types/plant";
 
 const soilOptions = [
   { value: "dry", labelKey: "checkSoil.dry" },
@@ -16,14 +17,20 @@ export function CheckSoilSheet({
   onClose,
   onWatered,
   onSoilChecked,
-  isSaving
+  isSaving,
+  plant,
+  milestones,
+  hypothesisResolutions
 }: {
   onClose: () => void;
   onWatered: () => void;
   onSoilChecked: (result: SoilCheckResult, note: string) => Promise<void>;
   isSaving?: boolean;
+  plant: Plant;
+  milestones: PlantMilestone[];
+  hypothesisResolutions: PlantHypothesisResolution[];
 }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const [choice, setChoice] = useState<SoilCheckResult | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
@@ -39,11 +46,10 @@ export function CheckSoilSheet({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
-  const noteForChoice = (nextChoice: SoilCheckResult) => {
-    if (nextChoice === "dry") return t("checkSoil.ready");
-    if (nextChoice === "slightly_damp") return t("checkSoil.wait");
-    if (nextChoice === "very_wet") return t("checkSoil.wet");
-    return t("checkSoil.unsure");
+  const resolution = choice ? calculateSoilCheckCareResolution(plant, choice, milestones, hypothesisResolutions) : null;
+  const messageForChoice = (nextChoice: SoilCheckResult) => {
+    const nextResolution = calculateSoilCheckCareResolution(plant, nextChoice, milestones, hypothesisResolutions);
+    return nextResolution.message[locale];
   };
 
   const choose = async (nextChoice: SoilCheckResult) => {
@@ -51,7 +57,7 @@ export function CheckSoilSheet({
       return;
     }
     setChoice(nextChoice);
-    await onSoilChecked(nextChoice, noteForChoice(nextChoice));
+    await onSoilChecked(nextChoice, messageForChoice(nextChoice));
   };
 
   return (
@@ -110,32 +116,42 @@ export function CheckSoilSheet({
         {choice === "dry" ? (
           <div>
             <p className="rounded-[22px] bg-[#edf8ed] p-4 text-[15px] font-bold leading-6 text-[#2d7a4f]">
-              {t("checkSoil.ready")}
+              {resolution?.message[locale]}
             </p>
-            <div className="mt-4 grid gap-2">
+            {resolution?.nextAction === "water" ? (
+              <div className="mt-4 grid gap-2">
+                <button
+                  type="button"
+                  onClick={onWatered}
+                  disabled={isSaving}
+                  className="min-h-12 rounded-[18px] bg-gradient-to-br from-[#92cc90] to-[#6ba369] px-4 text-sm font-extrabold text-white shadow-fab disabled:opacity-60"
+                >
+                  {t("checkSoil.iWatered")}
+                </button>
+                <button type="button" onClick={onClose} disabled={isSaving} className="min-h-12 rounded-[18px] px-4 text-sm font-extrabold text-[#777167] disabled:opacity-50">
+                  {t("checkSoil.notNow")}
+                </button>
+              </div>
+            ) : (
               <button
                 type="button"
-                onClick={onWatered}
+                onClick={onClose}
                 disabled={isSaving}
-                className="min-h-12 rounded-[18px] bg-gradient-to-br from-[#92cc90] to-[#6ba369] px-4 text-sm font-extrabold text-white shadow-fab disabled:opacity-60"
+                className="mt-4 min-h-12 w-full rounded-[18px] bg-white px-4 text-sm font-extrabold text-[#5f594f] shadow-[0_1px_8px_rgba(0,0,0,0.06)] disabled:opacity-50"
               >
-                {t("checkSoil.iWatered")}
+                {t("checkSoil.gotIt")}
               </button>
-              <button type="button" onClick={onClose} disabled={isSaving} className="min-h-12 rounded-[18px] px-4 text-sm font-extrabold text-[#777167] disabled:opacity-50">
-                {t("checkSoil.notNow")}
-              </button>
-            </div>
+            )}
           </div>
         ) : null}
 
         {choice === "slightly_damp" ? (
-          <ResultMessage message={t("checkSoil.wait")} buttonLabel={t("checkSoil.gotIt")} onClose={onClose} disabled={isSaving} />
+          <ResultMessage message={resolution?.message[locale] ?? ""} buttonLabel={t("checkSoil.gotIt")} onClose={onClose} disabled={isSaving} />
         ) : null}
 
         {choice === "very_wet" ? (
           <div>
-            <p className="rounded-[22px] bg-[#fdeaf0] p-4 text-[15px] font-bold leading-6 text-[#9b2c3e]">{t("checkSoil.wet")}</p>
-            <p className="mt-3 text-sm leading-6 text-[#66625b]">{t("checkSoil.wetWarning")}</p>
+            <p className="rounded-[22px] bg-[#fdeaf0] p-4 text-[15px] font-bold leading-6 text-[#9b2c3e]">{resolution?.message[locale]}</p>
             <button
               type="button"
               onClick={onClose}
@@ -148,7 +164,7 @@ export function CheckSoilSheet({
         ) : null}
 
         {choice === "not_sure" ? (
-          <ResultMessage message={t("checkSoil.unsure")} buttonLabel={t("checkSoil.backToOptions")} onClose={() => setChoice(null)} disabled={isSaving} />
+          <ResultMessage message={resolution?.message[locale] ?? ""} buttonLabel={t("checkSoil.backToOptions")} onClose={() => setChoice(null)} disabled={isSaving} />
         ) : null}
       </div>
     </div>
