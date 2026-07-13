@@ -33,6 +33,7 @@ type PlantAnalysis = {
   rawResult?: unknown;
 };
 type ImageAnalysisDiagnostic = {
+  debugId?: string | null;
   source: "camera" | "gallery";
   fileName: string;
   detectedFormat: string;
@@ -56,6 +57,7 @@ type ImageAnalysisDiagnostic = {
   errorMessage?: string;
 };
 type ClientImagePreparationDiagnostic = {
+  debugId: string;
   source: "camera" | "gallery";
   fileName: string;
   originalMimeType: string;
@@ -131,7 +133,7 @@ async function prepareImageForAnalysis(blob: Blob, fileName: string) {
 
   const safeName = `${fileName.replace(/\.[^.]+$/, "") || "plant-photo"}-analysis.jpg`;
   return {
-    file: new File([blob], safeName, { type: blob.type || "image/jpeg" }),
+    file: new File([blob], safeName, { type: "image/jpeg" }),
     originalWidth: display.width,
     originalHeight: display.height,
     finalWidth: display.width,
@@ -321,6 +323,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             const fileName = photo.originalName || `${photo.id}.${photo.originalExtension ?? "jpg"}`;
             const diagnostic: ClientImagePreparationDiagnostic = {
               source: photo.source,
+              debugId: photo.debugId,
               fileName,
               originalMimeType: blob.type,
               originalSize: blob.size,
@@ -340,6 +343,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             nextPreparationDiagnostics.push(diagnostic);
             logAddPlantDebug("photo_orientation_stage", {
               stage: "analysis_indexeddb_read",
+              debugId: photo.debugId,
               source: photo.source,
               fileName,
               mimeType: blob.type,
@@ -389,6 +393,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             diagnostic.includedInRequest = true;
             logAddPlantDebug("photo_orientation_stage", {
               stage: "formdata_openai_upload",
+              debugId: photo.debugId,
               source: photo.source,
               fileName: preparedImage.file.name,
               mimeType: preparedImage.file.type,
@@ -413,6 +418,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             formData.append("clientExifOrientations", String(preparedImage.exifOrientation ?? ""));
             formData.append("clientPhysicallyRotated", String(preparedImage.physicallyRotated));
             formData.append("clientOrientationSources", preparedImage.orientationSource);
+            formData.append("clientDebugIds", photo.debugId);
           }
         }
         nextPreparationDiagnostics.forEach((diagnostic) => {

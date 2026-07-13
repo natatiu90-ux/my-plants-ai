@@ -257,7 +257,7 @@ export class PhotoRepository {
     return signedPhotoUrl(this.supabase, storagePath, "full");
   }
 
-  async addPhotos(plantId: string, inputs: { url: string; type: PhotoType; isCover?: boolean }[], hasExistingPhotos: boolean) {
+  async addPhotos(plantId: string, inputs: { url: string; type: PhotoType; isCover?: boolean; debugId?: string }[], hasExistingPhotos: boolean) {
     const createdRows: PlantPhotoRow[] = [];
     const selectedCoverIndex = inputs.findIndex((photo) => photo.isCover);
     const shouldAssignCover = selectedCoverIndex >= 0 || !hasExistingPhotos;
@@ -282,6 +282,7 @@ export class PhotoRepository {
         console.info("photo_orientation_stage", {
           stage: "supabase_storage_upload",
           photoId,
+          debugId: input.debugId,
           mimeType: blob.type,
           byteSize: blob.size,
           width: display.width,

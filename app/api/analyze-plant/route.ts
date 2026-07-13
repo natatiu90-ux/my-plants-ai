@@ -16,6 +16,7 @@ const allowedExtensions = new Set(["jpg", "jpeg", "png", "heic", "heif"]);
 const model = process.env.OPENAI_MODEL ?? "gpt-5-mini";
 
 type ImageDiagnostic = {
+  debugId: string | null;
   source: string;
   fileName: string;
   mimeType: string;
@@ -227,11 +228,12 @@ function detectedFormat(file: File) {
   return extension ?? "unknown";
 }
 
-function diagnosticResponse(message: string, status = 400, diagnostics?: ImageDiagnostic[]) {
+function diagnosticResponse(message: string, status = 400, diagnostics?: ImageDiagnostic[], stage?: string) {
   return NextResponse.json(
     {
       ok: false,
       error: message,
+      ...(stage ? { stage } : {}),
       ...(process.env.NODE_ENV !== "production" && diagnostics ? { diagnostics } : {})
     },
     { status }
@@ -260,6 +262,7 @@ export async function POST(request: Request) {
     return diagnosticResponse(message, 503);
   }
 
+  let failureStage = "read_form_data";
   const formData = await request.formData();
   const files = formData.getAll("photos").filter((value): value is File => value instanceof File);
   const locale = String(formData.get("locale") ?? "en");
@@ -275,7 +278,9 @@ export async function POST(request: Request) {
   const clientExifOrientations = formData.getAll("clientExifOrientations");
   const clientPhysicallyRotated = formData.getAll("clientPhysicallyRotated");
   const clientOrientationSources = formData.getAll("clientOrientationSources").map(String);
+  const clientDebugIds = formData.getAll("clientDebugIds").map(String);
   const diagnostics: ImageDiagnostic[] = files.map((file, index) => ({
+    debugId: clientDebugIds[index] || null,
     source: photoSources[index] ?? "unknown",
     fileName: file.name || clientFileNames[index] || "unknown",
     mimeType: file.type,
@@ -307,11 +312,11 @@ export async function POST(request: Request) {
   }));
 
   if (!files.length) {
-    return diagnosticResponse("At least one image is required.");
+    return diagnosticResponse("At least one image is required.", 400, undefined, "validate_input");
   }
 
   if (files.length > maxPhotos) {
-    return diagnosticResponse(`Use ${maxPhotos} photos or fewer.`, 400, diagnostics);
+    return diagnosticResponse(`Use ${maxPhotos} photos or fewer.`, 400, diagnostics, "validate_input");
   }
 
   for (let index = 0; index < files.length; index += 1) {
@@ -324,7 +329,7 @@ export async function POST(request: Request) {
       diagnostics[index].errorCode = "unsupported_or_too_large";
       diagnostics[index].errorMessage = "Unsupported image type or image exceeds 10 MB.";
       console.warn("Plant analysis image rejected", diagnostics[index]);
-      return diagnosticResponse("One or more images are unsupported or too large.", 400, diagnostics);
+      return diagnosticResponse("One or more images are unsupported or too large.", 400, diagnostics, "validate_input");
     }
   }
 
@@ -337,6 +342,7 @@ export async function POST(request: Request) {
   }, openAIRequestTimeoutMs);
 
   try {
+    failureStage = "server_image_optimization";
     const client = new OpenAI({ apiKey });
     const optimizedImages = await Promise.all(
       files.map(async (file, index) => {
@@ -369,6 +375,7 @@ export async function POST(request: Request) {
       optimizedBytes: optimizedImages.reduce((total, image) => total + image.optimizedBytes, 0),
       images: diagnostics.map((diagnostic) => ({
         source: diagnostic.source,
+        debugId: diagnostic.debugId,
         fileName: diagnostic.fileName,
         mimeType: diagnostic.mimeType,
         extension: diagnostic.extension,
@@ -387,6 +394,7 @@ export async function POST(request: Request) {
         includedInOpenAIRequest: diagnostic.includedInOpenAIRequest
       }))
     });
+    failureStage = "prepare_openai_payload";
     const inputContent = [
       {
         type: "input_text",
@@ -404,6 +412,7 @@ export async function POST(request: Request) {
     ];
 
     openAIRequestStartedAt = Date.now();
+    failureStage = "openai_request";
     console.info("openai_request_started", {
       model,
       imageCount: optimizedImages.length,
@@ -429,6 +438,7 @@ export async function POST(request: Request) {
       durationMs: Date.now() - openAIRequestStartedAt
     });
 
+    failureStage = "parse_openai_response";
     const text = response.output_text;
     const analysis = JSON.parse(text);
 
@@ -455,6 +465,7 @@ export async function POST(request: Request) {
       });
     }
     console.error("Plant analysis failed", {
+      stage: failureStage,
       name: error instanceof Error ? error.name : "UnknownError",
       message: error instanceof Error ? error.message : "Unknown error",
       openAIStatus: status,
@@ -466,7 +477,8 @@ export async function POST(request: Request) {
     return diagnosticResponse(
       hasConversionFailure ? "image_conversion_failed" : isOpenAITimeout ? "ai_analysis_timed_out" : "Plant analysis failed.",
       hasConversionFailure ? 422 : isOpenAITimeout ? 504 : 502,
-      diagnostics
+      diagnostics,
+      failureStage
     );
   } finally {
     clearTimeout(timeout);

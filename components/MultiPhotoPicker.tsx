@@ -49,6 +49,14 @@ function logPhotoStage(stage: string, payload: Record<string, unknown>) {
   });
 }
 
+function createPhotoDebugId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `photo-debug-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 export function MultiPhotoPicker({
   title,
   onCancel,
@@ -79,8 +87,10 @@ export function MultiPhotoPicker({
     try {
       const savedPhotoResults: (PendingPhotoUpload | null)[] = await Promise.all(
         validFiles.map(async (file, index) => {
+          const debugId = createPhotoDebugId();
           const [originalDecode, originalExifOrientation] = await Promise.all([inspectImageFile(file), readJpegExifOrientation(file)]);
           logPhotoStage("photos_picker_selected", {
+            debugId,
             source,
             fileName: file.name,
             mimeType: file.type,
@@ -94,10 +104,11 @@ export function MultiPhotoPicker({
 
           let normalized: Awaited<ReturnType<typeof normalizeImageBlob>>;
           try {
-            normalized = await normalizeImageBlob(file, { maxSide: 1600, qualities: [0.82, 0.78, 0.75], targetBytes: 500 * 1024 });
+            normalized = await normalizeImageBlob(file, { maxSide: 1600, qualities: [0.82, 0.78, 0.75, 0.7, 0.66, 0.62], targetBytes: 500 * 1024 });
           } catch (error) {
             rejectedCount += 1;
             logPhotoStage("jpeg_normalization_failed", {
+              debugId,
               source,
               fileName: file.name,
               message: error instanceof Error ? error.message : "image_preparation_failed"
@@ -106,35 +117,41 @@ export function MultiPhotoPicker({
           }
 
           const fileToStore = new File([normalized.blob], `${file.name.replace(/\.[^.]+$/, "") || "plant-photo"}.jpg`, { type: "image/jpeg" });
+          const [storedDecodeBeforeSave, storedExifOrientation] = await Promise.all([inspectImageFile(fileToStore), readJpegExifOrientation(fileToStore)]);
           logPhotoStage("jpeg_saved_for_storage", {
+            debugId,
             source,
             fileName: fileToStore.name,
             mimeType: fileToStore.type,
             byteSize: fileToStore.size,
-            width: normalized.normalizedWidth,
-            height: normalized.normalizedHeight,
-            exifOrientation: normalized.exifOrientation,
+            width: storedDecodeBeforeSave.width,
+            height: storedDecodeBeforeSave.height,
+            originalExifOrientation,
+            exifOrientation: storedExifOrientation,
             orientationSource: normalized.orientationSource,
-            physicallyRotated: normalized.physicallyRotated,
-            displayedInUi: `${normalized.normalizedWidth}x${normalized.normalizedHeight}`
+            physicallyRotated: storedExifOrientation == null || storedExifOrientation === 1,
+            displayedInUi: storedDecodeBeforeSave.succeeded ? `${storedDecodeBeforeSave.width}x${storedDecodeBeforeSave.height}` : "decode_failed"
           });
 
           const storedPhoto = await PhotoStorageRepository.savePhoto(fileToStore);
-          const decode = await inspectImageFile(fileToStore);
+          const decode = storedDecodeBeforeSave;
           logPhotoStage("indexeddb_saved_photo", {
+            debugId,
             source,
             storageId: storedPhoto.id,
             mimeType: fileToStore.type,
             byteSize: fileToStore.size,
             width: decode.width,
             height: decode.height,
-            exifOrientation: null,
-            physicallyRotated: normalized.physicallyRotated,
+            originalExifOrientation,
+            exifOrientation: storedExifOrientation,
+            physicallyRotated: storedExifOrientation == null || storedExifOrientation === 1,
             displayedInUi: decode.succeeded ? `${decode.width}x${decode.height}` : "decode_failed"
           });
 
           return {
             id: storedPhoto.id,
+            debugId,
             storageId: storedPhoto.id,
             source,
             originalName: file.name,
@@ -143,11 +160,11 @@ export function MultiPhotoPicker({
             originalExtension: getFileExtension(file.name),
             decode,
             orientation: {
-              exifOrientation: normalized.exifOrientation,
+              exifOrientation: storedExifOrientation,
               orientationSource: normalized.orientationSource,
-              physicallyRotated: normalized.physicallyRotated,
-              storedWidth: normalized.normalizedWidth,
-              storedHeight: normalized.normalizedHeight,
+              physicallyRotated: storedExifOrientation == null || storedExifOrientation === 1,
+              storedWidth: decode.width,
+              storedHeight: decode.height,
               displayedWidth: decode.width,
               displayedHeight: decode.height
             },

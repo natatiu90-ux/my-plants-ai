@@ -128,6 +128,11 @@ function canvasToJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob>
   });
 }
 
+function candidateMaxSides(maxSide: number) {
+  const sides = [maxSide, 1400, 1200, 1000, 850, 700].filter((side) => side > 0 && side <= maxSide);
+  return Array.from(new Set(sides));
+}
+
 type LoadedImage = {
   image: ImageBitmap | HTMLImageElement;
   orientationSource: "raw_pixels" | "browser_display";
@@ -225,7 +230,7 @@ export async function normalizeImageBlob(
   blob: Blob,
   options: { maxSide: number; qualities: number[]; targetBytes?: number }
 ): Promise<NormalizedImageResult> {
-  const exifOrientation = await readJpegExifOrientation(blob);
+  const [exifOrientation, displayedImage] = await Promise.all([readJpegExifOrientation(blob), inspectImageDisplay(blob)]);
   const orientation = exifOrientation ?? 1;
   const loaded = await loadBitmap(blob);
   const bitmap = loaded.image;
@@ -236,38 +241,63 @@ export async function normalizeImageBlob(
       throw new Error("image_preparation_failed");
     }
 
-    const shouldApplyExifOrientation = loaded.orientationSource === "raw_pixels";
+    const browserDisplayStillLooksRaw =
+      loaded.orientationSource === "browser_display" &&
+      orientation >= 5 &&
+      orientation <= 8 &&
+      displayedImage.succeeded &&
+      displayedImage.width === sourceHeight &&
+      displayedImage.height === sourceWidth;
+    const shouldApplyExifOrientation = loaded.orientationSource === "raw_pixels" || browserDisplayStillLooksRaw;
     const swapsDimensions = shouldApplyExifOrientation && orientation >= 5 && orientation <= 8;
     const visualWidth = swapsDimensions ? sourceHeight : sourceWidth;
     const visualHeight = swapsDimensions ? sourceWidth : sourceHeight;
-    const scale = Math.min(1, options.maxSide / Math.max(visualWidth, visualHeight));
-    const normalizedWidth = Math.max(1, Math.round(visualWidth * scale));
-    const normalizedHeight = Math.max(1, Math.round(visualHeight * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = normalizedWidth;
-    canvas.height = normalizedHeight;
-    const context = canvas.getContext("2d");
-    if (!context) {
-      throw new Error("image_preparation_failed");
-    }
-
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, normalizedWidth, normalizedHeight);
-    context.save();
-    context.scale(scale, scale);
-    if (shouldApplyExifOrientation) {
-      drawWithOrientation(context, bitmap, visualWidth, visualHeight, orientation);
-    } else {
-      context.drawImage(bitmap, 0, 0);
-    }
-    context.restore();
-
     let bestBlob: Blob | null = null;
-    for (const quality of options.qualities) {
-      const candidate = await canvasToJpeg(canvas, quality);
-      bestBlob = candidate;
-      if (!options.targetBytes || candidate.size <= options.targetBytes) {
-        break;
+    let bestWidth = 0;
+    let bestHeight = 0;
+
+    for (const maxSide of candidateMaxSides(options.maxSide)) {
+      const scale = Math.min(1, maxSide / Math.max(visualWidth, visualHeight));
+      const normalizedWidth = Math.max(1, Math.round(visualWidth * scale));
+      const normalizedHeight = Math.max(1, Math.round(visualHeight * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = normalizedWidth;
+      canvas.height = normalizedHeight;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        throw new Error("image_preparation_failed");
+      }
+
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, normalizedWidth, normalizedHeight);
+      context.save();
+      context.scale(scale, scale);
+      if (shouldApplyExifOrientation) {
+        drawWithOrientation(context, bitmap, visualWidth, visualHeight, orientation);
+      } else {
+        context.drawImage(bitmap, 0, 0);
+      }
+      context.restore();
+
+      for (const quality of options.qualities) {
+        const candidate = await canvasToJpeg(canvas, quality);
+        if (!bestBlob || candidate.size < bestBlob.size) {
+          bestBlob = candidate;
+          bestWidth = normalizedWidth;
+          bestHeight = normalizedHeight;
+        }
+        if (!options.targetBytes || candidate.size <= options.targetBytes) {
+          return {
+            blob: candidate,
+            originalWidth: sourceWidth,
+            originalHeight: sourceHeight,
+            normalizedWidth,
+            normalizedHeight,
+            exifOrientation,
+            orientationSource: loaded.orientationSource,
+            physicallyRotated: true
+          };
+        }
       }
     }
 
@@ -279,8 +309,8 @@ export async function normalizeImageBlob(
       blob: bestBlob,
       originalWidth: sourceWidth,
       originalHeight: sourceHeight,
-      normalizedWidth,
-      normalizedHeight,
+      normalizedWidth: bestWidth,
+      normalizedHeight: bestHeight,
       exifOrientation,
       orientationSource: loaded.orientationSource,
       physicallyRotated: true
