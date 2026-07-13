@@ -153,3 +153,35 @@ export async function sendTestCareNotification(locale: string) {
     throw new Error("push_test_failed");
   }
 }
+
+export async function createAccountRecoveryCode() {
+  const token = await getSessionToken();
+  const response = await fetch("/api/recovery/code", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`
+    }
+  });
+  const payload = await response.json() as { ok?: boolean; code?: string; error?: string };
+  if (!response.ok || !payload.code) {
+    throw new Error(payload.error ?? "recovery_code_failed");
+  }
+  return payload.code;
+}
+
+export async function claimAccountRecoveryCode(code: string) {
+  const token = await getSessionToken();
+  const response = await fetch("/api/recovery/claim", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ code })
+  });
+  const payload = await response.json().catch(() => ({})) as { ok?: boolean; plantsCount?: number; error?: string };
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error ?? "recovery_claim_failed");
+  }
+  return payload.plantsCount ?? 0;
+}

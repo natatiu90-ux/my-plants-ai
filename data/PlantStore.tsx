@@ -113,11 +113,16 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
   const [repositories, setRepositories] = useState<Repositories | null>(null);
 
   const loadData = useCallback(async (nextRepositories: Repositories) => {
+    console.info("ownership_query_user_id", { userId: nextRepositories.userId });
     const [plants, photos, rooms] = await Promise.all([
       nextRepositories.plants.listPlants(),
       nextRepositories.photos.listPhotos(),
       nextRepositories.rooms.listRooms()
     ]);
+    console.info("plants_loaded_count", { count: plants.length, userId: nextRepositories.userId });
+    if (!plants.length) {
+      console.info("recovery_required", { reason: "no_plants_for_current_identity", userId: nextRepositories.userId });
+    }
 
     setState((current) => ({ ...current, plants, photos, rooms, secondaryDataReady: false }));
 
@@ -152,17 +157,20 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       }
 
       let nextUser = sessionData.session?.user ?? null;
+      console.info("existing_session_found", { found: Boolean(nextUser) });
       if (!nextUser) {
         const { data, error: signInError } = await supabase.auth.signInAnonymously();
         if (signInError) {
           throw signInError;
         }
         nextUser = data.user;
+        console.info("anonymous_session_created", { userId: nextUser?.id ?? null });
       }
 
       if (!nextUser) {
         throw new Error("Anonymous session was not created.");
       }
+      console.info("identity_source", { source: sessionData.session?.user ? "existing_supabase_session" : "new_supabase_anonymous_session", userId: nextUser.id });
 
       await Promise.all([
         supabase.from("profiles").upsert({ id: nextUser.id }, { onConflict: "id" }),

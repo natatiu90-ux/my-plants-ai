@@ -640,6 +640,7 @@ export class HypothesisResolutionRepository {
 
 export async function createRepositories(supabase: SupabaseClient, user: User) {
   return {
+    userId: user.id,
     plants: new PlantRepository(supabase, user),
     photos: new PhotoRepository(supabase, user),
     rooms: new RoomRepository(supabase, user),

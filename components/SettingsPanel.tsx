@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, Bell, Home, Trash2, UserRound } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
-import { getNotificationSupport, saveCareNotificationSettings, sendTestCareNotification, subscribeToCarePush, unsubscribeFromCarePush } from "@/lib/push-client";
+import { claimAccountRecoveryCode, createAccountRecoveryCode, getNotificationSupport, saveCareNotificationSettings, sendTestCareNotification, subscribeToCarePush, unsubscribeFromCarePush } from "@/lib/push-client";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { roomOptions } from "./RoomPicker";
 
@@ -16,7 +16,7 @@ const futureSections = [
 
 export function SettingsPanel() {
   const { locale, t } = useI18n();
-  const { rooms, plants, deleteRoom } = usePlantStore();
+  const { rooms, plants, deleteRoom, retry } = usePlantStore();
   const [roomToDelete, setRoomToDelete] = useState<string | null>(null);
   const [replacementRoomKey, setReplacementRoomKey] = useState("");
   const [isDeletingRoom, setIsDeletingRoom] = useState(false);
@@ -28,6 +28,10 @@ export function SettingsPanel() {
   const [quietHoursEnd, setQuietHoursEnd] = useState("08:00");
   const [notificationMessage, setNotificationMessage] = useState<string | null>(null);
   const [isNotificationSaving, setIsNotificationSaving] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [claimCode, setClaimCode] = useState("");
+  const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
+  const [isRecoverySaving, setIsRecoverySaving] = useState(false);
   const selectedRoom = rooms.find((room) => room.id === roomToDelete);
   const selectedRoomPlantCount = plants.filter((plant) => plant.roomKey === roomToDelete).length;
   const permissionLabel = {
@@ -111,6 +115,39 @@ export function SettingsPanel() {
     }
   };
 
+  const createRecoveryCode = async () => {
+    if (isRecoverySaving) return;
+    setIsRecoverySaving(true);
+    setRecoveryMessage(null);
+    try {
+      const code = await createAccountRecoveryCode();
+      setRecoveryCode(code);
+      setRecoveryMessage(t("recovery.codeCreated"));
+    } catch (error) {
+      console.info("recovery_code_failed", { message: error instanceof Error ? error.message : "Unknown error" });
+      setRecoveryMessage(t("recovery.failed"));
+    } finally {
+      setIsRecoverySaving(false);
+    }
+  };
+
+  const claimRecoveryCode = async () => {
+    if (isRecoverySaving || !claimCode.trim()) return;
+    setIsRecoverySaving(true);
+    setRecoveryMessage(null);
+    try {
+      const plantsCount = await claimAccountRecoveryCode(claimCode);
+      setClaimCode("");
+      setRecoveryMessage(t("recovery.restored").replace("{count}", String(plantsCount)));
+      await retry();
+    } catch (error) {
+      console.info("recovery_claim_failed", { message: error instanceof Error ? error.message : "Unknown error" });
+      setRecoveryMessage(t("recovery.failed"));
+    } finally {
+      setIsRecoverySaving(false);
+    }
+  };
+
   const confirmDeleteRoom = async () => {
     if (!selectedRoom || isDeletingRoom) {
       return;
@@ -148,6 +185,43 @@ export function SettingsPanel() {
       <section className="rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
         <h2 className="mb-3 px-1 font-rounded text-xl font-extrabold text-ink">{t("settings.language")}</h2>
         <LanguageSwitcher />
+      </section>
+
+      <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
+        <h2 className="px-1 font-rounded text-xl font-extrabold text-ink">{t("recovery.title")}</h2>
+        <p className="mt-2 px-1 text-sm font-bold leading-5 text-[#7a7166]">{t("recovery.description")}</p>
+        {recoveryCode ? (
+          <div className="mt-3 rounded-[20px] bg-white/75 p-3 text-center">
+            <p className="text-xs font-extrabold uppercase tracking-[0.08em] text-[#9a9286]">{t("recovery.yourCode")}</p>
+            <p className="mt-1 font-rounded text-2xl font-black tracking-[0.08em] text-ink">{recoveryCode}</p>
+          </div>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => void createRecoveryCode()}
+          disabled={isRecoverySaving}
+          className="mt-3 min-h-12 w-full rounded-[20px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f] disabled:opacity-60"
+        >
+          {t("recovery.createCode")}
+        </button>
+        <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
+          {t("recovery.restoreLabel")}
+          <input
+            value={claimCode}
+            onChange={(event) => setClaimCode(event.target.value)}
+            placeholder="ABCD-EFGH-JKLM"
+            className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base uppercase outline-none focus:ring-2 focus:ring-[#b7d8a8]"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => void claimRecoveryCode()}
+          disabled={isRecoverySaving || !claimCode.trim()}
+          className="mt-3 min-h-12 w-full rounded-[20px] bg-[#2d7a4f] px-4 text-sm font-extrabold text-white shadow-[0_10px_24px_rgba(45,122,79,0.18)] disabled:opacity-60"
+        >
+          {t("recovery.restore")}
+        </button>
+        {recoveryMessage ? <p className="mt-3 text-sm font-bold leading-5 text-[#6f675c]">{recoveryMessage}</p> : null}
       </section>
 
       <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">

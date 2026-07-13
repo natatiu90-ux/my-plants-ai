@@ -14,6 +14,7 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
+  console.info("push_subscription_user_id", { userId: user.id });
 
   const body = await request.json().catch(() => null) as {
     subscription?: SubscriptionPayload;
