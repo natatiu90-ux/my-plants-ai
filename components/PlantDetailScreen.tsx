@@ -152,7 +152,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   };
 
   return (
-    <main className={`mx-auto min-h-screen w-full max-w-[430px] bg-cream px-5 ${plant.nextAction ? "pb-32" : "pb-10"}`}>
+    <main className={`mx-auto min-h-screen w-full max-w-[430px] bg-cream px-5 ${plant.nextAction ? "pb-[calc(9rem+env(safe-area-inset-bottom))]" : "pb-10"}`}>
       <PlantDetailHeader
         title={plantName}
         isMenuOpen={isMenuOpen}

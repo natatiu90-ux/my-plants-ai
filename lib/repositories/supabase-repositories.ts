@@ -278,17 +278,19 @@ export class PhotoRepository {
       const [display, exifOrientation] = await Promise.all([inspectImageDisplay(blob), readJpegExifOrientation(blob)]);
       const photoId = crypto.randomUUID();
       const storagePath = `${this.user.id}/${plantId}/${photoId}.${extensionForBlob(blob)}`;
-      console.info("photo_orientation_stage", {
-        stage: "supabase_storage_upload",
-        photoId,
-        mimeType: blob.type,
-        byteSize: blob.size,
-        width: display.width,
-        height: display.height,
-        exifOrientation,
-        physicallyRotated: exifOrientation == null || exifOrientation === 1,
-        displayedInUi: display.succeeded ? `${display.width}x${display.height}` : "decode_failed"
-      });
+      if (process.env.NODE_ENV !== "production") {
+        console.info("photo_orientation_stage", {
+          stage: "supabase_storage_upload",
+          photoId,
+          mimeType: blob.type,
+          byteSize: blob.size,
+          width: display.width,
+          height: display.height,
+          exifOrientation,
+          physicallyRotated: exifOrientation == null || exifOrientation === 1,
+          displayedInUi: display.succeeded ? `${display.width}x${display.height}` : "decode_failed"
+        });
+      }
       const { error: uploadError } = await this.supabase.storage.from(photoBucket).upload(storagePath, blob, {
         contentType: blob.type || "image/jpeg",
         upsert: false
@@ -629,36 +631,78 @@ export class HypothesisResolutionRepository {
     plantId: string,
     input: { hypothesis: PlantHypothesis; status: PlantHypothesisStatus; userResult: string; evidenceSource?: string }
   ) {
-    const payload = {
-      user_id: this.user.id,
-      plant_id: plantId,
-      hypothesis: input.hypothesis,
-      status: input.status,
-      user_result: input.userResult,
-      evidence_source: input.evidenceSource ?? "user_confirmation",
-      resolved_at: new Date().toISOString()
-    };
-    const { data, error } = await this.supabase
-      .from("plant_hypothesis_resolutions")
-      .upsert(payload, { onConflict: "user_id,plant_id,hypothesis" })
-      .select("*")
-      .single();
+    const saveWithHypothesis = async (hypothesis: string) => {
+      const payload = {
+        user_id: this.user.id,
+        plant_id: plantId,
+        hypothesis,
+        status: input.status,
+        user_result: input.userResult,
+        evidence_source: input.evidenceSource ?? "user_confirmation",
+        resolved_at: new Date().toISOString()
+      };
 
-    if (error) {
-      const safeError = error as { code?: string; message?: string; details?: string; hint?: string };
-      console.warn("plant_hypothesis_resolution_save_failed", {
-        hypothesis: input.hypothesis,
-        result: input.userResult,
-        code: safeError.code,
-        message: safeError.message,
-        details: safeError.details,
-        hint: safeError.hint
-      });
+      return this.supabase
+        .from("plant_hypothesis_resolutions")
+        .upsert(payload, { onConflict: "user_id,plant_id,hypothesis" })
+        .select("*")
+        .single();
+    };
+
+    const { data, error } = await saveWithHypothesis(input.hypothesis);
+
+    if (!error) {
+      return mapHypothesisResolution(data);
     }
 
+    const legacyHypothesis = legacyHypothesisFor(input.hypothesis);
+    if (legacyHypothesis && isHypothesisConstraintError(error)) {
+      const fallback = await saveWithHypothesis(legacyHypothesis);
+      if (!fallback.error) {
+        console.warn("plant_hypothesis_resolution_saved_with_legacy_value", {
+          hypothesis: input.hypothesis,
+          legacyHypothesis,
+          result: input.userResult
+        });
+        return mapHypothesisResolution(fallback.data);
+      }
+
+      logHypothesisSaveError(input.hypothesis, input.userResult, fallback.error);
+      assertNoError(fallback.error);
+    }
+
+    logHypothesisSaveError(input.hypothesis, input.userResult, error);
     assertNoError(error);
-    return mapHypothesisResolution(data);
+    throw new Error("Plant hypothesis resolution failed.");
   }
+}
+
+function legacyHypothesisFor(hypothesis: PlantHypothesis) {
+  if (hypothesis === "soil_condition") return "watering";
+  if (hypothesis === "repotting") return "old_compacted_soil";
+  if (hypothesis === "direct_sun") return "sun_stress";
+  return null;
+}
+
+function isHypothesisConstraintError(error: unknown) {
+  const safeError = error as { code?: string; message?: string; details?: string };
+  return (
+    safeError.code === "23514" ||
+    safeError.message?.includes("plant_hypothesis_resolutions_hypothesis_check") ||
+    safeError.details?.includes("plant_hypothesis_resolutions_hypothesis_check")
+  );
+}
+
+function logHypothesisSaveError(hypothesis: PlantHypothesis, userResult: string, error: unknown) {
+  const safeError = error as { code?: string; message?: string; details?: string; hint?: string };
+  console.warn("plant_hypothesis_resolution_save_failed", {
+    hypothesis,
+    result: userResult,
+    code: safeError.code,
+    message: safeError.message,
+    details: safeError.details,
+    hint: safeError.hint
+  });
 }
 
 export async function createRepositories(supabase: SupabaseClient, user: User) {

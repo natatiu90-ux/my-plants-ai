@@ -12,7 +12,7 @@ export function PlantHeroImage({ plant, coverPhotoUrl, onLoad }: { plant: Plant;
         src={coverPhotoUrl}
         alt={displayName}
         onLoad={onLoad}
-        className="h-full w-full object-cover"
+        className="h-full w-full object-contain"
       />
     </div>
   );

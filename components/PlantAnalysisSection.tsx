@@ -126,6 +126,27 @@ function checkedFactForResolution(resolution: PlantHypothesisResolution | undefi
   return "";
 }
 
+function mentionsHarshDirectSunAction(action: string) {
+  const value = action.toLocaleLowerCase();
+  const mentionsDirectSun = value.includes("direct sun") || value.includes("прям") || value.includes("солнц");
+  const explicitlySafeLight = value.includes("indirect") || value.includes("diffused") || value.includes("рассеян");
+  return mentionsDirectSun && !explicitlySafeLight;
+}
+
+function validateCurrentActions(actions: string[], context: { sunStressActive: boolean; sunRuledOut: boolean }) {
+  return actions.filter((action) => {
+    if (mentionsHarshDirectSunAction(action)) {
+      return false;
+    }
+
+    if (context.sunRuledOut && action.toLocaleLowerCase().includes("sun")) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
 export function PlantAnalysisSection({
   analysis,
   plant,
@@ -267,14 +288,18 @@ export function PlantAnalysisSection({
       activeHypotheses.some((hypothesis) => hypothesis.id === "direct_sun") ? t("plantAnalysis.statusDetailSun") : "",
       activeHypotheses.length === 0 ? t("plantAnalysis.statusDetailNoUrgent") : ""
     ]);
-    const actions = unique([
+    const canonicalActions = unique([
       activeHypotheses.some((hypothesis) => hypothesis.id === "direct_sun") && sunResolution?.status !== "ruled_out" ? t("plantAnalysis.actionBrightIndirect") : "",
       wasRepottedRecently ? t("plantAnalysis.actionDoNotRepot") : "",
       !soilCheckedToday && !wateringResolution && (activeHypotheses.some((hypothesis) => hypothesis.id === "soil_condition") || plant.nextAction === "check_soil") ? t("plantAnalysis.actionCheckSoil") : "",
       activeHypotheses.some((hypothesis) => hypothesis.id === "pests") ? t("plantAnalysis.actionPests") : "",
       activeHypotheses.some((hypothesis) => hypothesis.id === "root_condition") ? t("plantAnalysis.actionRoots") : "",
       activeHypotheses.length || wasRepottedRecently ? t("plantAnalysis.actionWatchNewGrowth") : ""
-    ]).slice(0, 3);
+    ]);
+    const actions = validateCurrentActions(canonicalActions, {
+      sunStressActive: activeHypotheses.some((hypothesis) => hypothesis.id === "direct_sun"),
+      sunRuledOut: sunResolution?.status === "ruled_out"
+    }).slice(0, 3);
     const activeActions = actions.length ? actions : [t("plantAnalysis.actionNothingNow")];
     const checkedFacts = unique([
       noPests ? t("plantAnalysis.checkedNoPests") : "",

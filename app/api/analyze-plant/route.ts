@@ -150,6 +150,25 @@ async function optimizeImageForAnalysis(file: File) {
   }
 
   const inputMetadata = await sharp(sharpInput, { failOn: "none" }).metadata();
+  if (
+    inputMetadata.format === "jpeg" &&
+    (!inputMetadata.orientation || inputMetadata.orientation === 1) &&
+    inputBuffer.byteLength <= targetOptimizedBytes &&
+    Math.max(inputMetadata.width ?? 0, inputMetadata.height ?? 0) <= optimizedImageMaxSide
+  ) {
+    return {
+      dataUrl: `data:image/jpeg;base64,${inputBuffer.toString("base64")}`,
+      originalBytes: file.size,
+      optimizedBytes: inputBuffer.byteLength,
+      inputWidth: inputMetadata.width ?? null,
+      inputHeight: inputMetadata.height ?? null,
+      exifOrientation: inputMetadata.orientation ?? null,
+      normalizedWidth: inputMetadata.width ?? null,
+      normalizedHeight: inputMetadata.height ?? null,
+      finalMimeType: "image/jpeg"
+    };
+  }
+
   const candidates = [
     { maxSide: optimizedImageMaxSide, quality: optimizedJpegQuality },
     { maxSide: optimizedImageMaxSide, quality: 80 },

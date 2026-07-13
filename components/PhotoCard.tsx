@@ -26,7 +26,7 @@ export function PhotoCard({
         onClick={onOpen}
         className="relative h-[104px] w-full overflow-hidden rounded-[22px] bg-[#dde8dc] shadow-[0_2px_12px_rgba(0,0,0,0.06)]"
       >
-        <PhotoImage src={photo.thumbnailUrl ?? photo.url} alt={t("photos.photoAlt")} className="h-full w-full object-cover" />
+        <PhotoImage src={photo.thumbnailUrl ?? photo.url} alt={t("photos.photoAlt")} className="h-full w-full object-contain" />
         <span className="absolute bottom-2 left-2">
           <PhotoTypeBadge type={photo.type} />
         </span>

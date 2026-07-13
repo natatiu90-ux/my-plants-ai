@@ -39,6 +39,10 @@ async function inspectImageFile(file: File): Promise<PendingPhotoUpload["decode"
 }
 
 function logPhotoStage(stage: string, payload: Record<string, unknown>) {
+  if (process.env.NODE_ENV === "production") {
+    return;
+  }
+
   console.info("photo_orientation_stage", {
     stage,
     ...payload
@@ -90,11 +94,10 @@ export function MultiPhotoPicker({
 
           let normalized: Awaited<ReturnType<typeof normalizeImageBlob>>;
           try {
-            normalized = await normalizeImageBlob(file, { maxSide: 2400, qualities: [0.9, 0.86] });
+            normalized = await normalizeImageBlob(file, { maxSide: 1600, qualities: [0.82, 0.78, 0.75], targetBytes: 500 * 1024 });
           } catch (error) {
             rejectedCount += 1;
-            console.warn("photo_orientation_stage", {
-              stage: "jpeg_normalization_failed",
+            logPhotoStage("jpeg_normalization_failed", {
               source,
               fileName: file.name,
               message: error instanceof Error ? error.message : "image_preparation_failed"

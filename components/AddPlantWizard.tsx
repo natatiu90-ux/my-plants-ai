@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
-import { normalizeImageBlob } from "@/lib/client-image-normalization";
+import { inspectImageDisplay, readJpegExifOrientation } from "@/lib/client-image-normalization";
 import { addDays, formatRelativeDate, formatShortDate, toDateKey } from "@/lib/date-format";
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
@@ -80,11 +80,9 @@ type ClientImagePreparationDiagnostic = {
 };
 
 const analysisStageCount = 4;
-const analysisImageMaxSide = 1600;
 const analysisImageTargetBytes = 500 * 1024;
 const analysisRequestTargetBytes = 3 * 1024 * 1024;
 const maxSelectedPhotos = 5;
-const analysisJpegQualities = [0.78, 0.75, 0.72, 0.68];
 const defaultNicknames = {
   en: ["Sprout", "Pebble", "Mochi", "Button", "Pickle", "Clover", "Poppy", "Bean", "Sunny", "Olive", "Noodle", "Dot", "Minty", "Pumpkin", "Biscuit", "Twiggy"],
   ru: ["Плюша", "Листик", "Кнопка", "Пышка", "Ростик", "Зелёныш", "Фисташка", "Плющинка", "Бублик", "Капля", "Мята", "Печенька", "Пуговка", "Тучка", "Крошка", "Лапка"]
@@ -119,22 +117,28 @@ function suggestedNickname(locale: "en" | "ru", existingNames: string[]) {
   return names[Math.floor(Math.random() * names.length)];
 }
 
+function logAddPlantDebug(message: string, payload: Record<string, unknown>) {
+  if (process.env.NODE_ENV !== "production") {
+    console.info(message, payload);
+  }
+}
+
 async function prepareImageForAnalysis(blob: Blob, fileName: string) {
-  const normalized = await normalizeImageBlob(blob, {
-    maxSide: analysisImageMaxSide,
-    qualities: analysisJpegQualities,
-    targetBytes: analysisImageTargetBytes
-  });
+  const [display, exifOrientation] = await Promise.all([inspectImageDisplay(blob), readJpegExifOrientation(blob)]);
+  if (!display.succeeded || !display.width || !display.height) {
+    throw new Error("image_preparation_failed");
+  }
+
   const safeName = `${fileName.replace(/\.[^.]+$/, "") || "plant-photo"}-analysis.jpg`;
   return {
-    file: new File([normalized.blob], safeName, { type: "image/jpeg" }),
-    originalWidth: normalized.originalWidth,
-    originalHeight: normalized.originalHeight,
-    finalWidth: normalized.normalizedWidth,
-    finalHeight: normalized.normalizedHeight,
-    exifOrientation: normalized.exifOrientation,
-    orientationSource: normalized.orientationSource,
-    physicallyRotated: normalized.physicallyRotated
+    file: new File([blob], safeName, { type: blob.type || "image/jpeg" }),
+    originalWidth: display.width,
+    originalHeight: display.height,
+    finalWidth: display.width,
+    finalHeight: display.height,
+    exifOrientation,
+    orientationSource: "browser_display" as const,
+    physicallyRotated: exifOrientation == null || exifOrientation === 1
   };
 }
 
@@ -334,7 +338,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
               includedInRequest: false
             };
             nextPreparationDiagnostics.push(diagnostic);
-            console.info("photo_orientation_stage", {
+            logAddPlantDebug("photo_orientation_stage", {
               stage: "analysis_indexeddb_read",
               source: photo.source,
               fileName,
@@ -383,7 +387,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             diagnostic.orientationSource = preparedImage.orientationSource;
             diagnostic.physicallyRotated = preparedImage.physicallyRotated;
             diagnostic.includedInRequest = true;
-            console.info("photo_orientation_stage", {
+            logAddPlantDebug("photo_orientation_stage", {
               stage: "formdata_openai_upload",
               source: photo.source,
               fileName: preparedImage.file.name,
@@ -415,7 +419,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           diagnostic.totalOutgoingRequestSize = totalOutgoingRequestSize;
         });
         setClientPreparationDiagnostics(nextPreparationDiagnostics);
-        console.info("Plant analysis client images prepared", {
+        logAddPlantDebug("Plant analysis client images prepared", {
           totalOutgoingRequestSize,
           images: nextPreparationDiagnostics
         });
@@ -434,7 +438,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           diagnostic.httpStatus = httpStatus;
         });
         setClientPreparationDiagnostics(nextPreparationDiagnostics);
-        console.info("Plant analysis request completed", {
+        logAddPlantDebug("Plant analysis request completed", {
           status: httpStatus,
           durationMs: requestDurationMs,
           totalOutgoingRequestSize,
@@ -682,7 +686,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       return;
     }
 
-    console.info("plant_submit_started", {
+    logAddPlantDebug("plant_submit_started", {
       photoCount: selectedPhotos.length,
       hasRoom: Boolean(roomKey),
       hasLastWateredAt: Boolean(lastWateredAt),
@@ -692,7 +696,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     setSubmitError(null);
 
     try {
-      console.info("plant_save_started", {
+      logAddPlantDebug("plant_save_started", {
         photoCount: selectedPhotos.length,
         roomKey,
         lastWateredAt,
@@ -740,11 +744,11 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             }
           : undefined
       });
-      console.info("plant_save_completed", { plantId });
+      logAddPlantDebug("plant_save_completed", { plantId });
       void cleanupTemporaryPhotos(selectedPhotos);
       router.push(`/plants/${plantId}`);
       router.refresh();
-      console.info("modal_close_started", { plantId });
+      logAddPlantDebug("modal_close_started", { plantId });
       onClose();
     } catch (error) {
       console.error("plant_save_failed", {
@@ -770,7 +774,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
           {coverPhoto ? (
             <div className={step === "confirm" ? "relative mt-1 h-64 overflow-hidden rounded-[24px] bg-[#dde8dc]" : "relative mt-1 h-48 overflow-hidden rounded-[24px] bg-[#dde8dc]"}>
-              <PhotoImage src={coverPhoto.url} alt={t("photos.photoAlt")} className="h-full w-full object-cover" />
+              <PhotoImage src={coverPhoto.url} alt={t("photos.photoAlt")} className="h-full w-full object-contain" />
             </div>
           ) : null}
           {analysisFailed ? (
@@ -935,9 +939,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                       <PhotoImage
                         src={photo.url}
                         alt={t("photos.photoAlt")}
-                        className="h-full w-full object-cover"
+                        className="h-full w-full object-contain"
                         onLoad={() => {
-                          console.info("photo_orientation_stage", {
+                          if (process.env.NODE_ENV === "production") return;
+                          logAddPlantDebug("photo_orientation_stage", {
                             stage: "add_plant_preview",
                             source: photo.source,
                             photoId: photo.id,

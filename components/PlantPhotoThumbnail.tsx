@@ -32,7 +32,7 @@ export function PlantPhotoThumbnail({
         onClick={onOpen}
         className="relative aspect-square w-full overflow-hidden rounded-[18px] bg-[#dde8dc]"
       >
-        <PhotoImage src={photo.thumbnailUrl ?? photo.url} alt={t("photos.photoAlt")} className="h-full w-full object-cover" />
+        <PhotoImage src={photo.thumbnailUrl ?? photo.url} alt={t("photos.photoAlt")} className="h-full w-full object-contain" />
         <span className="absolute bottom-2 left-2">
           <PhotoTypeBadge type={photo.type} />
         </span>

@@ -44,9 +44,9 @@ export function PhotoReviewGrid({
             <PhotoImage
               src={photo.thumbnailUrl ?? photo.url}
               alt={t("photos.photoAlt")}
-              className="h-full w-full object-cover"
+              className="h-full w-full object-contain"
               onLoad={() => {
-                if (!photo.orientation) return;
+                if (!photo.orientation || process.env.NODE_ENV === "production") return;
                 console.info("photo_orientation_stage", {
                   stage: "photo_manager_preview",
                   source: photo.source ?? "unknown",
