@@ -55,20 +55,22 @@ export function PlantNotificationControls({ plant }: { plant: Plant }) {
         </button>
       </div>
 
-      <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
+      <label className="mt-4 block min-w-0 text-sm font-extrabold text-[#4f4940]">
         <span className="flex items-center gap-2">
           <CalendarDays aria-hidden="true" size={16} />
           {t("notifications.nextCheckDate")}
         </span>
-        <input
-          type="date"
-          value={nextCheckAt}
-          onChange={(event) => {
-            setNextCheckAt(event.target.value);
-            void saveNextCheck(event.target.value);
-          }}
-          className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none focus:ring-2 focus:ring-[#b7d8a8]"
-        />
+        <span className="app-native-input-shell mt-2">
+          <input
+            type="date"
+            value={nextCheckAt}
+            onChange={(event) => {
+              setNextCheckAt(event.target.value);
+              void saveNextCheck(event.target.value);
+            }}
+            className="app-date-input outline-none focus:ring-2 focus:ring-[#b7d8a8]"
+          />
+        </span>
       </label>
       {process.env.NODE_ENV !== "production" ? (
         <button

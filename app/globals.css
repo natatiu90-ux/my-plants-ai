@@ -35,13 +35,20 @@ a {
   -webkit-tap-highlight-color: transparent;
 }
 
+input[type="date"],
 input[type="time"],
+.app-date-input,
 .app-time-input {
   box-sizing: border-box;
+  display: block;
+  max-width: 100%;
   min-width: 0;
+  overflow: hidden;
   width: 100%;
+  font-size: 16px;
 }
 
+.app-date-input,
 .app-time-input {
   min-height: 3rem;
   border-radius: 18px;
@@ -50,6 +57,15 @@ input[type="time"],
   font-size: 1rem;
   line-height: 1.5rem;
   text-align: center;
+}
+
+.app-native-input-shell {
+  box-sizing: border-box;
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  width: 100%;
 }
 
 :focus-visible {

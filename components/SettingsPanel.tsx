@@ -261,7 +261,7 @@ export function SettingsPanel() {
                 />
               </label>
 
-                <div className="grid min-w-0 grid-cols-2 gap-2">
+                <div className="grid min-w-0 grid-cols-[repeat(2,minmax(0,1fr))] gap-2">
                   <label className="block min-w-0 text-sm font-extrabold text-[#4f4940]">
                     {t("notifications.quietStart")}
                     <input
