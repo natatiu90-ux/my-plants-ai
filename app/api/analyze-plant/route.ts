@@ -23,6 +23,9 @@ type ImageDiagnostic = {
   byteSize: number;
   decodedWidth: number | null;
   decodedHeight: number | null;
+  exifOrientation: number | null;
+  normalizedWidth: number | null;
+  normalizedHeight: number | null;
   decodingSucceeded: boolean;
   conversionSucceeded: boolean;
   conversionStatus: "pending" | "converted" | "image_conversion_failed" | "invalid_output";
@@ -183,6 +186,9 @@ async function optimizeImageForAnalysis(file: File) {
     optimizedBytes: optimizedBuffer!.byteLength,
     inputWidth: inputMetadata.width ?? null,
     inputHeight: inputMetadata.height ?? null,
+    exifOrientation: inputMetadata.orientation ?? null,
+    normalizedWidth: outputMetadata.width ?? null,
+    normalizedHeight: outputMetadata.height ?? null,
     finalMimeType: "image/jpeg"
   };
 }
@@ -252,6 +258,9 @@ export async function POST(request: Request) {
     byteSize: file.size,
     decodedWidth: null,
     decodedHeight: null,
+    exifOrientation: null,
+    normalizedWidth: null,
+    normalizedHeight: null,
     decodingSucceeded: false,
     conversionSucceeded: false,
     conversionStatus: "pending",
@@ -307,6 +316,9 @@ export async function POST(request: Request) {
           const optimizedImage = await optimizeImageForAnalysis(file);
           diagnostics[index].decodedWidth = optimizedImage.inputWidth;
           diagnostics[index].decodedHeight = optimizedImage.inputHeight;
+          diagnostics[index].exifOrientation = optimizedImage.exifOrientation;
+          diagnostics[index].normalizedWidth = optimizedImage.normalizedWidth;
+          diagnostics[index].normalizedHeight = optimizedImage.normalizedHeight;
           diagnostics[index].decodingSucceeded = Boolean(optimizedImage.inputWidth && optimizedImage.inputHeight);
           diagnostics[index].conversionSucceeded = true;
           diagnostics[index].conversionStatus = "converted";
@@ -335,6 +347,9 @@ export async function POST(request: Request) {
         byteSize: diagnostic.byteSize,
         decodedWidth: diagnostic.decodedWidth,
         decodedHeight: diagnostic.decodedHeight,
+        exifOrientation: diagnostic.exifOrientation,
+        normalizedWidth: diagnostic.normalizedWidth,
+        normalizedHeight: diagnostic.normalizedHeight,
         conversionStatus: diagnostic.conversionStatus,
         finalMimeType: diagnostic.finalMimeType,
         finalByteSize: diagnostic.finalByteSize,

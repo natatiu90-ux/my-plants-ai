@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
+import { normalizeImageBlob } from "@/lib/client-image-normalization";
 import { addDays, formatRelativeDate, formatShortDate, toDateKey } from "@/lib/date-format";
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
@@ -15,6 +16,7 @@ import type { PendingPhotoUpload } from "./photo-upload-types";
 
 type Step = "pick" | "analysis" | "confirm" | "details";
 type ConfirmationPicker = "room" | "watering" | null;
+type AnalysisFailureKind = "technical" | null;
 type PlantAnalysis = {
   commonName?: { en?: string | null; ru?: string | null } | string | null;
   detectedSpecies: string | null;
@@ -43,7 +45,9 @@ type ImageAnalysisDiagnostic = {
 type ClientImagePreparationDiagnostic = {
   source: "camera" | "gallery";
   fileName: string;
+  originalMimeType: string;
   originalSize: number;
+  exifOrientation: number | null;
   compressedSize: number | null;
   originalWidth: number | null;
   originalHeight: number | null;
@@ -51,7 +55,11 @@ type ClientImagePreparationDiagnostic = {
   finalHeight: number | null;
   totalOutgoingRequestSize: number | null;
   includedInRequest: boolean;
+  requestDurationMs?: number | null;
+  httpStatus?: number | null;
   errorCode?: string;
+  errorName?: string;
+  errorMessage?: string;
 };
 
 const analysisStageCount = 4;
@@ -93,85 +101,21 @@ function suggestedNickname(locale: "en" | "ru", existingNames: string[]) {
   return names[Math.floor(Math.random() * names.length)];
 }
 
-function loadImageFromBlob(blob: Blob): Promise<{ image: HTMLImageElement; objectUrl: string }> {
-  const objectUrl = URL.createObjectURL(blob);
-  const image = new Image();
-
-  return new Promise((resolve, reject) => {
-    image.onload = () => resolve({ image, objectUrl });
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("image_preparation_failed"));
-    };
-    image.src = objectUrl;
-  });
-}
-
-function canvasToJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) {
-          reject(new Error("image_preparation_failed"));
-          return;
-        }
-        resolve(blob);
-      },
-      "image/jpeg",
-      quality
-    );
-  });
-}
-
 async function prepareImageForAnalysis(blob: Blob, fileName: string) {
-  const { image, objectUrl } = await loadImageFromBlob(blob);
-
-  try {
-    const originalWidth = image.naturalWidth;
-    const originalHeight = image.naturalHeight;
-    if (!originalWidth || !originalHeight) {
-      throw new Error("image_preparation_failed");
-    }
-
-    const scale = Math.min(1, analysisImageMaxSide / Math.max(originalWidth, originalHeight));
-    const finalWidth = Math.max(1, Math.round(originalWidth * scale));
-    const finalHeight = Math.max(1, Math.round(originalHeight * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = finalWidth;
-    canvas.height = finalHeight;
-    const context = canvas.getContext("2d");
-    if (!context) {
-      throw new Error("image_preparation_failed");
-    }
-
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, finalWidth, finalHeight);
-    context.drawImage(image, 0, 0, finalWidth, finalHeight);
-
-    let bestBlob: Blob | null = null;
-    for (const quality of analysisJpegQualities) {
-      const candidate = await canvasToJpeg(canvas, quality);
-      bestBlob = candidate;
-      if (candidate.size <= analysisImageTargetBytes) {
-        break;
-      }
-    }
-
-    if (!bestBlob) {
-      throw new Error("image_preparation_failed");
-    }
-
-    const safeName = `${fileName.replace(/\.[^.]+$/, "") || "plant-photo"}-analysis.jpg`;
-    return {
-      file: new File([bestBlob], safeName, { type: "image/jpeg" }),
-      originalWidth,
-      originalHeight,
-      finalWidth,
-      finalHeight
-    };
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
+  const normalized = await normalizeImageBlob(blob, {
+    maxSide: analysisImageMaxSide,
+    qualities: analysisJpegQualities,
+    targetBytes: analysisImageTargetBytes
+  });
+  const safeName = `${fileName.replace(/\.[^.]+$/, "") || "plant-photo"}-analysis.jpg`;
+  return {
+    file: new File([normalized.blob], safeName, { type: "image/jpeg" }),
+    originalWidth: normalized.originalWidth,
+    originalHeight: normalized.originalHeight,
+    finalWidth: normalized.normalizedWidth,
+    finalHeight: normalized.normalizedHeight,
+    exifOrientation: normalized.exifOrientation
+  };
 }
 
 export function AddPlantWizard({ onClose }: { onClose: () => void }) {
@@ -193,6 +137,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [customWaterDate, setCustomWaterDate] = useState(toDateKey(new Date()));
   const [analysis, setAnalysis] = useState<PlantAnalysis | null>(null);
   const [analysisFailed, setAnalysisFailed] = useState(false);
+  const [analysisFailureKind, setAnalysisFailureKind] = useState<AnalysisFailureKind>(null);
   const [analysisDiagnostics, setAnalysisDiagnostics] = useState<ImageAnalysisDiagnostic[]>([]);
   const [clientPreparationDiagnostics, setClientPreparationDiagnostics] = useState<ClientImagePreparationDiagnostic[]>([]);
   const [analysisErrorCode, setAnalysisErrorCode] = useState<string | null>(null);
@@ -200,6 +145,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [analysisStageIndex, setAnalysisStageIndex] = useState(0);
   const [showLongAnalysisHint, setShowLongAnalysisHint] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [analysisAttempt, setAnalysisAttempt] = useState(0);
   const nicknameInputRef = useRef<HTMLInputElement>(null);
   const generatedNicknameRef = useRef<string | null>(null);
 
@@ -241,7 +187,11 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     setAnalysisStageIndex(0);
     setShowLongAnalysisHint(false);
     setAnalysisErrorCode(null);
+    setAnalysisFailed(false);
+    setAnalysisFailureKind(null);
+    setAnalysis(null);
     setClientPreparationDiagnostics([]);
+    setAnalysisDiagnostics([]);
     const stageTimers = [
       window.setTimeout(() => {
         if (isMounted) setAnalysisStageIndex(1);
@@ -270,8 +220,8 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     }
 
     async function analyzePhotos() {
-      setAnalysisFailed(false);
-
+      let requestStartedAt: number | null = null;
+      let httpStatus: number | null = null;
       try {
         const formData = new FormData();
         const nextPreparationDiagnostics: ClientImagePreparationDiagnostic[] = [];
@@ -284,7 +234,9 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             const diagnostic: ClientImagePreparationDiagnostic = {
               source: photo.source,
               fileName,
+              originalMimeType: blob.type,
               originalSize: blob.size,
+              exifOrientation: null,
               compressedSize: null,
               originalWidth: null,
               originalHeight: null,
@@ -300,6 +252,8 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
               preparedImage = await prepareImageForAnalysis(blob, fileName);
             } catch {
               diagnostic.errorCode = "image_preparation_failed";
+              diagnostic.errorName = "Error";
+              diagnostic.errorMessage = "image_preparation_failed";
               setClientPreparationDiagnostics(nextPreparationDiagnostics);
               throw new Error("image_preparation_failed");
             }
@@ -311,8 +265,11 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
               diagnostic.originalHeight = preparedImage.originalHeight;
               diagnostic.finalWidth = preparedImage.finalWidth;
               diagnostic.finalHeight = preparedImage.finalHeight;
+              diagnostic.exifOrientation = preparedImage.exifOrientation;
               diagnostic.totalOutgoingRequestSize = totalOutgoingRequestSize;
               diagnostic.errorCode = "image_preparation_failed";
+              diagnostic.errorName = "Error";
+              diagnostic.errorMessage = "image_preparation_failed";
               setClientPreparationDiagnostics(nextPreparationDiagnostics);
               throw new Error("image_preparation_failed");
             }
@@ -322,6 +279,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             diagnostic.originalHeight = preparedImage.originalHeight;
             diagnostic.finalWidth = preparedImage.finalWidth;
             diagnostic.finalHeight = preparedImage.finalHeight;
+            diagnostic.exifOrientation = preparedImage.exifOrientation;
             diagnostic.includedInRequest = true;
             formData.append("photos", preparedImage.file, preparedImage.file.name);
             formData.append("photoTypes", photo.type);
@@ -345,11 +303,25 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         });
 
         formData.append("locale", locale);
+        requestStartedAt = Date.now();
         const response = await fetch("/api/analyze-plant", {
           method: "POST",
           body: formData
         });
+        httpStatus = response.status;
         const payload = await response.json();
+        const requestDurationMs = Date.now() - requestStartedAt;
+        nextPreparationDiagnostics.forEach((diagnostic) => {
+          diagnostic.requestDurationMs = requestDurationMs;
+          diagnostic.httpStatus = httpStatus;
+        });
+        setClientPreparationDiagnostics(nextPreparationDiagnostics);
+        console.info("Plant analysis request completed", {
+          status: httpStatus,
+          durationMs: requestDurationMs,
+          totalOutgoingRequestSize,
+          images: nextPreparationDiagnostics
+        });
 
         if (payload.diagnostics && process.env.NODE_ENV !== "production") {
           setAnalysisDiagnostics(payload.diagnostics);
@@ -377,7 +349,24 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       } catch (error) {
         if (isMounted) {
           setAnalysisFailed(true);
+          setAnalysisFailureKind("technical");
           setAnalysisErrorCode(error instanceof Error ? error.message : "analysis_failed");
+          setClientPreparationDiagnostics((current) =>
+            current.map((diagnostic) => ({
+              ...diagnostic,
+              requestDurationMs: requestStartedAt ? Date.now() - requestStartedAt : diagnostic.requestDurationMs ?? null,
+              httpStatus,
+              errorCode: diagnostic.errorCode ?? (error instanceof Error ? error.message : "analysis_failed"),
+              errorName: error instanceof Error ? error.name : "UnknownError",
+              errorMessage: error instanceof Error ? error.message : "analysis_failed"
+            }))
+          );
+          console.warn("Plant analysis technical failure", {
+            name: error instanceof Error ? error.name : "UnknownError",
+            message: error instanceof Error ? error.message : "analysis_failed",
+            status: httpStatus,
+            durationMs: requestStartedAt ? Date.now() - requestStartedAt : null
+          });
         }
       } finally {
         if (isMounted) {
@@ -394,7 +383,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       stageTimers.forEach((timer) => window.clearTimeout(timer));
       window.clearTimeout(longAnalysisTimer);
     };
-  }, [ensureSuggestedNickname, locale, selectedPhotos, step]);
+  }, [analysisAttempt, ensureSuggestedNickname, locale, selectedPhotos, step]);
 
   const analysisStages = [
     t("addPlant.uploadingPhotos"),
@@ -488,10 +477,17 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             title: t("addPlant.conditionHealthyTitle"),
             text: t("addPlant.conditionHealthyText")
           };
+  const isTechnicalAnalysisFailure = analysisFailed && analysisFailureKind === "technical";
+  const isLowConfidenceAnalysis = Boolean(analysis && analysis.confidence < 0.55);
 
   const openPicker = (picker: ConfirmationPicker) => {
     setIsChoosingWaterDate(false);
     setActivePicker(picker);
+  };
+
+  const retryAnalysis = () => {
+    setAnalysisAttempt((current) => current + 1);
+    setStep("analysis");
   };
 
   const startNicknameEdit = () => {
@@ -567,6 +563,14 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         setHomeName(savedNickname);
       }
       const savedCommonName = cleanPlantName(speciesName) || commonNameFromScientificName(displayScientificName);
+      if (!savedCommonName && !displayScientificName && analysisFailed) {
+        const shouldSaveManualPlant = window.confirm(t("addPlant.manualEmptyConfirm"));
+        if (!shouldSaveManualPlant) {
+          setSubmitError(t("addPlant.manualNameRequired"));
+          setIsSaving(false);
+          return;
+        }
+      }
       const plantId = await addPlant({
         homeName: savedNickname,
         speciesName: savedCommonName,
@@ -626,14 +630,78 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           {submitError ? (
             <p className="mt-4 rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{submitError}</p>
           ) : null}
-          {step === "confirm" ? (
+          {step === "confirm" && isTechnicalAnalysisFailure ? (
+            <div className="pt-5">
+              <div className="rounded-[22px] bg-[#fff1d8] p-4">
+                <h3 className="font-rounded text-2xl font-black leading-tight text-ink">{t("addPlant.technicalFailureTitle")}</h3>
+                <p className="mt-2 text-sm font-bold leading-5 text-[#7a623d]">{t("addPlant.technicalFailureText")}</p>
+                {process.env.NODE_ENV !== "production" && analysisErrorCode ? (
+                  <p className="mt-3 rounded-[14px] bg-white/65 p-3 text-left text-[11px] font-bold leading-5 text-[#5f594f]">analysis error: {analysisErrorCode}</p>
+                ) : null}
+              </div>
+              <div className="mt-5 grid gap-2">
+                <div className="rounded-[20px] bg-white/70 p-3">
+                  <p className="text-xs font-bold uppercase text-[#a09a90]">{t("addPlant.nickname")}</p>
+                  {isEditingNickname ? (
+                    <div className="mt-2">
+                      <input
+                        ref={nicknameInputRef}
+                        value={nicknameDraft}
+                        onChange={(event) => setNicknameDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            saveNicknameEdit();
+                          }
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            cancelNicknameEdit();
+                          }
+                        }}
+                        className="min-h-12 w-full rounded-[18px] bg-[#fffaf3] px-4 text-base font-extrabold text-[#3f3b35] outline-none ring-2 ring-[#ddf2dc]"
+                      />
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <button type="button" onClick={saveNicknameEdit} className="min-h-10 rounded-[16px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
+                          {t("addPlant.saveNickname")}
+                        </button>
+                        <button type="button" onClick={cancelNicknameEdit} className="min-h-10 rounded-[16px] bg-white/80 px-3 text-sm font-extrabold text-[#777167]">
+                          {t("plantDetail.cancel")}
+                        </button>
+                      </div>
+                      {isConfirmingNicknameRegeneration ? (
+                        <div className="mt-3 rounded-[16px] bg-[#fff8e8] p-3">
+                          <p className="text-sm font-bold leading-5 text-[#7a623d]">{t("addPlant.nicknameEmptyPrompt")}</p>
+                          <button type="button" onClick={generateReplacementNickname} className="mt-2 min-h-10 rounded-[16px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
+                            {t("addPlant.generateNickname")}
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="mt-1 flex items-center justify-between gap-3">
+                      <p className="font-rounded text-xl font-extrabold text-[#3f3b35]">{homeName || ensureSuggestedNickname()}</p>
+                      <button type="button" onClick={startNicknameEdit} className="shrink-0 text-sm font-extrabold text-[#2d7a4f]">
+                        {t("addPlant.rename")}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : step === "confirm" ? (
             <div className="pt-5">
               <h3 className="font-rounded text-[30px] font-black leading-tight text-ink">{displayCommonName}</h3>
               {displayScientificName ? <p className="mt-1 text-sm italic leading-5 text-[#8e867b]">{displayScientificName}</p> : null}
-              <div className="mt-4 rounded-[20px] bg-[#edf8ed] p-3">
+              {isLowConfidenceAnalysis ? (
+                <div className="mt-4 rounded-[20px] bg-[#fff8e8] p-3">
+                  <p className="font-rounded text-lg font-extrabold text-[#8a6230]">{t("addPlant.lowConfidenceTitle")}</p>
+                  <p className="mt-1 text-sm font-bold leading-5 text-[#7a623d]">{t("addPlant.lowConfidenceText")}</p>
+                </div>
+              ) : null}
+              {analysis ? <div className="mt-4 rounded-[20px] bg-[#edf8ed] p-3">
                 <p className="font-rounded text-lg font-extrabold text-[#2d7a4f]">{conditionSummary.title}</p>
                 <p className="mt-1 text-sm font-bold leading-5 text-[#5f594f]">{conditionSummary.text}</p>
-              </div>
+              </div> : null}
               {uncertaintyMessage ? <p className="mt-4 rounded-[18px] bg-white/70 p-3 text-sm font-bold leading-5 text-[#7a6f61]">{uncertaintyMessage}</p> : null}
               <div className="mt-5 grid gap-2">
                 <div className="rounded-[20px] bg-white/70 p-3">
@@ -729,12 +797,15 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                   <p className="mb-2 text-xs font-extrabold text-ink">Development client image preparation</p>
                   {clientPreparationDiagnostics.map((diagnostic, index) => (
                     <div key={`${diagnostic.fileName}-${index}`} className="border-t border-[#eee7dc] py-2 first:border-t-0 first:pt-0">
-                      <p>source: {diagnostic.source}</p>
-                      <p>original: {diagnostic.originalSize} bytes / {diagnostic.originalWidth ?? "unknown"}x{diagnostic.originalHeight ?? "unknown"}</p>
-                      <p>compressed: {diagnostic.compressedSize ?? 0} bytes / {diagnostic.finalWidth ?? "unknown"}x{diagnostic.finalHeight ?? "unknown"}</p>
-                      <p>total request images: {diagnostic.totalOutgoingRequestSize ?? 0} bytes</p>
-                      <p>included: {String(diagnostic.includedInRequest)}</p>
-                      {diagnostic.errorCode ? <p>error: {diagnostic.errorCode}</p> : null}
+	                      <p>source: {diagnostic.source}</p>
+	                      <p>mime: {diagnostic.originalMimeType || "unknown"}</p>
+	                      <p>original: {diagnostic.originalSize} bytes / {diagnostic.originalWidth ?? "unknown"}x{diagnostic.originalHeight ?? "unknown"}</p>
+	                      <p>exif orientation: {diagnostic.exifOrientation ?? "none"}</p>
+	                      <p>normalized: {diagnostic.compressedSize ?? 0} bytes / {diagnostic.finalWidth ?? "unknown"}x{diagnostic.finalHeight ?? "unknown"}</p>
+	                      <p>total request images: {diagnostic.totalOutgoingRequestSize ?? 0} bytes</p>
+	                      <p>request: {diagnostic.httpStatus ?? "none"} / {diagnostic.requestDurationMs ?? 0} ms</p>
+	                      <p>included: {String(diagnostic.includedInRequest)}</p>
+	                      {diagnostic.errorCode ? <p>error: {diagnostic.errorCode} / {diagnostic.errorName ?? "Error"} / {diagnostic.errorMessage ?? ""}</p> : null}
                     </div>
                   ))}
                 </div>
@@ -754,10 +825,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                   ))}
                 </div>
               ) : null}
-              <div className="mt-4 rounded-[20px] bg-[#edf8ed] p-3">
+              {analysis ? <div className="mt-4 rounded-[20px] bg-[#edf8ed] p-3">
                 <p className="font-rounded text-lg font-extrabold text-[#2d7a4f]">{conditionSummary.title}</p>
                 <p className="mt-1 text-sm font-bold leading-5 text-[#5f594f]">{conditionSummary.text}</p>
-              </div>
+              </div> : null}
               {uncertaintyMessage ? <p className="mt-3 rounded-[18px] bg-white/70 p-3 text-sm font-bold leading-5 text-[#7a6f61]">{uncertaintyMessage}</p> : null}
               <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
                 {t("addPlant.nickname")}
@@ -781,12 +852,12 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         <div className="shrink-0 border-t border-[#efe6d8] bg-[#fffaf3] px-5 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-3">
           <button
             type="button"
-            onClick={() => void save()}
+            onClick={isTechnicalAnalysisFailure && step === "confirm" ? retryAnalysis : () => void save()}
             disabled={isSaving}
             className="flex min-h-12 w-full items-center justify-center gap-2 rounded-[18px] bg-gradient-to-br from-[#92cc90] to-[#6ba369] px-4 text-sm font-extrabold text-white shadow-fab disabled:opacity-60"
           >
             {isSaving ? <Loader2 aria-hidden="true" size={16} className="animate-spin" /> : null}
-            {isSaving ? t("addPlant.saving") : t("addPlant.save")}
+            {isSaving ? t("addPlant.saving") : isTechnicalAnalysisFailure && step === "confirm" ? t("addPlant.retryAnalysis") : t("addPlant.save")}
           </button>
           <button
             type="button"
@@ -794,7 +865,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             disabled={isSaving}
             className="mt-2 min-h-12 w-full rounded-[18px] px-4 text-sm font-extrabold text-[#777167] disabled:opacity-50"
           >
-            {step === "confirm" ? t("addPlant.refineDetails") : t("plantDetail.cancel")}
+            {step === "confirm" ? isTechnicalAnalysisFailure ? t("addPlant.manualEntry") : t("addPlant.refineDetails") : t("plantDetail.cancel")}
           </button>
         </div>
       </div>

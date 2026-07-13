@@ -3,6 +3,7 @@
 import { Camera, ImageIcon, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { useI18n } from "@/i18n/I18nProvider";
+import { normalizeImageBlob } from "@/lib/client-image-normalization";
 import { PhotoStorageRepository, validateImageFile } from "@/lib/photo-storage";
 import type { PendingPhotoUpload } from "./photo-upload-types";
 
@@ -67,8 +68,15 @@ export function MultiPhotoPicker({
     try {
       const savedPhotos = await Promise.all(
         validFiles.map(async (file, index) => {
-          const storedPhoto = await PhotoStorageRepository.savePhoto(file);
-          const decode = await inspectImageFile(file);
+          let fileToStore: File = file;
+          try {
+            const normalized = await normalizeImageBlob(file, { maxSide: 2400, qualities: [0.9, 0.86] });
+            fileToStore = new File([normalized.blob], `${file.name.replace(/\.[^.]+$/, "") || "plant-photo"}.jpg`, { type: "image/jpeg" });
+          } catch {
+            fileToStore = file;
+          }
+          const storedPhoto = await PhotoStorageRepository.savePhoto(fileToStore);
+          const decode = await inspectImageFile(fileToStore);
           return {
             id: storedPhoto.id,
             storageId: storedPhoto.id,
