@@ -3,6 +3,7 @@ import { Manrope, Nunito } from "next/font/google";
 import "./globals.css";
 import { I18nProvider } from "@/i18n/I18nProvider";
 import { PlantStoreProvider } from "@/data/PlantStore";
+import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 
 const nunito = Nunito({
   subsets: ["latin", "cyrillic"],
@@ -39,7 +40,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <body className={`${nunito.variable} ${manrope.variable} font-body antialiased`}>
         <I18nProvider>
-          <PlantStoreProvider>{children}</PlantStoreProvider>
+          <PlantStoreProvider>
+            <ServiceWorkerRegistration />
+            {children}
+          </PlantStoreProvider>
         </I18nProvider>
       </body>
     </html>

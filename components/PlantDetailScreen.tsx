@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
 import { plantDisplayName } from "@/lib/plant-display";
@@ -16,6 +16,7 @@ import { PhotoUploadFlow } from "./PhotoUploadFlow";
 import { PlantAnalysisSection } from "./PlantAnalysisSection";
 import { PlantDetailHeader } from "./PlantDetailHeader";
 import { PlantHeroImage } from "./PlantHeroImage";
+import { PlantNotificationControls } from "./PlantNotificationControls";
 import { PlantStatusSection } from "./PlantStatusSection";
 import { PrimaryCareAction } from "./PrimaryCareAction";
 import { Toast } from "./Toast";
@@ -25,8 +26,9 @@ type Sheet = "check_soil" | "add_photo" | "add_event" | null;
 
 export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useI18n();
-  const { addMilestone, addPlantPhotos, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getPlant, getPlantAnalysis, getPlantMilestones, getPlantPhotos, recordSoilChecked, secondaryDataReady, waterPlant } =
+  const { addMilestone, addPlantPhotos, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getPlant, getPlantAnalysis, getPlantHypothesisResolutions, getPlantMilestones, getPlantPhotos, recordSoilChecked, resolvePlantHypothesis, secondaryDataReady, waterPlant } =
     usePlantStore();
   const plant = getPlant(plantId);
   const analysis = getPlantAnalysis(plantId);
@@ -36,6 +38,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     () => getPlantMilestones(plantId).sort((a, b) => (b.eventDate ?? b.createdAt).localeCompare(a.eventDate ?? a.createdAt)),
     [getPlantMilestones, plantId]
   );
+  const hypothesisResolutions = getPlantHypothesisResolutions(plantId);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [sheet, setSheet] = useState<Sheet>(null);
@@ -43,6 +46,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const [isCompletingAction, setIsCompletingAction] = useState(false);
   const [fullCoverUrl, setFullCoverUrl] = useState<string | undefined>();
   const loggedEvents = useRef(new Set<string>());
+  const openedActionRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!toast) {
@@ -56,6 +60,15 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   useEffect(() => {
     logNavigationEvent("detail", plantId, "detail_shell_rendered");
   }, [plantId]);
+
+  useEffect(() => {
+    const action = searchParams.get("action");
+    if (action !== "check_soil" || openedActionRef.current === `${plantId}:${action}`) {
+      return;
+    }
+    openedActionRef.current = `${plantId}:${action}`;
+    setSheet("check_soil");
+  }, [plantId, searchParams]);
 
   useEffect(() => {
     if (!plant || loggedEvents.current.has("plant_data_ready")) {
@@ -162,7 +175,13 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         }}
       />
       <PlantStatusSection plant={plant} />
-      <PlantAnalysisSection analysis={analysis} plant={plant} />
+      <PlantAnalysisSection
+        analysis={analysis}
+        plant={plant}
+        milestones={milestones}
+        hypothesisResolutions={hypothesisResolutions}
+        onResolveHypothesis={(hypothesis, status, result) => resolvePlantHypothesis(plant.id, hypothesis, status, result)}
+      />
       <button
         type="button"
         onClick={() => setSheet("add_photo")}
@@ -171,6 +190,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         {t("photos.addNewPhotos")}
       </button>
       <CareSummary plant={plant} />
+      <PlantNotificationControls plant={plant} />
       <PhotoGallery photos={photos} onAddPhoto={() => setSheet("add_photo")} />
       <CareHistory milestones={milestones} onAddEvent={() => setSheet("add_event")} />
 

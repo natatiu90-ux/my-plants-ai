@@ -5,11 +5,16 @@ import type {
   PlantAction,
   PlantCareEvent,
   PlantCareEventType,
+  CareScheduleStatus,
+  PlantHypothesis,
+  PlantHypothesisResolution,
+  PlantHypothesisStatus,
   PlantMilestone,
   PlantMilestoneType,
   PlantPhoto,
   PlantStatus,
-  Room
+  Room,
+  SoilCheckResult
 } from "@/types/plant";
 import type { TranslationKey } from "@/i18n/dictionaries";
 import { commonNameFromScientificName } from "@/lib/plant-display";
@@ -25,7 +30,13 @@ export type PlantRow = {
   status: PlantStatus;
   next_action: PlantAction | "none";
   last_watered_at: string | null;
+  last_soil_checked_at?: string | null;
+  last_soil_result?: SoilCheckResult | null;
   next_check_at: string | null;
+  care_schedule_status?: CareScheduleStatus | null;
+  notification_enabled?: boolean | null;
+  last_notification_sent_at?: string | null;
+  notification_due_cycle_key?: string | null;
   created_at: string;
 };
 
@@ -80,6 +91,17 @@ export type PlantAnalysisRow = {
   resolved_at?: string | null;
 };
 
+export type PlantHypothesisResolutionRow = {
+  id: string;
+  plant_id: string;
+  hypothesis: PlantHypothesis;
+  status: PlantHypothesisStatus;
+  user_result: string;
+  evidence_source: string;
+  resolved_at: string;
+  created_at: string;
+};
+
 const statusLabelKeys: Record<PlantStatus, TranslationKey> = {
   healthy: "status.doingGreat",
   check_soon: "status.checkSoilToday",
@@ -117,7 +139,13 @@ export function mapPlant(row: PlantRow): Plant {
     messageKey: messageKeys[row.status],
     nextAction,
     lastWateredAt: toDateKey(row.last_watered_at),
+    lastSoilCheckedAt: toDateKey(row.last_soil_checked_at),
+    lastSoilResult: row.last_soil_result ?? undefined,
     nextCheckAt: toDateKey(row.next_check_at),
+    careScheduleStatus: row.care_schedule_status ?? "active",
+    notificationEnabled: row.notification_enabled ?? true,
+    lastNotificationSentAt: toDateKey(row.last_notification_sent_at),
+    notificationDueCycleKey: row.notification_due_cycle_key ?? undefined,
     roomKey: row.room_key ?? row.room_id ?? undefined,
     lightConditionKey: "light.mediumIndirect",
     notes: row.notes ?? undefined
@@ -198,5 +226,18 @@ export function mapAnalysis(row: PlantAnalysisRow): PlantAnalysisRecord {
     model: row.model ?? undefined,
     createdAt: toDateKey(row.created_at) ?? row.created_at,
     resolvedAt: toDateKey(row.resolved_at) ?? undefined
+  };
+}
+
+export function mapHypothesisResolution(row: PlantHypothesisResolutionRow): PlantHypothesisResolution {
+  return {
+    id: row.id,
+    plantId: row.plant_id,
+    hypothesis: row.hypothesis,
+    status: row.status,
+    userResult: row.user_result,
+    evidenceSource: row.evidence_source,
+    resolvedAt: toDateKey(row.resolved_at) ?? row.resolved_at,
+    createdAt: toDateKey(row.created_at) ?? row.created_at
   };
 }

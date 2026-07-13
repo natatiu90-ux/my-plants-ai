@@ -1,27 +1,115 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, Bell, Home, Trash2, UserRound } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
+import { getNotificationSupport, saveCareNotificationSettings, sendTestCareNotification, subscribeToCarePush, unsubscribeFromCarePush } from "@/lib/push-client";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { roomOptions } from "./RoomPicker";
 
 const futureSections = [
   { key: "settings.home", icon: Home },
-  { key: "settings.notifications", icon: Bell },
   { key: "settings.account", icon: UserRound }
 ] as const;
 
 export function SettingsPanel() {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const { rooms, plants, deleteRoom } = usePlantStore();
   const [roomToDelete, setRoomToDelete] = useState<string | null>(null);
   const [replacementRoomKey, setReplacementRoomKey] = useState("");
   const [isDeletingRoom, setIsDeletingRoom] = useState(false);
+  const [isPushSupported, setIsPushSupported] = useState(true);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("default");
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [preferredTime, setPreferredTime] = useState("09:00");
+  const [quietHoursStart, setQuietHoursStart] = useState("22:00");
+  const [quietHoursEnd, setQuietHoursEnd] = useState("08:00");
+  const [notificationMessage, setNotificationMessage] = useState<string | null>(null);
+  const [isNotificationSaving, setIsNotificationSaving] = useState(false);
   const selectedRoom = rooms.find((room) => room.id === roomToDelete);
   const selectedRoomPlantCount = plants.filter((plant) => plant.roomKey === roomToDelete).length;
+  const permissionLabel = {
+    default: t("notifications.permission.default"),
+    granted: t("notifications.permission.granted"),
+    denied: t("notifications.permission.denied"),
+    unsupported: t("notifications.permission.unsupported")
+  }[notificationPermission];
+
+  const refreshNotificationSupport = async () => {
+    const support = await getNotificationSupport();
+    setIsPushSupported(support.supported);
+    setNotificationPermission(support.permission);
+    setNotificationsEnabled(support.subscribed);
+  };
+
+  useEffect(() => {
+    void refreshNotificationSupport();
+  }, []);
+
+  const enableNotifications = async () => {
+    if (isNotificationSaving) return;
+    setIsNotificationSaving(true);
+    setNotificationMessage(null);
+    try {
+      await subscribeToCarePush(locale);
+      await saveCareNotificationSettings({ preferredTime, quietHoursStart, quietHoursEnd, locale });
+      await refreshNotificationSupport();
+      setNotificationMessage(t("notifications.enabledMessage"));
+    } catch (error) {
+      console.info("push_subscription_failed", { message: error instanceof Error ? error.message : "Unknown error" });
+      setNotificationMessage(t("notifications.failedMessage"));
+    } finally {
+      setIsNotificationSaving(false);
+    }
+  };
+
+  const disableNotifications = async () => {
+    if (isNotificationSaving) return;
+    setIsNotificationSaving(true);
+    setNotificationMessage(null);
+    try {
+      await unsubscribeFromCarePush();
+      await refreshNotificationSupport();
+      setNotificationMessage(t("notifications.disabledMessage"));
+    } catch (error) {
+      console.info("push_unsubscribe_failed", { message: error instanceof Error ? error.message : "Unknown error" });
+      setNotificationMessage(t("notifications.failedMessage"));
+    } finally {
+      setIsNotificationSaving(false);
+    }
+  };
+
+  const saveNotificationSettings = async () => {
+    if (isNotificationSaving) return;
+    setIsNotificationSaving(true);
+    setNotificationMessage(null);
+    try {
+      await saveCareNotificationSettings({ preferredTime, quietHoursStart, quietHoursEnd, locale });
+      setNotificationMessage(t("notifications.savedMessage"));
+    } catch (error) {
+      console.info("push_settings_failed", { message: error instanceof Error ? error.message : "Unknown error" });
+      setNotificationMessage(t("notifications.failedMessage"));
+    } finally {
+      setIsNotificationSaving(false);
+    }
+  };
+
+  const sendTest = async () => {
+    if (isNotificationSaving) return;
+    setIsNotificationSaving(true);
+    setNotificationMessage(null);
+    try {
+      await sendTestCareNotification(locale);
+      setNotificationMessage(t("notifications.testSent"));
+    } catch (error) {
+      console.info("push_test_failed", { message: error instanceof Error ? error.message : "Unknown error" });
+      setNotificationMessage(t("notifications.failedMessage"));
+    } finally {
+      setIsNotificationSaving(false);
+    }
+  };
 
   const confirmDeleteRoom = async () => {
     if (!selectedRoom || isDeletingRoom) {
@@ -91,6 +179,83 @@ export function SettingsPanel() {
           </div>
         ) : (
           <p className="rounded-[22px] bg-white/70 p-3 text-sm font-bold text-[#7a7166]">{t("rooms.noCustomRooms")}</p>
+        )}
+      </section>
+
+      <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
+        <div className="flex items-start gap-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-[#eef5e8] text-[#3f7d4f]">
+            <Bell aria-hidden="true" size={18} />
+          </span>
+          <div>
+            <h2 className="font-rounded text-xl font-extrabold text-ink">{t("notifications.title")}</h2>
+            <p className="mt-1 text-sm font-bold leading-5 text-[#8b8173]">{t("notifications.description")}</p>
+          </div>
+        </div>
+
+        {!isPushSupported ? (
+          <p className="mt-4 rounded-[20px] bg-white/75 p-3 text-sm font-bold leading-5 text-[#7a7166]">{t("notifications.unsupported")}</p>
+        ) : (
+          <div className="mt-4 grid gap-3">
+            <div className="rounded-[22px] bg-white/70 p-3">
+              <p className="text-xs font-extrabold uppercase tracking-[0.08em] text-[#9a9286]">{t("notifications.permission")}</p>
+              <p className="mt-1 text-sm font-bold text-[#565149]">{permissionLabel}</p>
+            </div>
+
+            <label className="block text-sm font-extrabold text-[#4f4940]">
+              {t("notifications.preferredTime")}
+              <input
+                type="time"
+                value={preferredTime}
+                onChange={(event) => setPreferredTime(event.target.value)}
+                onBlur={() => void saveNotificationSettings()}
+                className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none focus:ring-2 focus:ring-[#b7d8a8]"
+              />
+            </label>
+
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block text-sm font-extrabold text-[#4f4940]">
+                {t("notifications.quietStart")}
+                <input
+                  type="time"
+                  value={quietHoursStart}
+                  onChange={(event) => setQuietHoursStart(event.target.value)}
+                  onBlur={() => void saveNotificationSettings()}
+                  className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-3 text-base outline-none focus:ring-2 focus:ring-[#b7d8a8]"
+                />
+              </label>
+              <label className="block text-sm font-extrabold text-[#4f4940]">
+                {t("notifications.quietEnd")}
+                <input
+                  type="time"
+                  value={quietHoursEnd}
+                  onChange={(event) => setQuietHoursEnd(event.target.value)}
+                  onBlur={() => void saveNotificationSettings()}
+                  className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-3 text-base outline-none focus:ring-2 focus:ring-[#b7d8a8]"
+                />
+              </label>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => void (notificationsEnabled ? disableNotifications() : enableNotifications())}
+              disabled={isNotificationSaving}
+              className="min-h-12 rounded-[20px] bg-[#2d7a4f] px-4 text-sm font-extrabold text-white shadow-[0_10px_24px_rgba(45,122,79,0.18)] disabled:opacity-60"
+            >
+              {notificationsEnabled ? t("notifications.disable") : t("notifications.enable")}
+            </button>
+            {process.env.NODE_ENV !== "production" ? (
+              <button
+                type="button"
+                onClick={() => void sendTest()}
+                disabled={isNotificationSaving || !notificationsEnabled}
+                className="min-h-11 rounded-[18px] bg-white/75 px-4 text-sm font-extrabold text-[#7d776b] disabled:opacity-60"
+              >
+                {t("notifications.sendTest")}
+              </button>
+            ) : null}
+            {notificationMessage ? <p className="text-sm font-bold leading-5 text-[#6f675c]">{notificationMessage}</p> : null}
+          </div>
         )}
       </section>
 

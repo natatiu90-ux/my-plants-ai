@@ -2,8 +2,8 @@
 
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
-import type { PhotoType, Plant, PlantCareEvent, PlantMilestone, PlantPhoto, Room } from "@/types/plant";
-import { mapAnalysis, mapCareEvent, mapMilestone, mapPhoto, mapPlant, mapRoom, type PlantPhotoRow } from "./mappers";
+import type { CareScheduleStatus, PhotoType, Plant, PlantCareEvent, PlantHypothesis, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
+import { mapAnalysis, mapCareEvent, mapHypothesisResolution, mapMilestone, mapPhoto, mapPlant, mapRoom, type PlantPhotoRow } from "./mappers";
 
 const photoBucket = "plant-photos";
 const signedUrlTtlSeconds = 60 * 60;
@@ -105,6 +105,7 @@ export class PlantRepository {
     nextAction?: Plant["nextAction"];
     lastWateredAt?: string;
     nextCheckAt?: string;
+    careScheduleStatus?: CareScheduleStatus;
   }) {
     const { data, error } = await this.supabase
       .from("plants")
@@ -119,7 +120,8 @@ export class PlantRepository {
         status: input.status ?? "unknown",
         next_action: normalizeAction(input.nextAction),
         last_watered_at: input.lastWateredAt ? `${input.lastWateredAt}T12:00:00.000Z` : null,
-        next_check_at: input.nextCheckAt ? `${input.nextCheckAt}T12:00:00.000Z` : null
+        next_check_at: input.nextCheckAt ? `${input.nextCheckAt}T12:00:00.000Z` : null,
+        care_schedule_status: input.careScheduleStatus ?? "active"
       })
       .select("*")
       .single();
@@ -161,7 +163,9 @@ export class PlantRepository {
         status: "healthy",
         next_action: "none",
         last_watered_at: new Date().toISOString(),
-        next_check_at: `${nextCheckAt}T12:00:00.000Z`
+        next_check_at: `${nextCheckAt}T12:00:00.000Z`,
+        care_schedule_status: "active",
+        notification_due_cycle_key: null
       })
       .eq("id", plantId)
       .eq("user_id", this.user.id);
@@ -176,6 +180,12 @@ export class PlantRepository {
       nextAction: Plant["nextAction"];
       nextCheckAt?: string | null;
       lastWateredAt?: string | null;
+      lastSoilCheckedAt?: string | null;
+      lastSoilResult?: SoilCheckResult | null;
+      careScheduleStatus?: CareScheduleStatus;
+      notificationEnabled?: boolean;
+      lastNotificationSentAt?: string | null;
+      notificationDueCycleKey?: string | null;
     }
   ) {
     const update: {
@@ -183,6 +193,12 @@ export class PlantRepository {
       next_action: Plant["nextAction"] | "none";
       next_check_at: string | null;
       last_watered_at?: string;
+      last_soil_checked_at?: string;
+      last_soil_result?: SoilCheckResult | null;
+      care_schedule_status?: CareScheduleStatus;
+      notification_enabled?: boolean;
+      last_notification_sent_at?: string | null;
+      notification_due_cycle_key?: string | null;
     } = {
       status: input.status,
       next_action: normalizeAction(input.nextAction),
@@ -191,6 +207,24 @@ export class PlantRepository {
 
     if (input.lastWateredAt) {
       update.last_watered_at = `${input.lastWateredAt}T12:00:00.000Z`;
+    }
+    if (input.lastSoilCheckedAt) {
+      update.last_soil_checked_at = `${input.lastSoilCheckedAt}T12:00:00.000Z`;
+    }
+    if (input.lastSoilResult !== undefined) {
+      update.last_soil_result = input.lastSoilResult;
+    }
+    if (input.careScheduleStatus) {
+      update.care_schedule_status = input.careScheduleStatus;
+    }
+    if (input.notificationEnabled !== undefined) {
+      update.notification_enabled = input.notificationEnabled;
+    }
+    if (input.lastNotificationSentAt !== undefined) {
+      update.last_notification_sent_at = input.lastNotificationSentAt ? `${input.lastNotificationSentAt}T12:00:00.000Z` : null;
+    }
+    if (input.notificationDueCycleKey !== undefined) {
+      update.notification_due_cycle_key = input.notificationDueCycleKey;
     }
 
     const { error } = await this.supabase
@@ -564,6 +598,46 @@ export class AnalysisRepository {
   }
 }
 
+export class HypothesisResolutionRepository {
+  constructor(private supabase: SupabaseClient, private user: User) {}
+
+  async listResolutions() {
+    const { data, error } = await this.supabase
+      .from("plant_hypothesis_resolutions")
+      .select("*")
+      .eq("user_id", this.user.id)
+      .order("resolved_at", { ascending: false });
+
+    assertNoError(error);
+    return (data ?? []).map(mapHypothesisResolution);
+  }
+
+  async saveResolution(
+    plantId: string,
+    input: { hypothesis: PlantHypothesis; status: PlantHypothesisStatus; userResult: string; evidenceSource?: string }
+  ) {
+    const { data, error } = await this.supabase
+      .from("plant_hypothesis_resolutions")
+      .upsert(
+        {
+          user_id: this.user.id,
+          plant_id: plantId,
+          hypothesis: input.hypothesis,
+          status: input.status,
+          user_result: input.userResult,
+          evidence_source: input.evidenceSource ?? "user_confirmation",
+          resolved_at: new Date().toISOString()
+        },
+        { onConflict: "user_id,plant_id,hypothesis" }
+      )
+      .select("*")
+      .single();
+
+    assertNoError(error);
+    return mapHypothesisResolution(data);
+  }
+}
+
 export async function createRepositories(supabase: SupabaseClient, user: User) {
   return {
     plants: new PlantRepository(supabase, user),
@@ -571,6 +645,7 @@ export async function createRepositories(supabase: SupabaseClient, user: User) {
     rooms: new RoomRepository(supabase, user),
     milestones: new MilestoneRepository(supabase, user),
     careEvents: new CareEventRepository(supabase, user),
-    analyses: new AnalysisRepository(supabase, user)
+    analyses: new AnalysisRepository(supabase, user),
+    hypothesisResolutions: new HypothesisResolutionRepository(supabase, user)
   };
 }

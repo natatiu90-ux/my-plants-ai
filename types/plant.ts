@@ -8,6 +8,9 @@ export type PhotoType = "overview" | "leaf" | "pot" | "roots" | "problem" | "oth
 
 export type PlantCareEventType = "watered" | "soil_checked" | "photo_added";
 export type SoilCheckResult = "dry" | "slightly_damp" | "very_wet" | "not_sure";
+export type CareScheduleStatus = "active" | "paused" | "needs_first_check";
+export type PlantHypothesis = "pests" | "sun_stress" | "old_compacted_soil" | "recent_repotting" | "watering";
+export type PlantHypothesisStatus = "confirmed" | "ruled_out" | "unknown";
 
 export type PlantMilestoneType =
   | "plant_added"
@@ -35,7 +38,13 @@ export interface Plant {
   statusLabelKey: TranslationKey;
   nextAction?: PlantAction;
   lastWateredAt?: string;
+  lastSoilCheckedAt?: string;
+  lastSoilResult?: SoilCheckResult;
   nextCheckAt?: string;
+  careScheduleStatus: CareScheduleStatus;
+  notificationEnabled: boolean;
+  lastNotificationSentAt?: string;
+  notificationDueCycleKey?: string;
   roomKey?: string;
   lightConditionKey?: TranslationKey;
   notes?: string;
@@ -79,6 +88,17 @@ export interface PlantAnalysisRecord {
   model?: string;
   createdAt: string;
   resolvedAt?: string;
+}
+
+export interface PlantHypothesisResolution {
+  id: string;
+  plantId: string;
+  hypothesis: PlantHypothesis;
+  status: PlantHypothesisStatus;
+  userResult: string;
+  evidenceSource: string;
+  resolvedAt: string;
+  createdAt: string;
 }
 
 export interface PlantMilestone {

@@ -18,6 +18,8 @@ export const mockPlants: Plant[] = [
     nextAction: null,
     lastWateredAt: "2026-07-08",
     nextCheckAt: "2026-07-16",
+    careScheduleStatus: "active",
+    notificationEnabled: true,
     roomKey: "rooms.livingRoom",
     lightConditionKey: "light.brightIndirect"
   },
@@ -31,6 +33,8 @@ export const mockPlants: Plant[] = [
     nextAction: "water",
     lastWateredAt: "2026-07-06",
     nextCheckAt: "2026-07-12",
+    careScheduleStatus: "active",
+    notificationEnabled: true,
     roomKey: "rooms.kitchen",
     lightConditionKey: "light.mediumIndirect"
   },
@@ -44,6 +48,8 @@ export const mockPlants: Plant[] = [
     nextAction: "take_photo",
     lastWateredAt: "2026-07-06",
     nextCheckAt: "2026-07-12",
+    careScheduleStatus: "active",
+    notificationEnabled: true,
     roomKey: "rooms.livingRoom",
     lightConditionKey: "light.brightIndirect"
   },
@@ -57,6 +63,8 @@ export const mockPlants: Plant[] = [
     nextAction: "check_soil",
     lastWateredAt: "2026-07-09",
     nextCheckAt: "2026-07-12",
+    careScheduleStatus: "active",
+    notificationEnabled: true,
     roomKey: "rooms.bedroom",
     lightConditionKey: "light.softMorning"
   }

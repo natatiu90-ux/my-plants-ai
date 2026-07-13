@@ -6,7 +6,7 @@ import { addDays, toDateKey } from "@/lib/date-format";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/client";
 import { createRepositories } from "@/lib/repositories/supabase-repositories";
 import { commonNameFromScientificName } from "@/lib/plant-display";
-import type { PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
+import type { PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
 
 type PlantState = {
   plants: Plant[];
@@ -14,6 +14,7 @@ type PlantState = {
   careEvents: PlantCareEvent[];
   milestones: PlantMilestone[];
   analyses: PlantAnalysisRecord[];
+  hypothesisResolutions: PlantHypothesisResolution[];
   rooms: Room[];
   secondaryDataReady: boolean;
 };
@@ -53,6 +54,7 @@ type PlantStoreValue = PlantState & {
   getPlantCareEvents: (plantId: string) => PlantCareEvent[];
   getPlantMilestones: (plantId: string) => PlantMilestone[];
   getPlantAnalysis: (plantId: string) => PlantAnalysisRecord | undefined;
+  getPlantHypothesisResolutions: (plantId: string) => PlantHypothesisResolution[];
   ensureFullPhotoUrl: (photoId: string) => Promise<string | undefined>;
   addPlant: (input: AddPlantInput) => Promise<string>;
   updatePlant: (plantId: string, input: { homeName?: string; speciesName?: string; scientificName?: string; roomKey?: Plant["roomKey"]; notes?: string }) => Promise<void>;
@@ -75,6 +77,9 @@ type PlantStoreValue = PlantState & {
   deleteMilestone: (milestoneId: string) => Promise<void>;
   waterPlant: (plantId: string) => Promise<void>;
   recordSoilChecked: (plantId: string, result: SoilCheckResult, note?: string) => Promise<void>;
+  resolvePlantHypothesis: (plantId: string, hypothesis: PlantHypothesis, status: PlantHypothesisStatus, userResult: string) => Promise<void>;
+  updatePlantNotification: (plantId: string, enabled: boolean) => Promise<void>;
+  updatePlantNextCheck: (plantId: string, nextCheckAt?: string) => Promise<void>;
   deletePlant: (plantId: string) => Promise<void>;
 };
 
@@ -88,6 +93,7 @@ const emptyState: PlantState = {
   careEvents: [],
   milestones: [],
   analyses: [],
+  hypothesisResolutions: [],
   rooms: [],
   secondaryDataReady: false
 };
@@ -115,9 +121,14 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
 
     setState((current) => ({ ...current, plants, photos, rooms, secondaryDataReady: false }));
 
-    void Promise.all([nextRepositories.milestones.listMilestones(), nextRepositories.careEvents.listCareEvents(), nextRepositories.analyses.listAnalyses()])
-      .then(([milestones, careEvents, analyses]) => {
-        setState((current) => ({ ...current, milestones, careEvents, analyses, secondaryDataReady: true }));
+    void Promise.all([
+      nextRepositories.milestones.listMilestones(),
+      nextRepositories.careEvents.listCareEvents(),
+      nextRepositories.analyses.listAnalyses(),
+      nextRepositories.hypothesisResolutions.listResolutions()
+    ])
+      .then(([milestones, careEvents, analyses, hypothesisResolutions]) => {
+        setState((current) => ({ ...current, milestones, careEvents, analyses, hypothesisResolutions, secondaryDataReady: true }));
       })
       .catch((nextError) => {
         console.error("secondary_plant_data_load_failed", {
@@ -206,8 +217,13 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
   );
 
   const getPlantAnalysis = useCallback(
-    (plantId: string) => state.analyses.find((analysis) => analysis.plantId === plantId),
+    (plantId: string) => state.analyses.find((analysis) => analysis.plantId === plantId && !analysis.resolvedAt) ?? state.analyses.find((analysis) => analysis.plantId === plantId),
     [state.analyses]
+  );
+
+  const getPlantHypothesisResolutions = useCallback(
+    (plantId: string) => state.hypothesisResolutions.filter((resolution) => resolution.plantId === plantId),
+    [state.hypothesisResolutions]
   );
 
   const ensureFullPhotoUrl = useCallback(
@@ -353,7 +369,8 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         status: input.analysis?.condition ?? "unknown",
         nextAction: input.analysis?.nextAction ?? null,
         lastWateredAt: input.lastWateredAt,
-        nextCheckAt
+        nextCheckAt,
+        careScheduleStatus: input.lastWateredAt ? "active" : "needs_first_check"
       });
 
       const photos = await repositories.photos.addPhotos(plant.id, input.photos ?? [], false);
@@ -409,6 +426,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         photos: [...photos, ...current.photos],
         milestones: [milestone, ...(wateringMilestone ? [wateringMilestone] : []), ...current.milestones],
         analyses: [...(analysisRecord ? [analysisRecord] : []), ...current.analyses],
+        hypothesisResolutions: current.hypothesisResolutions,
         careEvents: [
           ...(input.lastWateredAt
             ? [{ id: `${plant.id}-watered-${Date.now()}`, plantId: plant.id, type: "watered" as const, createdAt: input.lastWateredAt }]
@@ -547,7 +565,9 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
                 messageKey: "plants.afterWatering.message",
                 nextAction: null,
                 lastWateredAt: toDateKey(new Date()),
-                nextCheckAt
+                nextCheckAt,
+                careScheduleStatus: "active",
+                notificationDueCycleKey: undefined
               }
             : plant
         ),
@@ -563,6 +583,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         status: "check_soon" as const,
         nextAction: "water" as const,
         nextCheckAt: null,
+        careScheduleStatus: "active" as const,
         replacementRecommendationId: "water_after_soil_check"
       };
     }
@@ -572,6 +593,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         status: "healthy" as const,
         nextAction: null,
         nextCheckAt: toDateKey(addDays(new Date(), 1)),
+        careScheduleStatus: "active" as const,
         replacementRecommendationId: "soil_check_guidance"
       };
     }
@@ -580,6 +602,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       status: "healthy" as const,
       nextAction: null,
       nextCheckAt: toDateKey(addDays(new Date(), 2)),
+      careScheduleStatus: "active" as const,
       replacementRecommendationId: null
     };
   };
@@ -599,9 +622,14 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       await repositories.plants.updateRecommendationState(plantId, {
         status: resolution.status,
         nextAction: resolution.nextAction,
-        nextCheckAt: resolution.nextCheckAt
+        nextCheckAt: resolution.nextCheckAt,
+        lastSoilCheckedAt: toDateKey(new Date()),
+        lastSoilResult: result,
+        careScheduleStatus: resolution.careScheduleStatus,
+        notificationDueCycleKey: null
       });
       await repositories.careEvents.addCareEvent(plantId, { type: "soil_checked", metadata: { result, followUp: resolution.replacementRecommendationId ?? "next_check_scheduled" } });
+      console.info("care_schedule_recalculated", { plantId, result, nextCheckAt: resolution.nextCheckAt });
       const milestone = await repositories.milestones.addMilestone(plantId, {
         type: "soil_checked",
         eventDate: toDateKey(new Date()),
@@ -625,7 +653,11 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
                     ? "plants.checkSoon.message"
                     : "plants.afterWatering.message",
                 nextAction: resolution.nextAction,
-                nextCheckAt: resolution.nextCheckAt ?? undefined
+                nextCheckAt: resolution.nextCheckAt ?? undefined,
+                lastSoilCheckedAt: toDateKey(new Date()),
+                lastSoilResult: result,
+                careScheduleStatus: resolution.careScheduleStatus,
+                notificationDueCycleKey: undefined
               }
             : plant
         ),
@@ -639,6 +671,74 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
     [repositories]
   );
 
+  const resolvePlantHypothesis = useCallback(
+    async (plantId: string, hypothesis: PlantHypothesis, status: PlantHypothesisStatus, userResult: string) => {
+      if (!repositories) {
+        return;
+      }
+
+      const resolution = await repositories.hypothesisResolutions.saveResolution(plantId, {
+        hypothesis,
+        status,
+        userResult,
+        evidenceSource: "user_confirmation"
+      });
+
+      setState((current) => ({
+        ...current,
+        hypothesisResolutions: [
+          resolution,
+          ...current.hypothesisResolutions.filter((item) => item.plantId !== plantId || item.hypothesis !== hypothesis)
+        ]
+      }));
+    },
+    [repositories]
+  );
+
+  const updatePlantNotification = useCallback(
+    async (plantId: string, enabled: boolean) => {
+      await repositories?.plants.updateRecommendationState(plantId, {
+        status: state.plants.find((plant) => plant.id === plantId)?.status ?? "unknown",
+        nextAction: state.plants.find((plant) => plant.id === plantId)?.nextAction ?? null,
+        nextCheckAt: state.plants.find((plant) => plant.id === plantId)?.nextCheckAt ?? null,
+        notificationEnabled: enabled
+      });
+      setState((current) => ({
+        ...current,
+        plants: current.plants.map((plant) => (plant.id === plantId ? { ...plant, notificationEnabled: enabled } : plant))
+      }));
+    },
+    [repositories, state.plants]
+  );
+
+  const updatePlantNextCheck = useCallback(
+    async (plantId: string, nextCheckAt?: string) => {
+      const plant = state.plants.find((item) => item.id === plantId);
+      await repositories?.plants.updateRecommendationState(plantId, {
+        status: plant?.status ?? "unknown",
+        nextAction: plant?.nextAction ?? null,
+        nextCheckAt: nextCheckAt ?? null,
+        careScheduleStatus: nextCheckAt ? "active" : "needs_first_check",
+        notificationDueCycleKey: null
+      });
+      setState((current) => ({
+        ...current,
+        plants: current.plants.map((item) =>
+          item.id === plantId
+            ? {
+                ...item,
+                nextCheckAt,
+                careScheduleStatus: nextCheckAt ? "active" : "needs_first_check",
+                notificationDueCycleKey: undefined
+              }
+            : item
+        )
+      }));
+      console.info("care_schedule_recalculated", { plantId, nextCheckAt });
+    },
+    [repositories, state.plants]
+  );
+
   const deletePlant = useCallback(
     async (plantId: string) => {
       if (!repositories) return;
@@ -650,6 +750,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         careEvents: current.careEvents.filter((event) => event.plantId !== plantId),
         milestones: current.milestones.filter((milestone) => milestone.plantId !== plantId),
         analyses: current.analyses.filter((analysis) => analysis.plantId !== plantId),
+        hypothesisResolutions: current.hypothesisResolutions.filter((resolution) => resolution.plantId !== plantId),
         rooms: current.rooms,
         secondaryDataReady: current.secondaryDataReady
       }));
@@ -670,6 +771,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       getPlantCareEvents,
       getPlantMilestones,
       getPlantAnalysis,
+      getPlantHypothesisResolutions,
       ensureFullPhotoUrl,
       addPlant,
       updatePlant,
@@ -686,6 +788,9 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       deleteMilestone,
       waterPlant,
       recordSoilChecked,
+      resolvePlantHypothesis,
+      updatePlantNotification,
+      updatePlantNextCheck,
       deletePlant
     }),
     [
@@ -704,10 +809,12 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       getCoverPhoto,
       getPlant,
       getPlantAnalysis,
+      getPlantHypothesisResolutions,
       getPlantCareEvents,
       getPlantMilestones,
       getPlantPhotos,
       recordSoilChecked,
+      resolvePlantHypothesis,
       roomExists,
       setCoverPhoto,
       state,
@@ -715,6 +822,8 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       updateMilestone,
       updatePhotoType,
       updatePlant,
+      updatePlantNextCheck,
+      updatePlantNotification,
       user?.id,
       waterPlant
     ]
