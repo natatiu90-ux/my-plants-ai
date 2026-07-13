@@ -56,6 +56,31 @@ export interface PlantCareEvent {
   metadata?: Record<string, string>;
 }
 
+export interface PlantAnalysisRecord {
+  id: string;
+  plantId: string;
+  condition: PlantStatus;
+  nextAction?: PlantAction;
+  summary?: {
+    en?: string | null;
+    ru?: string | null;
+  };
+  recommendations: {
+    type?: string;
+    priority?: string;
+    en?: string;
+    ru?: string;
+  }[];
+  rawResult?: {
+    visibleObservations?: { en?: string; ru?: string }[];
+    uncertainties?: { en?: string; ru?: string }[];
+    [key: string]: unknown;
+  };
+  model?: string;
+  createdAt: string;
+  resolvedAt?: string;
+}
+
 export interface PlantMilestone {
   id: string;
   plantId: string;

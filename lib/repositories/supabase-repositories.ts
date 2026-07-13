@@ -3,7 +3,7 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
 import type { PhotoType, Plant, PlantCareEvent, PlantMilestone, PlantPhoto, Room } from "@/types/plant";
-import { mapCareEvent, mapMilestone, mapPhoto, mapPlant, mapRoom, type PlantPhotoRow } from "./mappers";
+import { mapAnalysis, mapCareEvent, mapMilestone, mapPhoto, mapPlant, mapRoom, type PlantPhotoRow } from "./mappers";
 
 const photoBucket = "plant-photos";
 const signedUrlTtlSeconds = 60 * 60;
@@ -483,6 +483,17 @@ export class CareEventRepository {
 
 export class AnalysisRepository {
   constructor(private supabase: SupabaseClient, private user: User) {}
+
+  async listAnalyses() {
+    const { data, error } = await this.supabase
+      .from("plant_analyses")
+      .select("*")
+      .eq("user_id", this.user.id)
+      .order("created_at", { ascending: false });
+
+    assertNoError(error);
+    return (data ?? []).map(mapAnalysis);
+  }
 
   async addAnalysis(input: {
     plantId: string;

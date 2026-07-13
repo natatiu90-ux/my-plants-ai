@@ -6,13 +6,14 @@ import { addDays, toDateKey } from "@/lib/date-format";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/client";
 import { createRepositories } from "@/lib/repositories/supabase-repositories";
 import { commonNameFromScientificName } from "@/lib/plant-display";
-import type { PhotoType, Plant, PlantCareEvent, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
+import type { PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
 
 type PlantState = {
   plants: Plant[];
   photos: PlantPhoto[];
   careEvents: PlantCareEvent[];
   milestones: PlantMilestone[];
+  analyses: PlantAnalysisRecord[];
   rooms: Room[];
   secondaryDataReady: boolean;
 };
@@ -51,6 +52,7 @@ type PlantStoreValue = PlantState & {
   getCoverPhoto: (plantId: string) => PlantPhoto | undefined;
   getPlantCareEvents: (plantId: string) => PlantCareEvent[];
   getPlantMilestones: (plantId: string) => PlantMilestone[];
+  getPlantAnalysis: (plantId: string) => PlantAnalysisRecord | undefined;
   ensureFullPhotoUrl: (photoId: string) => Promise<string | undefined>;
   addPlant: (input: AddPlantInput) => Promise<string>;
   updatePlant: (plantId: string, input: { homeName?: string; speciesName?: string; scientificName?: string; roomKey?: Plant["roomKey"]; notes?: string }) => Promise<void>;
@@ -85,6 +87,7 @@ const emptyState: PlantState = {
   photos: [],
   careEvents: [],
   milestones: [],
+  analyses: [],
   rooms: [],
   secondaryDataReady: false
 };
@@ -112,9 +115,9 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
 
     setState((current) => ({ ...current, plants, photos, rooms, secondaryDataReady: false }));
 
-    void Promise.all([nextRepositories.milestones.listMilestones(), nextRepositories.careEvents.listCareEvents()])
-      .then(([milestones, careEvents]) => {
-        setState((current) => ({ ...current, milestones, careEvents, secondaryDataReady: true }));
+    void Promise.all([nextRepositories.milestones.listMilestones(), nextRepositories.careEvents.listCareEvents(), nextRepositories.analyses.listAnalyses()])
+      .then(([milestones, careEvents, analyses]) => {
+        setState((current) => ({ ...current, milestones, careEvents, analyses, secondaryDataReady: true }));
       })
       .catch((nextError) => {
         console.error("secondary_plant_data_load_failed", {
@@ -200,6 +203,11 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         .filter((milestone) => milestone.plantId === plantId)
         .sort((a, b) => (b.eventDate ?? b.createdAt).localeCompare(a.eventDate ?? a.createdAt)),
     [state.milestones]
+  );
+
+  const getPlantAnalysis = useCallback(
+    (plantId: string) => state.analyses.find((analysis) => analysis.plantId === plantId),
+    [state.analyses]
   );
 
   const ensureFullPhotoUrl = useCallback(
@@ -379,11 +387,28 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         });
       }
 
+      const analysisRecord: PlantAnalysisRecord | null = input.analysis
+        ? {
+            id: `${plant.id}-analysis-${Date.now()}`,
+            plantId: plant.id,
+            condition: input.analysis.condition ?? "unknown",
+            nextAction: input.analysis.nextAction ?? null,
+            summary: input.analysis.summary,
+            recommendations: Array.isArray(input.analysis.recommendations)
+              ? (input.analysis.recommendations as PlantAnalysisRecord["recommendations"])
+              : [],
+            rawResult: input.analysis.rawResult as PlantAnalysisRecord["rawResult"],
+            model: input.analysis.model ?? undefined,
+            createdAt: toDateKey(new Date())
+          }
+        : null;
+
       setState((current) => ({
         ...current,
         plants: [plant, ...current.plants],
         photos: [...photos, ...current.photos],
         milestones: [milestone, ...(wateringMilestone ? [wateringMilestone] : []), ...current.milestones],
+        analyses: [...(analysisRecord ? [analysisRecord] : []), ...current.analyses],
         careEvents: [
           ...(input.lastWateredAt
             ? [{ id: `${plant.id}-watered-${Date.now()}`, plantId: plant.id, type: "watered" as const, createdAt: input.lastWateredAt }]
@@ -624,6 +649,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         photos: current.photos.filter((photo) => photo.plantId !== plantId),
         careEvents: current.careEvents.filter((event) => event.plantId !== plantId),
         milestones: current.milestones.filter((milestone) => milestone.plantId !== plantId),
+        analyses: current.analyses.filter((analysis) => analysis.plantId !== plantId),
         rooms: current.rooms,
         secondaryDataReady: current.secondaryDataReady
       }));
@@ -643,6 +669,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       getCoverPhoto,
       getPlantCareEvents,
       getPlantMilestones,
+      getPlantAnalysis,
       ensureFullPhotoUrl,
       addPlant,
       updatePlant,
@@ -676,6 +703,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       ensureFullPhotoUrl,
       getCoverPhoto,
       getPlant,
+      getPlantAnalysis,
       getPlantCareEvents,
       getPlantMilestones,
       getPlantPhotos,

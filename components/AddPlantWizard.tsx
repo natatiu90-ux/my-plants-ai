@@ -176,7 +176,6 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [isEditingNickname, setIsEditingNickname] = useState(false);
   const [speciesName, setSpeciesName] = useState("");
   const [scientificName, setScientificName] = useState("");
-  const [notes, setNotes] = useState("");
   const [roomKey, setRoomKey] = useState<string | undefined>();
   const [lastWateredAt, setLastWateredAt] = useState<string | undefined>();
   const [activePicker, setActivePicker] = useState<ConfirmationPicker>(null);
@@ -451,6 +450,21 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const displayScientificName = cleanScientificName(scientificName);
   const uncertaintyMessage = analysis?.uncertainties?.[0]?.[locale];
   const todayDateKey = toDateKey(new Date());
+  const conditionSummary =
+    analysis?.condition === "needs_attention"
+      ? {
+          title: t("addPlant.conditionHighTitle"),
+          text: t("addPlant.conditionHighText")
+        }
+      : analysis?.condition === "check_soon"
+        ? {
+            title: t("addPlant.conditionCheckTitle"),
+            text: t("addPlant.conditionCheckText")
+          }
+        : {
+            title: t("addPlant.conditionHealthyTitle"),
+            text: t("addPlant.conditionHealthyText")
+          };
 
   const openPicker = (picker: ConfirmationPicker) => {
     setIsChoosingWaterDate(false);
@@ -510,7 +524,6 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         scientificName: displayScientificName || undefined,
         roomKey,
         lastWateredAt,
-        notes: notes.trim() || undefined,
         photos: selectedPhotos,
         analysis: analysis
           ? {
@@ -568,6 +581,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             <div className="pt-5">
               <h3 className="font-rounded text-[30px] font-black leading-tight text-ink">{displayCommonName}</h3>
               {displayScientificName ? <p className="mt-1 text-sm italic leading-5 text-[#8e867b]">{displayScientificName}</p> : null}
+              <div className="mt-4 rounded-[20px] bg-[#edf8ed] p-3">
+                <p className="font-rounded text-lg font-extrabold text-[#2d7a4f]">{conditionSummary.title}</p>
+                <p className="mt-1 text-sm font-bold leading-5 text-[#5f594f]">{conditionSummary.text}</p>
+              </div>
               {uncertaintyMessage ? <p className="mt-4 rounded-[18px] bg-white/70 p-3 text-sm font-bold leading-5 text-[#7a6f61]">{uncertaintyMessage}</p> : null}
               <div className="mt-5 grid gap-2">
                 <div className="rounded-[20px] bg-white/70 p-3">
@@ -680,7 +697,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                   ))}
                 </div>
               ) : null}
-              {analysis?.summary ? <p className="mt-4 text-sm font-bold leading-6 text-[#5f594f]">{analysis.summary[locale]}</p> : null}
+              <div className="mt-4 rounded-[20px] bg-[#edf8ed] p-3">
+                <p className="font-rounded text-lg font-extrabold text-[#2d7a4f]">{conditionSummary.title}</p>
+                <p className="mt-1 text-sm font-bold leading-5 text-[#5f594f]">{conditionSummary.text}</p>
+              </div>
               {uncertaintyMessage ? <p className="mt-3 rounded-[18px] bg-white/70 p-3 text-sm font-bold leading-5 text-[#7a6f61]">{uncertaintyMessage}</p> : null}
               <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
                 {t("addPlant.nickname")}
@@ -698,10 +718,6 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                 <p className="mb-2 text-sm font-extrabold text-[#4f4940]">{t("plantDetail.location")}</p>
                 <RoomPicker value={roomKey} onChange={setRoomKey} />
               </div>
-              <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
-                {t("edit.notes")}
-                <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder={t("edit.notesPlaceholder")} className="mt-2 min-h-28 w-full rounded-[18px] bg-white/80 p-4 text-sm leading-6 outline-none" />
-              </label>
             </>
           )}
         </div>

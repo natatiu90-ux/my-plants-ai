@@ -1,6 +1,7 @@
 import type {
   PhotoType,
   Plant,
+  PlantAnalysisRecord,
   PlantAction,
   PlantCareEvent,
   PlantCareEventType,
@@ -63,6 +64,20 @@ export type CareEventRow = {
   event_date: string;
   created_at: string;
   metadata: Record<string, string> | null;
+};
+
+export type PlantAnalysisRow = {
+  id: string;
+  plant_id: string;
+  condition: PlantStatus;
+  next_action: PlantAction | "none" | null;
+  summary_en: string | null;
+  summary_ru: string | null;
+  recommendations: unknown;
+  raw_result: unknown;
+  model: string | null;
+  created_at: string;
+  resolved_at?: string | null;
 };
 
 const statusLabelKeys: Record<PlantStatus, TranslationKey> = {
@@ -153,5 +168,35 @@ export function mapCareEvent(row: CareEventRow): PlantCareEvent {
     type: row.type,
     createdAt: toDateKey(row.event_date) ?? row.created_at,
     metadata: row.metadata ?? undefined
+  };
+}
+
+function isRecommendationList(value: unknown): PlantAnalysisRecord["recommendations"] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is PlantAnalysisRecord["recommendations"][number] => Boolean(item && typeof item === "object"));
+}
+
+function isRawAnalysis(value: unknown): PlantAnalysisRecord["rawResult"] {
+  return value && typeof value === "object" ? (value as PlantAnalysisRecord["rawResult"]) : undefined;
+}
+
+export function mapAnalysis(row: PlantAnalysisRow): PlantAnalysisRecord {
+  return {
+    id: row.id,
+    plantId: row.plant_id,
+    condition: row.condition,
+    nextAction: row.next_action === "none" ? null : row.next_action,
+    summary: {
+      en: row.summary_en,
+      ru: row.summary_ru
+    },
+    recommendations: isRecommendationList(row.recommendations),
+    rawResult: isRawAnalysis(row.raw_result),
+    model: row.model ?? undefined,
+    createdAt: toDateKey(row.created_at) ?? row.created_at,
+    resolvedAt: toDateKey(row.resolved_at) ?? undefined
   };
 }

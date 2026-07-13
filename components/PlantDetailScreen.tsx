@@ -13,6 +13,7 @@ import { DeletePlantDialog } from "./DeletePlantDialog";
 import { MilestoneEditor } from "./MilestoneEditor";
 import { PhotoGallery } from "./PhotoGallery";
 import { PhotoUploadFlow } from "./PhotoUploadFlow";
+import { PlantAnalysisSection } from "./PlantAnalysisSection";
 import { PlantDetailHeader } from "./PlantDetailHeader";
 import { PlantHeroImage } from "./PlantHeroImage";
 import { PlantStatusSection } from "./PlantStatusSection";
@@ -25,9 +26,10 @@ type Sheet = "check_soil" | "add_photo" | "add_event" | null;
 export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const router = useRouter();
   const { t } = useI18n();
-  const { addMilestone, addPlantPhotos, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getPlant, getPlantMilestones, getPlantPhotos, recordSoilChecked, secondaryDataReady, waterPlant } =
+  const { addMilestone, addPlantPhotos, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getPlant, getPlantAnalysis, getPlantMilestones, getPlantPhotos, recordSoilChecked, secondaryDataReady, waterPlant } =
     usePlantStore();
   const plant = getPlant(plantId);
+  const analysis = getPlantAnalysis(plantId);
   const coverPhoto = getCoverPhoto(plantId);
   const photos = getPlantPhotos(plantId);
   const milestones = useMemo(
@@ -160,6 +162,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         }}
       />
       <PlantStatusSection plant={plant} />
+      <PlantAnalysisSection analysis={analysis} plant={plant} />
       <button
         type="button"
         onClick={() => setSheet("add_photo")}
