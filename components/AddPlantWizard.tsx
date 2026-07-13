@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
@@ -172,6 +172,8 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<Step>("pick");
   const [selectedPhotos, setSelectedPhotos] = useState<PendingPhotoUpload[]>([]);
   const [homeName, setHomeName] = useState("");
+  const [nicknameDraft, setNicknameDraft] = useState("");
+  const [isEditingNickname, setIsEditingNickname] = useState(false);
   const [speciesName, setSpeciesName] = useState("");
   const [scientificName, setScientificName] = useState("");
   const [notes, setNotes] = useState("");
@@ -189,6 +191,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [analysisStageIndex, setAnalysisStageIndex] = useState(0);
   const [showLongAnalysisHint, setShowLongAnalysisHint] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const nicknameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const originalOverflow = document.body.style.overflow;
@@ -198,6 +201,17 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       document.body.style.overflow = originalOverflow;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isEditingNickname) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      nicknameInputRef.current?.focus();
+      nicknameInputRef.current?.select();
+    }, 0);
+  }, [isEditingNickname]);
 
   useEffect(() => {
     if (step !== "analysis") {
@@ -443,6 +457,23 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     setActivePicker(picker);
   };
 
+  const startNicknameEdit = () => {
+    setNicknameDraft(homeName || suggestedNickname(locale, plants.map((plant) => plant.homeName ?? "")));
+    setIsEditingNickname(true);
+  };
+
+  const saveNicknameEdit = () => {
+    const nextNickname = cleanPlantName(nicknameDraft) || suggestedNickname(locale, plants.map((plant) => plant.homeName ?? ""));
+    setHomeName(nextNickname);
+    setNicknameDraft(nextNickname);
+    setIsEditingNickname(false);
+  };
+
+  const cancelNicknameEdit = () => {
+    setNicknameDraft(homeName);
+    setIsEditingNickname(false);
+  };
+
   const selectLastWateredDate = (dateKey: string | undefined) => {
     setLastWateredAt(dateKey);
     setIsChoosingWaterDate(false);
@@ -541,12 +572,41 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
               <div className="mt-5 grid gap-2">
                 <div className="rounded-[20px] bg-white/70 p-3">
                   <p className="text-xs font-bold uppercase text-[#a09a90]">{t("addPlant.nickname")}</p>
-                  <div className="mt-1 flex items-center justify-between gap-3">
-                    <p className="font-rounded text-xl font-extrabold text-[#3f3b35]">{homeName}</p>
-                    <button type="button" onClick={() => setStep("details")} className="shrink-0 text-sm font-extrabold text-[#2d7a4f]">
-                      {t("addPlant.rename")}
-                    </button>
-                  </div>
+                  {isEditingNickname ? (
+                    <div className="mt-2">
+                      <input
+                        ref={nicknameInputRef}
+                        value={nicknameDraft}
+                        onChange={(event) => setNicknameDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            saveNicknameEdit();
+                          }
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            cancelNicknameEdit();
+                          }
+                        }}
+                        className="min-h-12 w-full rounded-[18px] bg-[#fffaf3] px-4 text-base font-extrabold text-[#3f3b35] outline-none ring-2 ring-[#ddf2dc]"
+                      />
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <button type="button" onClick={saveNicknameEdit} className="min-h-10 rounded-[16px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
+                          {t("addPlant.saveNickname")}
+                        </button>
+                        <button type="button" onClick={cancelNicknameEdit} className="min-h-10 rounded-[16px] bg-white/80 px-3 text-sm font-extrabold text-[#777167]">
+                          {t("plantDetail.cancel")}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-1 flex items-center justify-between gap-3">
+                      <p className="font-rounded text-xl font-extrabold text-[#3f3b35]">{homeName}</p>
+                      <button type="button" onClick={startNicknameEdit} className="shrink-0 text-sm font-extrabold text-[#2d7a4f]">
+                        {t("addPlant.rename")}
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <button
                   type="button"

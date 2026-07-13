@@ -38,6 +38,7 @@
   "addPlant.scientificName": "Scientific name",
   "addPlant.nickname": "Home nickname",
   "addPlant.rename": "Rename",
+  "addPlant.saveNickname": "Save",
   "addPlant.refineDetails": "Review and edit",
   "addPlant.noRoomSelected": "No room selected",
   "addPlant.locationLabel": "Location",

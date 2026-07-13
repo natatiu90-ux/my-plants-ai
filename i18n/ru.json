@@ -38,6 +38,7 @@
   "addPlant.scientificName": "Научное название",
   "addPlant.nickname": "Домашнее имя",
   "addPlant.rename": "Переименовать",
+  "addPlant.saveNickname": "Сохранить",
   "addPlant.refineDetails": "Проверить и изменить",
   "addPlant.noRoomSelected": "Комната не выбрана",
   "addPlant.locationLabel": "Местоположение",
