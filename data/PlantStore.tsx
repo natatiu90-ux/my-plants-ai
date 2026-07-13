@@ -682,7 +682,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
   const resolvePlantHypothesis = useCallback(
     async (plantId: string, hypothesis: PlantHypothesis, status: PlantHypothesisStatus, userResult: string) => {
       if (!repositories) {
-        return;
+        throw new Error("Plant collection is not ready.");
       }
 
       const resolution = await repositories.hypothesisResolutions.saveResolution(plantId, {

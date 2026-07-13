@@ -460,7 +460,6 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     : t("addPlant.lastWateringEmpty");
   const displayCommonName = cleanPlantName(speciesName) || commonNameFromScientificName(scientificName) || t("plants.unknownName");
   const displayScientificName = cleanScientificName(scientificName);
-  const uncertaintyMessage = analysis?.uncertainties?.[0]?.[locale];
   const todayDateKey = toDateKey(new Date());
   const conditionSummary =
     analysis?.condition === "needs_attention"
@@ -702,7 +701,6 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                 <p className="font-rounded text-lg font-extrabold text-[#2d7a4f]">{conditionSummary.title}</p>
                 <p className="mt-1 text-sm font-bold leading-5 text-[#5f594f]">{conditionSummary.text}</p>
               </div> : null}
-              {uncertaintyMessage ? <p className="mt-4 rounded-[18px] bg-white/70 p-3 text-sm font-bold leading-5 text-[#7a6f61]">{uncertaintyMessage}</p> : null}
               <div className="mt-5 grid gap-2">
                 <div className="rounded-[20px] bg-white/70 p-3">
                   <p className="text-xs font-bold uppercase text-[#a09a90]">{t("addPlant.nickname")}</p>
@@ -829,7 +827,6 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                 <p className="font-rounded text-lg font-extrabold text-[#2d7a4f]">{conditionSummary.title}</p>
                 <p className="mt-1 text-sm font-bold leading-5 text-[#5f594f]">{conditionSummary.text}</p>
               </div> : null}
-              {uncertaintyMessage ? <p className="mt-3 rounded-[18px] bg-white/70 p-3 text-sm font-bold leading-5 text-[#7a6f61]">{uncertaintyMessage}</p> : null}
               <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
                 {t("addPlant.nickname")}
                 <input value={homeName} onChange={(event) => setHomeName(event.target.value)} className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none" />

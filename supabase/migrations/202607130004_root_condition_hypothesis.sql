@@ -5,6 +5,6 @@ begin
   end if;
 
   alter table public.plant_hypothesis_resolutions add constraint plant_hypothesis_resolutions_hypothesis_check check (
-    hypothesis in ('pests', 'sun_stress', 'old_compacted_soil', 'recent_repotting', 'watering', 'root_condition')
+    hypothesis in ('pests', 'sun_stress', 'old_compacted_soil', 'recent_repotting', 'watering', 'root_condition', 'drainage')
   );
 end $$;
