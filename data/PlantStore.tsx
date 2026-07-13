@@ -14,6 +14,7 @@ type PlantState = {
   careEvents: PlantCareEvent[];
   milestones: PlantMilestone[];
   rooms: Room[];
+  secondaryDataReady: boolean;
 };
 
 type StoreStatus = "loading" | "ready" | "error";
@@ -50,6 +51,7 @@ type PlantStoreValue = PlantState & {
   getCoverPhoto: (plantId: string) => PlantPhoto | undefined;
   getPlantCareEvents: (plantId: string) => PlantCareEvent[];
   getPlantMilestones: (plantId: string) => PlantMilestone[];
+  ensureFullPhotoUrl: (photoId: string) => Promise<string | undefined>;
   addPlant: (input: AddPlantInput) => Promise<string>;
   updatePlant: (plantId: string, input: { homeName?: string; speciesName?: string; scientificName?: string; roomKey?: Plant["roomKey"]; notes?: string }) => Promise<void>;
   addRoom: (name: string) => Promise<Room>;
@@ -83,7 +85,8 @@ const emptyState: PlantState = {
   photos: [],
   careEvents: [],
   milestones: [],
-  rooms: []
+  rooms: [],
+  secondaryDataReady: false
 };
 
 function builtInRoomExists(name: string) {
@@ -101,15 +104,23 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
   const [repositories, setRepositories] = useState<Repositories | null>(null);
 
   const loadData = useCallback(async (nextRepositories: Repositories) => {
-    const [plants, photos, rooms, milestones, careEvents] = await Promise.all([
+    const [plants, photos, rooms] = await Promise.all([
       nextRepositories.plants.listPlants(),
       nextRepositories.photos.listPhotos(),
-      nextRepositories.rooms.listRooms(),
-      nextRepositories.milestones.listMilestones(),
-      nextRepositories.careEvents.listCareEvents()
+      nextRepositories.rooms.listRooms()
     ]);
 
-    setState({ plants, photos, rooms, milestones, careEvents });
+    setState((current) => ({ ...current, plants, photos, rooms, secondaryDataReady: false }));
+
+    void Promise.all([nextRepositories.milestones.listMilestones(), nextRepositories.careEvents.listCareEvents()])
+      .then(([milestones, careEvents]) => {
+        setState((current) => ({ ...current, milestones, careEvents, secondaryDataReady: true }));
+      })
+      .catch((nextError) => {
+        console.error("secondary_plant_data_load_failed", {
+          message: nextError instanceof Error ? nextError.message : "Unknown error"
+        });
+      });
   }, []);
 
   const bootstrap = useCallback(async () => {
@@ -189,6 +200,27 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         .filter((milestone) => milestone.plantId === plantId)
         .sort((a, b) => (b.eventDate ?? b.createdAt).localeCompare(a.eventDate ?? a.createdAt)),
     [state.milestones]
+  );
+
+  const ensureFullPhotoUrl = useCallback(
+    async (photoId: string) => {
+      const photo = state.photos.find((item) => item.id === photoId);
+      if (!repositories || !photo?.storagePath) {
+        return photo?.url;
+      }
+
+      const fullUrl = await repositories.photos.getFullPhotoUrl(photo.storagePath);
+      if (!fullUrl) {
+        return photo.url;
+      }
+
+      setState((current) => ({
+        ...current,
+        photos: current.photos.map((item) => (item.id === photoId ? { ...item, url: fullUrl } : item))
+      }));
+      return fullUrl;
+    },
+    [repositories, state.photos]
   );
 
   const roomExists = useCallback(
@@ -592,7 +624,8 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         photos: current.photos.filter((photo) => photo.plantId !== plantId),
         careEvents: current.careEvents.filter((event) => event.plantId !== plantId),
         milestones: current.milestones.filter((milestone) => milestone.plantId !== plantId),
-        rooms: current.rooms
+        rooms: current.rooms,
+        secondaryDataReady: current.secondaryDataReady
       }));
     },
     [repositories, state.photos]
@@ -610,6 +643,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       getCoverPhoto,
       getPlantCareEvents,
       getPlantMilestones,
+      ensureFullPhotoUrl,
       addPlant,
       updatePlant,
       addRoom,
@@ -639,6 +673,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       deletePlant,
       deletePlantPhoto,
       error,
+      ensureFullPhotoUrl,
       getCoverPhoto,
       getPlant,
       getPlantCareEvents,

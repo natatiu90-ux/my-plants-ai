@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { ArrowLeft, Plus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
 import { cleanScientificName, plantCommonName, plantDisplayName } from "@/lib/plant-display";
+import { logNavigationEvent } from "@/lib/navigation-performance";
 import { DeletePlantDialog } from "./DeletePlantDialog";
 import { DeletePhotoDialog } from "./DeletePhotoDialog";
 import { PhotoUploadFlow } from "./PhotoUploadFlow";
@@ -38,6 +39,19 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [deletingPhotoId, setDeletingPhotoId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const didLogEditDataReady = useRef(false);
+
+  useEffect(() => {
+    logNavigationEvent("edit", plantId, "edit_shell_rendered");
+  }, [plantId]);
+
+  useEffect(() => {
+    if (!plant || didLogEditDataReady.current) {
+      return;
+    }
+    didLogEditDataReady.current = true;
+    logNavigationEvent("edit", plant.id, "edit_data_ready");
+  }, [plant]);
 
   if (!plant) {
     return (

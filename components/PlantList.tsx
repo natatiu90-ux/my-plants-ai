@@ -9,9 +9,10 @@ export function PlantList({ plants }: { plants: Plant[] }) {
 
   return (
     <section className="flex flex-col gap-4 px-5 pt-6">
-      {plants.map((plant) => (
-        <PlantCard key={plant.id} plant={plant} coverPhotoUrl={getCoverPhoto(plant.id)?.url ?? "/plants/martha.png"} />
-      ))}
+      {plants.map((plant) => {
+        const coverPhoto = getCoverPhoto(plant.id);
+        return <PlantCard key={plant.id} plant={plant} coverPhotoUrl={coverPhoto?.thumbnailUrl ?? coverPhoto?.url ?? "/plants/martha.png"} />;
+      })}
     </section>
   );
 }

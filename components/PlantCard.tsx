@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useI18n } from "@/i18n/I18nProvider";
 import { plantCommonName, plantDisplayName } from "@/lib/plant-display";
+import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
 import type { Plant, PlantStatus } from "@/types/plant";
 import { PhotoImage } from "./PhotoImage";
 import { StatusBadge } from "./StatusBadge";
@@ -39,6 +40,10 @@ export function PlantCard({ plant, coverPhotoUrl }: { plant: Plant; coverPhotoUr
   return (
     <Link
       href={`/plants/${plant.id}`}
+      onClick={() => {
+        startNavigationLog("detail", plant.id, "plant_card_tapped");
+        startNavigationLog("detail", plant.id, "detail_navigation_started");
+      }}
       aria-label={`${t("plant.open")}: ${displayName}`}
       className={`block overflow-hidden rounded-[28px] border-[1.5px] shadow-soft transition duration-200 hover:-translate-y-1 focus-visible:-translate-y-1 ${styles.card}`}
     >
@@ -46,6 +51,9 @@ export function PlantCard({ plant, coverPhotoUrl }: { plant: Plant; coverPhotoUr
         <div className={`relative h-[224px] overflow-hidden rounded-t-[27px] ${styles.image}`}>
           <PhotoImage
             src={coverPhotoUrl}
+            onLoad={() => {
+              logNavigationEvent("detail", plant.id, "cover_thumbnail_ready");
+            }}
             alt={`${displayName}, ${commonName}`}
             className="h-full w-full object-cover"
           />

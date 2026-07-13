@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
 import { plantDisplayName } from "@/lib/plant-display";
+import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
 import { CareHistory } from "./CareHistory";
 import { CareSummary } from "./CareSummary";
 import { CheckSoilSheet } from "./CheckSoilSheet";
@@ -24,7 +25,7 @@ type Sheet = "check_soil" | "add_photo" | "add_event" | null;
 export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const router = useRouter();
   const { t } = useI18n();
-  const { addMilestone, addPlantPhotos, deletePlant, getCoverPhoto, getPlant, getPlantMilestones, getPlantPhotos, recordSoilChecked, waterPlant } =
+  const { addMilestone, addPlantPhotos, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getPlant, getPlantMilestones, getPlantPhotos, recordSoilChecked, secondaryDataReady, waterPlant } =
     usePlantStore();
   const plant = getPlant(plantId);
   const coverPhoto = getCoverPhoto(plantId);
@@ -38,6 +39,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const [sheet, setSheet] = useState<Sheet>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [isCompletingAction, setIsCompletingAction] = useState(false);
+  const [fullCoverUrl, setFullCoverUrl] = useState<string | undefined>();
+  const loggedEvents = useRef(new Set<string>());
 
   useEffect(() => {
     if (!toast) {
@@ -47,6 +50,45 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     const timeout = window.setTimeout(() => setToast(null), 2400);
     return () => window.clearTimeout(timeout);
   }, [toast]);
+
+  useEffect(() => {
+    logNavigationEvent("detail", plantId, "detail_shell_rendered");
+  }, [plantId]);
+
+  useEffect(() => {
+    if (!plant || loggedEvents.current.has("plant_data_ready")) {
+      return;
+    }
+    loggedEvents.current.add("plant_data_ready");
+    logNavigationEvent("detail", plant.id, "plant_data_ready");
+    logNavigationEvent("detail", plant.id, "recommendations_ready");
+  }, [plant]);
+
+  useEffect(() => {
+    if (!plant || !secondaryDataReady || loggedEvents.current.has("history_ready")) {
+      return;
+    }
+    loggedEvents.current.add("history_ready");
+    logNavigationEvent("detail", plant.id, "history_ready");
+  }, [plant, milestones.length, secondaryDataReady]);
+
+  useEffect(() => {
+    let isMounted = true;
+    setFullCoverUrl(undefined);
+    if (!plant || !coverPhoto?.id) {
+      return;
+    }
+
+    void ensureFullPhotoUrl(coverPhoto.id).then((url) => {
+      if (isMounted && url) {
+        setFullCoverUrl(url);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [coverPhoto?.id, ensureFullPhotoUrl, plant]);
 
   if (!plant) {
     return (
@@ -102,6 +144,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         onToggleMenu={() => setIsMenuOpen((value) => !value)}
         onEdit={() => {
           setIsMenuOpen(false);
+          startNavigationLog("edit", plant.id, "edit_navigation_started");
           router.push(`/plants/${plant.id}/edit`);
         }}
         onDelete={() => {
@@ -109,7 +152,13 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           setIsDeleteOpen(true);
         }}
       />
-      <PlantHeroImage plant={plant} coverPhotoUrl={coverPhoto?.url ?? "/plants/martha.png"} />
+      <PlantHeroImage
+        plant={plant}
+        coverPhotoUrl={fullCoverUrl ?? coverPhoto?.thumbnailUrl ?? coverPhoto?.url ?? "/plants/martha.png"}
+        onLoad={() => {
+          logNavigationEvent("detail", plant.id, fullCoverUrl ? "cover_full_image_ready" : "cover_thumbnail_ready");
+        }}
+      />
       <PlantStatusSection plant={plant} />
       <button
         type="button"

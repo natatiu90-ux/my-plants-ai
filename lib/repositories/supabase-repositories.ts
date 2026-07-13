@@ -7,6 +7,8 @@ import { mapCareEvent, mapMilestone, mapPhoto, mapPlant, mapRoom, type PlantPhot
 
 const photoBucket = "plant-photos";
 const signedUrlTtlSeconds = 60 * 60;
+const signedPhotoUrlCache = new Map<string, { url: string; expiresAt: number }>();
+const signedPhotoUrlRequests = new Map<string, Promise<string>>();
 
 function assertNoError(error: { message: string } | null) {
   if (error) {
@@ -30,21 +32,50 @@ function isBuiltInRoomKey(roomKey: string | undefined) {
   return Boolean(roomKey?.startsWith("rooms."));
 }
 
-async function withSignedPhotoUrls(supabase: SupabaseClient, rows: PlantPhotoRow[]) {
+async function signedPhotoUrl(supabase: SupabaseClient, storagePath: string, variant: "thumbnail" | "full") {
+  const cacheKey = `${variant}:${storagePath}`;
+  const cached = signedPhotoUrlCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.url;
+  }
+
+  const inFlight = signedPhotoUrlRequests.get(cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const request = (async () => {
+    const options =
+      variant === "thumbnail"
+        ? {
+            transform: {
+              width: 320,
+              height: 320,
+              resize: "cover" as const
+            }
+          }
+        : undefined;
+    const { data } = await supabase.storage.from(photoBucket).createSignedUrl(storagePath, signedUrlTtlSeconds, options);
+    const url = data?.signedUrl ?? "";
+    if (url) {
+      signedPhotoUrlCache.set(cacheKey, { url, expiresAt: Date.now() + (signedUrlTtlSeconds - 60) * 1000 });
+    }
+    signedPhotoUrlRequests.delete(cacheKey);
+    return url;
+  })();
+
+  signedPhotoUrlRequests.set(cacheKey, request);
+  return request;
+}
+
+async function withThumbnailPhotoUrls(supabase: SupabaseClient, rows: PlantPhotoRow[]) {
   return Promise.all(
     rows.map(async (row) => {
-      const { data } = await supabase.storage.from(photoBucket).createSignedUrl(row.storage_path, signedUrlTtlSeconds);
-      const { data: thumbnailData } = await supabase.storage.from(photoBucket).createSignedUrl(row.storage_path, signedUrlTtlSeconds, {
-        transform: {
-          width: 320,
-          height: 320,
-          resize: "cover"
-        }
-      });
+      const thumbnailUrl = await signedPhotoUrl(supabase, row.storage_path, "thumbnail");
       return {
         ...row,
-        signed_url: data?.signedUrl ?? null,
-        thumbnail_url: thumbnailData?.signedUrl ?? data?.signedUrl ?? null
+        signed_url: thumbnailUrl || null,
+        thumbnail_url: thumbnailUrl || null
       };
     })
   );
@@ -183,8 +214,12 @@ export class PhotoRepository {
       .order("created_at", { ascending: false });
 
     assertNoError(error);
-    const rows = await withSignedPhotoUrls(this.supabase, data ?? []);
+    const rows = await withThumbnailPhotoUrls(this.supabase, data ?? []);
     return rows.map(mapPhoto);
+  }
+
+  async getFullPhotoUrl(storagePath: string) {
+    return signedPhotoUrl(this.supabase, storagePath, "full");
   }
 
   async addPhotos(plantId: string, inputs: { url: string; type: PhotoType; isCover?: boolean }[], hasExistingPhotos: boolean) {
@@ -238,7 +273,7 @@ export class PhotoRepository {
       });
     }
 
-    const signedRows = await withSignedPhotoUrls(this.supabase, createdRows);
+    const signedRows = await withThumbnailPhotoUrls(this.supabase, createdRows);
     return signedRows.map(mapPhoto);
   }
 
