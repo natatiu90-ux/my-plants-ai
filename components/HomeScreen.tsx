@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Leaf, Sprout } from "lucide-react";
 import { AttentionBanner } from "./AttentionBanner";
@@ -59,9 +58,6 @@ function HomeEmptyState({ onAddPlant }: { onAddPlant: () => void }) {
         >
           {t("home.emptyCta")}
         </button>
-        <Link href="/settings" className="mt-3 inline-flex min-h-11 items-center justify-center rounded-[18px] px-4 text-sm font-extrabold text-[#6f8c62]">
-          {t("recovery.restore")}
-        </Link>
       </div>
     </section>
   );
