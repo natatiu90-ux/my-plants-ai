@@ -40,6 +40,9 @@ export function SettingsPanel() {
   const [pushDiagnostics, setPushDiagnostics] = useState<PushDiagnostics | null>(null);
   const selectedRoom = rooms.find((room) => room.id === roomToDelete);
   const selectedRoomPlantCount = plants.filter((plant) => plant.roomKey === roomToDelete).length;
+  const isPermissionGranted = notificationPermission === "granted";
+  const isPermissionDenied = notificationPermission === "denied";
+  const showPushDiagnostics = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_SHOW_PUSH_DIAGNOSTICS === "true";
   const permissionLabel = {
     default: t("notifications.permission.default"),
     granted: t("notifications.permission.granted"),
@@ -231,52 +234,67 @@ export function SettingsPanel() {
 
         {!isPushSupported ? (
           <p className="mt-4 rounded-[20px] bg-white/75 p-3 text-sm font-bold leading-5 text-[#7a7166]">{t("notifications.unsupported")}</p>
+        ) : isPermissionDenied ? (
+          <div className="mt-4 rounded-[20px] bg-white/75 p-3 text-sm font-bold leading-5 text-[#7a7166]">
+            <p>{t("notifications.deniedMessage")}</p>
+            <p className="mt-2 text-[#4f4940]">{t("notifications.deniedAction")}</p>
+          </div>
         ) : (
           <div className="mt-4 grid gap-3">
-            <div className="rounded-[22px] bg-white/70 p-3">
+            {!notificationsEnabled || !isPermissionGranted ? (
+              <div className="rounded-[22px] bg-white/70 p-3">
               <p className="text-xs font-extrabold uppercase tracking-[0.08em] text-[#9a9286]">{t("notifications.permission")}</p>
               <p className="mt-1 text-sm font-bold text-[#565149]">{permissionLabel}</p>
-            </div>
+              </div>
+            ) : null}
 
-            <label className="block text-sm font-extrabold text-[#4f4940]">
-              {t("notifications.preferredTime")}
-              <input
-                type="time"
-                value={preferredTime}
-                onChange={(event) => setPreferredTime(event.target.value)}
-                onBlur={() => void saveNotificationSettings()}
-                className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none focus:ring-2 focus:ring-[#b7d8a8]"
-              />
-            </label>
-
-            <div className="grid grid-cols-2 gap-2">
-              <label className="block text-sm font-extrabold text-[#4f4940]">
-                {t("notifications.quietStart")}
+            {notificationsEnabled && isPermissionGranted ? (
+              <>
+                <label className="block min-w-0 text-sm font-extrabold text-[#4f4940]">
+                  {t("notifications.preferredTime")}
                 <input
                   type="time"
-                  value={quietHoursStart}
-                  onChange={(event) => setQuietHoursStart(event.target.value)}
+                  value={preferredTime}
+                  onChange={(event) => setPreferredTime(event.target.value)}
                   onBlur={() => void saveNotificationSettings()}
-                  className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-3 text-base outline-none focus:ring-2 focus:ring-[#b7d8a8]"
+                  className="app-time-input mt-2 outline-none focus:ring-2 focus:ring-[#b7d8a8]"
                 />
               </label>
-              <label className="block text-sm font-extrabold text-[#4f4940]">
-                {t("notifications.quietEnd")}
-                <input
-                  type="time"
-                  value={quietHoursEnd}
-                  onChange={(event) => setQuietHoursEnd(event.target.value)}
-                  onBlur={() => void saveNotificationSettings()}
-                  className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-3 text-base outline-none focus:ring-2 focus:ring-[#b7d8a8]"
-                />
-              </label>
-            </div>
+
+                <div className="grid min-w-0 grid-cols-2 gap-2">
+                  <label className="block min-w-0 text-sm font-extrabold text-[#4f4940]">
+                    {t("notifications.quietStart")}
+                    <input
+                      type="time"
+                      value={quietHoursStart}
+                      onChange={(event) => setQuietHoursStart(event.target.value)}
+                      onBlur={() => void saveNotificationSettings()}
+                      className="app-time-input mt-2 outline-none focus:ring-2 focus:ring-[#b7d8a8]"
+                    />
+                  </label>
+                  <label className="block min-w-0 text-sm font-extrabold text-[#4f4940]">
+                    {t("notifications.quietEnd")}
+                    <input
+                      type="time"
+                      value={quietHoursEnd}
+                      onChange={(event) => setQuietHoursEnd(event.target.value)}
+                      onBlur={() => void saveNotificationSettings()}
+                      className="app-time-input mt-2 outline-none focus:ring-2 focus:ring-[#b7d8a8]"
+                    />
+                  </label>
+                </div>
+              </>
+            ) : null}
 
             <button
               type="button"
               onClick={() => void (notificationsEnabled ? disableNotifications() : enableNotifications())}
               disabled={isNotificationSaving}
-              className="min-h-12 rounded-[20px] bg-[#2d7a4f] px-4 text-sm font-extrabold text-white shadow-[0_10px_24px_rgba(45,122,79,0.18)] disabled:opacity-60"
+              className={
+                notificationsEnabled
+                  ? "min-h-12 rounded-[20px] bg-white/75 px-4 text-sm font-extrabold text-[#7d776b] disabled:opacity-60"
+                  : "min-h-12 rounded-[20px] bg-[#2d7a4f] px-4 text-sm font-extrabold text-white shadow-[0_10px_24px_rgba(45,122,79,0.18)] disabled:opacity-60"
+              }
             >
               {notificationsEnabled ? t("notifications.disable") : t("notifications.enable")}
             </button>
@@ -291,7 +309,7 @@ export function SettingsPanel() {
               </button>
             ) : null}
             {notificationMessage ? <p className="text-sm font-bold leading-5 text-[#6f675c]">{notificationMessage}</p> : null}
-            {pushDiagnostics ? (
+            {showPushDiagnostics && pushDiagnostics ? (
               <div className="rounded-[20px] bg-white/70 p-3 text-left">
                 <p className="text-xs font-extrabold uppercase tracking-[0.08em] text-[#9a9286]">{t("notifications.diagnostics")}</p>
                 <dl className="mt-2 grid grid-cols-[1.2fr_1fr] gap-x-3 gap-y-1 text-[11px] font-bold leading-4 text-[#6f675c]">

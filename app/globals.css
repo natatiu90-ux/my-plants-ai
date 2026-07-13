@@ -35,6 +35,23 @@ a {
   -webkit-tap-highlight-color: transparent;
 }
 
+input[type="time"],
+.app-time-input {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+}
+
+.app-time-input {
+  min-height: 3rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 0 0.75rem;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  text-align: center;
+}
+
 :focus-visible {
   outline: 3px solid rgba(107, 163, 105, 0.45);
   outline-offset: 3px;

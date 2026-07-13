@@ -15,6 +15,12 @@ type HypothesisView = {
   status: "active" | "confirmed" | "ruled_out";
 };
 
+type FollowUpView = {
+  hypothesis: PlantHypothesis;
+  question: string;
+  options: { label: string; status: PlantHypothesisStatus; result: string }[];
+};
+
 function localized(value: { en?: string | null; ru?: string | null } | undefined, locale: "en" | "ru") {
   return value?.[locale] || value?.en || value?.ru || "";
 }
@@ -44,6 +50,10 @@ function statusFromResolution(resolution: PlantHypothesisResolution | undefined)
 
 function unique(items: string[]) {
   return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
+}
+
+function firstNonEmpty(items: string[]) {
+  return items.find((item) => item.trim()) ?? "";
 }
 
 export function PlantAnalysisSection({
@@ -82,6 +92,7 @@ export function PlantAnalysisSection({
     const wateringMentioned = includesAny(combinedText, ["water", "soil", "dry", "полив", "почв", "сух"]);
     const pestMentioned = includesAny(combinedText, ["pest", "mite", "insect", "вредител", "клещ", "насеком"]);
     const oldSoilMentioned = includesAny(combinedText, ["compacted", "old soil", "salt buildup", "пересад", "стар", "уплотнен", "сол"]);
+    const soilCheckedToday = plant.lastSoilCheckedAt ? daysSince(plant.lastSoilCheckedAt) === 0 : false;
 
     const hypotheses: HypothesisView[] = [
       {
@@ -132,20 +143,43 @@ export function PlantAnalysisSection({
       .slice(0, 2);
     const lowConfidenceHypotheses = hypotheses.filter((hypothesis) => hypothesis.status === "active" && hypothesis.confidence >= 0.35 && hypothesis.confidence < 0.55);
     const observation = observations[0] || localized(analysis.summary, locale);
+    const statusSummary =
+      analysis.condition === "healthy" && activeHypotheses.length === 0
+        ? t("plantAnalysis.statusLooksOkay")
+        : wasRepottedRecently
+          ? t("plantAnalysis.statusRecovering")
+          : activeHypotheses.length === 0
+            ? t("plantAnalysis.statusOldDamage")
+            : plant.nextAction
+              ? t("plantAnalysis.statusWatch")
+              : t("plantAnalysis.statusStableWatch");
+    const statusDetail = firstNonEmpty([
+      wasRepottedRecently ? t("plantAnalysis.statusDetailRepot") : "",
+      activeHypotheses.some((hypothesis) => hypothesis.id === "sun_stress") ? t("plantAnalysis.statusDetailSun") : "",
+      activeHypotheses.length === 0 ? t("plantAnalysis.statusDetailNoUrgent") : ""
+    ]);
     const actions = unique([
-      activeHypotheses.some((hypothesis) => hypothesis.id === "sun_stress") ? t("plantAnalysis.actionBrightIndirect") : "",
+      activeHypotheses.some((hypothesis) => hypothesis.id === "sun_stress") && sunResolution?.status !== "ruled_out" ? t("plantAnalysis.actionBrightIndirect") : "",
       wasRepottedRecently ? t("plantAnalysis.actionDoNotRepot") : "",
-      activeHypotheses.some((hypothesis) => hypothesis.id === "watering") || plant.nextAction === "check_soil" ? t("plantAnalysis.actionCheckSoil") : "",
+      !soilCheckedToday && (activeHypotheses.some((hypothesis) => hypothesis.id === "watering") || plant.nextAction === "check_soil") ? t("plantAnalysis.actionCheckSoil") : "",
       activeHypotheses.some((hypothesis) => hypothesis.id === "pests") ? t("plantAnalysis.actionPests") : "",
-      t("plantAnalysis.actionWatchNewGrowth")
+      activeHypotheses.length || wasRepottedRecently ? t("plantAnalysis.actionWatchNewGrowth") : ""
     ]).slice(0, 3);
+    const activeActions = actions.length ? actions : [t("plantAnalysis.actionNothingNow")];
     const checkedFacts = unique([
       noPests ? t("plantAnalysis.checkedNoPests") : "",
+      pestsConfirmed ? t("plantAnalysis.checkedPestsFound") : "",
       wasRepottedRecently && repottedDaysAgo != null ? t("plantAnalysis.checkedRepotted").replace("{date}", formatRelativeDate(recentRepot?.eventDate ?? recentRepot?.createdAt, locale, "")) : "",
-      sunResolution?.status === "confirmed" ? t("plantAnalysis.checkedDirectSun") : "",
+      sunResolution?.status === "confirmed" ? t("plantAnalysis.checkedDirectSun") : sunResolution?.status === "ruled_out" ? t("plantAnalysis.checkedNoDirectSun") : "",
       plant.lastSoilCheckedAt ? t("plantAnalysis.checkedSoil").replace("{date}", formatRelativeDate(plant.lastSoilCheckedAt, locale, "")) : ""
     ]);
-    const followUp = !noPests && pestMentioned
+    const meaning = unique([
+      ...activeHypotheses.map((hypothesis) => hypothesis.text),
+      wasRepottedRecently ? t("plantAnalysis.meaningRepotAccounted") : "",
+      noPests ? t("plantAnalysis.meaningPestsRuledOut") : "",
+      sunResolution?.status === "ruled_out" ? t("plantAnalysis.meaningSunRuledOut") : ""
+    ]).slice(0, 3);
+    const followUp: FollowUpView | null = !noPests && pestMentioned
       ? { hypothesis: "pests" as const, question: t("plantAnalysis.questionPests"), options: [
           { label: t("plantAnalysis.answerYes"), status: "confirmed" as const, result: "yes" },
           { label: t("plantAnalysis.answerNo"), status: "ruled_out" as const, result: "no" },
@@ -161,10 +195,14 @@ export function PlantAnalysisSection({
               { label: t("plantAnalysis.answerRecently"), status: "ruled_out" as const, result: "recently" },
               { label: t("plantAnalysis.answerLongAgo"), status: "confirmed" as const, result: "long_ago" },
               { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
-            ] }
+          ] }
           : null;
+    const remainingUncertainty = unique([
+      ...uncertainties,
+      ...(followUp ? [followUp.question] : [])
+    ]).slice(0, 2);
 
-    return { observation, activeHypotheses, lowConfidenceHypotheses, actions, checkedFacts, followUp };
+    return { observation, statusSummary, statusDetail, meaning, lowConfidenceHypotheses, activeActions, checkedFacts, followUp, remainingUncertainty };
   }, [analysis, hypothesisResolutions, locale, milestones, plant.lastSoilCheckedAt, plant.lastSoilResult, plant.nextAction, t]);
 
   if (!analysis || !view) {
@@ -185,6 +223,11 @@ export function PlantAnalysisSection({
     <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
       <h2 className="px-1 font-rounded text-xl font-extrabold text-ink">{t("plantAnalysis.title")}</h2>
       <div className="mt-3 grid gap-2">
+        <div className="rounded-[22px] bg-[#eef5e8] p-3">
+          <p className="text-sm font-extrabold leading-5 text-[#355f3d]">{view.statusSummary}</p>
+          {view.statusDetail ? <p className="mt-1 text-sm font-bold leading-5 text-[#4f6946]">{view.statusDetail}</p> : null}
+        </div>
+
         {view.observation ? (
           <div className="rounded-[20px] bg-white/65 p-3">
             <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.observations")}</p>
@@ -192,15 +235,12 @@ export function PlantAnalysisSection({
           </div>
         ) : null}
 
-        {view.activeHypotheses.length ? (
+        {view.meaning.length ? (
           <div className="rounded-[20px] bg-white/65 p-3">
-            <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.mostLikelyCause")}</p>
+            <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.whatItMeans")}</p>
             <ul className="mt-2 grid gap-2 text-sm font-bold leading-5 text-[#4f4940]">
-              {view.activeHypotheses.map((hypothesis) => (
-                <li key={hypothesis.id}>
-                  {hypothesis.text}
-                  {hypothesis.evidence.length ? <span className="block pt-1 text-xs leading-4 text-[#8b8173]">{hypothesis.evidence.join(" · ")}</span> : null}
-                </li>
+              {view.meaning.map((item) => (
+                <li key={item}>{item}</li>
               ))}
             </ul>
           </div>
@@ -209,7 +249,7 @@ export function PlantAnalysisSection({
         <div className="rounded-[20px] bg-white/65 p-3">
           <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.currentAction")}</p>
           <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f]">
-            {view.actions.map((action) => (
+            {view.activeActions.map((action) => (
               <li key={action}>{action}</li>
             ))}
           </ul>
@@ -224,6 +264,17 @@ export function PlantAnalysisSection({
                   <Check aria-hidden="true" size={16} className="mt-0.5 shrink-0" />
                   <span>{fact}</span>
                 </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {view.remainingUncertainty.length ? (
+          <div className="rounded-[20px] bg-[#fff8e8] p-3">
+            <p className="text-xs font-bold uppercase text-[#a77735]">{t("plantAnalysis.remainingUncertainty")}</p>
+            <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#7a623d]">
+              {view.remainingUncertainty.map((item) => (
+                <li key={item}>{item}</li>
               ))}
             </ul>
           </div>

@@ -34,7 +34,6 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
   const [speciesName, setSpeciesName] = useState(plant ? plantCommonName(plant) : "");
   const [scientificName, setScientificName] = useState(plant?.scientificName ?? "");
   const [roomKey, setRoomKey] = useState<string | undefined>(plant?.roomKey);
-  const [notes, setNotes] = useState(plant?.notes ?? "");
   const [isAddingPhoto, setIsAddingPhoto] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [deletingPhotoId, setDeletingPhotoId] = useState<string | null>(null);
@@ -62,7 +61,7 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
   }
 
   const save = () => {
-    updatePlant(plant.id, { homeName, speciesName, scientificName: cleanScientificName(scientificName), roomKey, notes });
+    updatePlant(plant.id, { homeName, speciesName, scientificName: cleanScientificName(scientificName), roomKey });
     setToast(t("edit.saved"));
   };
 
@@ -127,16 +126,6 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
           <p className="mb-2 text-sm font-extrabold text-[#4f4940]">{t("plantDetail.location")}</p>
           <RoomPicker value={roomKey} onChange={setRoomKey} />
         </div>
-      </section>
-
-      <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
-        <h2 className="mb-3 px-1 font-rounded text-xl font-extrabold text-ink">{t("edit.notes")}</h2>
-        <textarea
-          value={notes}
-          onChange={(event) => setNotes(event.target.value)}
-          placeholder={t("edit.notesPlaceholder")}
-          className="min-h-36 w-full rounded-[20px] bg-white/80 p-4 text-sm leading-6 outline-none"
-        />
       </section>
 
       <button type="button" onClick={save} className="mt-5 min-h-12 w-full rounded-[18px] bg-gradient-to-br from-[#92cc90] to-[#6ba369] px-4 text-sm font-extrabold text-white shadow-fab">
