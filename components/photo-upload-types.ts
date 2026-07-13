@@ -2,6 +2,7 @@ import type { PhotoType } from "@/types/plant";
 
 export type PendingPhotoUpload = {
   id: string;
+  debugId?: string;
   url: string;
   storageId: string;
   source: "camera" | "gallery";

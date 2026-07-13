@@ -57,7 +57,7 @@ type ImageAnalysisDiagnostic = {
   errorMessage?: string;
 };
 type ClientImagePreparationDiagnostic = {
-  debugId: string;
+  debugId?: string;
   source: "camera" | "gallery";
   fileName: string;
   originalMimeType: string;
@@ -418,7 +418,9 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             formData.append("clientExifOrientations", String(preparedImage.exifOrientation ?? ""));
             formData.append("clientPhysicallyRotated", String(preparedImage.physicallyRotated));
             formData.append("clientOrientationSources", preparedImage.orientationSource);
-            formData.append("clientDebugIds", photo.debugId);
+            if (photo.debugId) {
+              formData.append("clientDebugIds", photo.debugId);
+            }
           }
         }
         nextPreparationDiagnostics.forEach((diagnostic) => {
