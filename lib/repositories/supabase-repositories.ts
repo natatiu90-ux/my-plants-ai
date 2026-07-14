@@ -263,136 +263,197 @@ export class PhotoRepository {
 
   async addPhotos(plantId: string, inputs: { url: string; type: PhotoType; isCover?: boolean; debugId?: string }[], hasExistingPhotos: boolean) {
     const createdRows: PlantPhotoRow[] = [];
+    const uploadedStoragePaths: string[] = [];
     const selectedCoverIndex = inputs.findIndex((photo) => photo.isCover);
     const shouldAssignCover = selectedCoverIndex >= 0 || !hasExistingPhotos;
     const coverIndex = selectedCoverIndex >= 0 ? selectedCoverIndex : 0;
 
-    for (let index = 0; index < inputs.length; index += 1) {
-      const input = inputs[index];
-      const storageId = storageIdFromTemporaryPhotoUrl(input.url);
-      if (!storageId) {
-        continue;
-      }
+    try {
+      for (let index = 0; index < inputs.length; index += 1) {
+        const input = inputs[index];
+        const storageId = storageIdFromTemporaryPhotoUrl(input.url);
+        if (!storageId) {
+          continue;
+        }
 
-      const blob = await PhotoStorageRepository.getPhoto(storageId);
-      if (!blob) {
-        console.warn("photo_upload_failed", {
-          stage: "indexeddb_blob_missing",
+        const blob = await PhotoStorageRepository.getPhoto(storageId);
+        console.info("photo_blob_read", {
+          stage: "indexeddb_blob_read",
           plantId,
-          temporaryStorageId: storageId,
+          storageId: input.url,
+          parsedTemporaryPhotoId: storageId,
+          blobFound: Boolean(blob),
+          blobMimeType: blob?.type ?? null,
+          blobSize: blob?.size ?? null,
           debugId: input.debugId
         });
-        throw new Error("photo_upload_failed");
+        if (!blob) {
+          console.warn("photo_upload_failed", {
+            stage: "indexeddb_blob_missing",
+            plantId,
+            storageId: input.url,
+            parsedTemporaryPhotoId: storageId,
+            debugId: input.debugId
+          });
+          throw new Error("photo_upload_failed:indexeddb_blob_missing");
+        }
+
+        const [display, exifOrientation] = await Promise.all([inspectImageDisplay(blob), readJpegExifOrientation(blob)]);
+        const photoId = crypto.randomUUID();
+        const storagePath = `${this.user.id}/${plantId}/${photoId}.${extensionForBlob(blob)}`;
+        if (process.env.NODE_ENV !== "production") {
+          console.info("photo_orientation_stage", {
+            stage: "supabase_storage_upload",
+            plantId,
+            photoId,
+            temporaryStorageId: storageId,
+            debugId: input.debugId,
+            mimeType: blob.type,
+            byteSize: blob.size,
+            uploadPath: storagePath,
+            width: display.width,
+            height: display.height,
+            exifOrientation,
+            physicallyRotated: exifOrientation == null || exifOrientation === 1,
+            displayedInUi: display.succeeded ? `${display.width}x${display.height}` : "decode_failed"
+          });
+        }
+        const { error: uploadError } = await this.supabase.storage.from(photoBucket).upload(storagePath, blob, {
+          contentType: blob.type || "image/jpeg",
+          upsert: false
+        });
+        if (uploadError) {
+          console.warn("photo_upload_failed", {
+            stage: "storage_upload",
+            plantId,
+            storageId: input.url,
+            parsedTemporaryPhotoId: storageId,
+            uploadPath: storagePath,
+            debugId: input.debugId,
+            message: uploadError.message
+          });
+        }
+        assertNoError(uploadError);
+        uploadedStoragePaths.push(storagePath);
+        if (process.env.NODE_ENV !== "production") {
+          console.info("photo_upload_succeeded", {
+            stage: "storage_upload",
+            plantId,
+            temporaryStorageId: storageId,
+            photoId,
+            storagePath
+          });
+        }
+
+        const { data, error } = await this.supabase
+          .from("plant_photos")
+          .insert({
+            id: photoId,
+            user_id: this.user.id,
+            plant_id: plantId,
+            storage_path: storagePath,
+            photo_type: input.type,
+            is_cover: shouldAssignCover && index === coverIndex
+          })
+          .select("*")
+          .single();
+
+        if (error) {
+          console.warn("photo_upload_failed", {
+            stage: "photo_row_create",
+            plantId,
+            storageId: input.url,
+            parsedTemporaryPhotoId: storageId,
+            uploadPath: storagePath,
+            debugId: input.debugId,
+            photoId,
+            message: error.message
+          });
+        }
+        assertNoError(error);
+        if (process.env.NODE_ENV !== "production") {
+          console.info("photo_row_created", {
+            plantId,
+            temporaryStorageId: storageId,
+            photoId: data.id,
+            isCover: data.is_cover
+          });
+        }
+        createdRows.push(data);
       }
 
-      const [display, exifOrientation] = await Promise.all([inspectImageDisplay(blob), readJpegExifOrientation(blob)]);
-      const photoId = crypto.randomUUID();
-      const storagePath = `${this.user.id}/${plantId}/${photoId}.${extensionForBlob(blob)}`;
-      if (process.env.NODE_ENV !== "production") {
-        console.info("photo_orientation_stage", {
-          stage: "supabase_storage_upload",
-          plantId,
-          photoId,
-          temporaryStorageId: storageId,
-          debugId: input.debugId,
-          mimeType: blob.type,
-          byteSize: blob.size,
-          width: display.width,
-          height: display.height,
-          exifOrientation,
-          physicallyRotated: exifOrientation == null || exifOrientation === 1,
-          displayedInUi: display.succeeded ? `${display.width}x${display.height}` : "decode_failed"
-        });
-      }
-      const { error: uploadError } = await this.supabase.storage.from(photoBucket).upload(storagePath, blob, {
-        contentType: blob.type || "image/jpeg",
-        upsert: false
-      });
-      if (uploadError) {
+      const expectedTemporaryPhotos = inputs.filter((input) => storageIdFromTemporaryPhotoUrl(input.url)).length;
+      if (createdRows.length !== expectedTemporaryPhotos) {
         console.warn("photo_upload_failed", {
-          stage: "storage_upload",
+          stage: "photo_count_mismatch",
           plantId,
-          temporaryStorageId: storageId,
-          debugId: input.debugId,
-          message: uploadError.message
+          expected: expectedTemporaryPhotos,
+          created: createdRows.length
+        });
+        throw new Error("photo_upload_failed:photo_count_mismatch");
+      }
+
+      if (shouldAssignCover && createdRows.length) {
+        const coverPhoto = createdRows[Math.min(coverIndex, createdRows.length - 1)];
+        const { error: clearError } = await this.supabase
+          .from("plant_photos")
+          .update({ is_cover: false })
+          .eq("plant_id", plantId)
+          .eq("user_id", this.user.id);
+        if (clearError) {
+          console.warn("photo_upload_failed", {
+            stage: "cover_clear",
+            plantId,
+            selectedCoverId: coverPhoto.id,
+            message: clearError.message
+          });
+        }
+        assertNoError(clearError);
+
+        const { error } = await this.supabase
+          .from("plant_photos")
+          .update({ is_cover: true })
+          .eq("id", coverPhoto.id)
+          .eq("plant_id", plantId)
+          .eq("user_id", this.user.id);
+        if (error) {
+          console.warn("photo_upload_failed", {
+            stage: "cover_update",
+            plantId,
+            selectedCoverId: coverPhoto.id,
+            message: error.message
+          });
+        }
+        assertNoError(error);
+        createdRows.forEach((row) => {
+          row.is_cover = row.id === coverPhoto.id;
         });
       }
-      assertNoError(uploadError);
+
+      const signedRows = await withThumbnailPhotoUrls(this.supabase, createdRows);
       if (process.env.NODE_ENV !== "production") {
-        console.info("photo_upload_succeeded", {
-          stage: "storage_upload",
+        const coverPhoto = signedRows.find((row) => row.is_cover);
+        console.info("photos_saved_for_plant", {
           plantId,
-          temporaryStorageId: storageId,
-          photoId,
-          storagePath
+          selectedCoverId: coverPhoto?.id ?? null,
+          finalSavedCoverUrl: coverPhoto?.thumbnail_url ?? coverPhoto?.signed_url ?? null,
+          returnedPhotoCount: signedRows.length
         });
       }
-
-      const { data, error } = await this.supabase
-        .from("plant_photos")
-        .insert({
-          id: photoId,
-          user_id: this.user.id,
-          plant_id: plantId,
-          storage_path: storagePath,
-          photo_type: input.type,
-          is_cover: shouldAssignCover && index === coverIndex
-        })
-        .select("*")
-        .single();
-
-      if (error) {
-        console.warn("photo_upload_failed", {
-          stage: "photo_row_create",
+      return signedRows.map(mapPhoto);
+    } catch (error) {
+      if (uploadedStoragePaths.length) {
+        const { error: cleanupError } = await this.supabase.storage.from(photoBucket).remove(uploadedStoragePaths);
+        console.warn("photo_upload_rollback", {
+          stage: "storage_cleanup_after_failure",
           plantId,
-          temporaryStorageId: storageId,
-          debugId: input.debugId,
-          photoId,
-          message: error.message
+          uploadedStoragePathCount: uploadedStoragePaths.length,
+          cleanupSucceeded: !cleanupError,
+          cleanupError: cleanupError?.message ?? null
         });
       }
-      assertNoError(error);
-      if (process.env.NODE_ENV !== "production") {
-        console.info("photo_row_created", {
-          plantId,
-          temporaryStorageId: storageId,
-          photoId: data.id,
-          isCover: data.is_cover
-        });
-      }
-      createdRows.push(data);
+      throw error;
     }
-
-    const expectedTemporaryPhotos = inputs.filter((input) => storageIdFromTemporaryPhotoUrl(input.url)).length;
-    if (createdRows.length !== expectedTemporaryPhotos) {
-      console.warn("photo_upload_failed", {
-        stage: "photo_count_mismatch",
-        plantId,
-        expected: expectedTemporaryPhotos,
-        created: createdRows.length
-      });
-      throw new Error("photo_upload_failed");
-    }
-
-    if (shouldAssignCover && createdRows.length) {
-      const coverPhoto = createdRows[Math.min(coverIndex, createdRows.length - 1)];
-      await this.setCoverPhoto(plantId, coverPhoto.id);
-      createdRows.forEach((row) => {
-        row.is_cover = row.id === coverPhoto.id;
-      });
-    }
-
-    const signedRows = await withThumbnailPhotoUrls(this.supabase, createdRows);
-    if (process.env.NODE_ENV !== "production") {
-      const coverPhoto = signedRows.find((row) => row.is_cover);
-      console.info("photos_saved_for_plant", {
-        plantId,
-        selectedCoverId: coverPhoto?.id ?? null,
-        finalSavedCoverUrl: coverPhoto?.thumbnail_url ?? coverPhoto?.signed_url ?? null,
-        returnedPhotoCount: signedRows.length
-      });
-    }
-    return signedRows.map(mapPhoto);
   }
 
   async setCoverPhoto(plantId: string, photoId: string) {

@@ -382,78 +382,111 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         careScheduleStatus: input.lastWateredAt ? "active" : "needs_first_check"
       });
 
-      const photos = await repositories.photos.addPhotos(plant.id, input.photos ?? [], false);
-      if (process.env.NODE_ENV !== "production") {
-        const coverPhoto = photos.find((photo) => photo.isCover);
-        console.info("plant_photos_attached", {
-          plantId: plant.id,
-          returnedPhotoCount: photos.length,
-          selectedCoverId: coverPhoto?.id ?? null,
-          finalSavedCoverUrl: coverPhoto?.thumbnailUrl ?? coverPhoto?.url ?? null
-        });
-      }
-      const milestone = await repositories.milestones.addMilestone(plant.id, {
-        type: "plant_added",
-        eventDate: toDateKey(new Date())
-      });
-      const wateringMilestone = input.lastWateredAt
-        ? await repositories.milestones.addMilestone(plant.id, {
-            type: "watered",
-            eventDate: input.lastWateredAt
-          })
-        : null;
-      if (input.lastWateredAt) {
-        await repositories.careEvents.addCareEvent(plant.id, { type: "watered", eventDate: input.lastWateredAt });
-      }
-
-      if (input.analysis) {
-        await repositories.analyses.addAnalysis({
-          plantId: plant.id,
-          sourcePhotoIds: photos.map((photo) => photo.id),
-          detectedSpecies: input.analysis.detectedSpecies,
-          confidence: input.analysis.confidence,
-          condition: input.analysis.condition,
-          nextAction: input.analysis.nextAction,
-          summaryEn: input.analysis.summary?.en,
-          summaryRu: input.analysis.summary?.ru,
-          recommendations: input.analysis.recommendations,
-          rawResult: input.analysis.rawResult,
-          model: input.analysis.model
-        });
-      }
-
-      const analysisRecord: PlantAnalysisRecord | null = input.analysis
-        ? {
-            id: `${plant.id}-analysis-${Date.now()}`,
+      let photos: PlantPhoto[] = [];
+      let postCreateStage = "photo_save";
+      try {
+        photos = await repositories.photos.addPhotos(plant.id, input.photos ?? [], false);
+        if (process.env.NODE_ENV !== "production") {
+          const coverPhoto = photos.find((photo) => photo.isCover);
+          console.info("plant_photos_attached", {
             plantId: plant.id,
-            condition: input.analysis.condition ?? "unknown",
-            nextAction: input.analysis.nextAction ?? null,
-            summary: input.analysis.summary,
-            recommendations: Array.isArray(input.analysis.recommendations)
-              ? (input.analysis.recommendations as PlantAnalysisRecord["recommendations"])
-              : [],
-            rawResult: input.analysis.rawResult as PlantAnalysisRecord["rawResult"],
-            model: input.analysis.model ?? undefined,
-            createdAt: toDateKey(new Date())
-          }
-        : null;
+            returnedPhotoCount: photos.length,
+            selectedCoverId: coverPhoto?.id ?? null,
+            finalSavedCoverUrl: coverPhoto?.thumbnailUrl ?? coverPhoto?.url ?? null
+          });
+        }
+        postCreateStage = "plant_added_milestone";
+        const milestone = await repositories.milestones.addMilestone(plant.id, {
+          type: "plant_added",
+          eventDate: toDateKey(new Date())
+        });
+        postCreateStage = "watering_milestone";
+        const wateringMilestone = input.lastWateredAt
+          ? await repositories.milestones.addMilestone(plant.id, {
+              type: "watered",
+              eventDate: input.lastWateredAt
+            })
+          : null;
+        if (input.lastWateredAt) {
+          postCreateStage = "watering_event";
+          await repositories.careEvents.addCareEvent(plant.id, { type: "watered", eventDate: input.lastWateredAt });
+        }
 
-      setState((current) => ({
-        ...current,
-        plants: [plant, ...current.plants],
-        photos: [...photos, ...current.photos],
-        milestones: [milestone, ...(wateringMilestone ? [wateringMilestone] : []), ...current.milestones],
-        analyses: [...(analysisRecord ? [analysisRecord] : []), ...current.analyses],
-        hypothesisResolutions: current.hypothesisResolutions,
-        careEvents: [
-          ...(input.lastWateredAt
-            ? [{ id: `${plant.id}-watered-${Date.now()}`, plantId: plant.id, type: "watered" as const, createdAt: input.lastWateredAt }]
-            : []),
-          ...current.careEvents
-        ]
-      }));
+        if (input.analysis) {
+          postCreateStage = "analysis_record";
+          await repositories.analyses.addAnalysis({
+            plantId: plant.id,
+            sourcePhotoIds: photos.map((photo) => photo.id),
+            detectedSpecies: input.analysis.detectedSpecies,
+            confidence: input.analysis.confidence,
+            condition: input.analysis.condition,
+            nextAction: input.analysis.nextAction,
+            summaryEn: input.analysis.summary?.en,
+            summaryRu: input.analysis.summary?.ru,
+            recommendations: input.analysis.recommendations,
+            rawResult: input.analysis.rawResult,
+            model: input.analysis.model
+          });
+        }
 
-      return plant.id;
+        const analysisRecord: PlantAnalysisRecord | null = input.analysis
+          ? {
+              id: `${plant.id}-analysis-${Date.now()}`,
+              plantId: plant.id,
+              condition: input.analysis.condition ?? "unknown",
+              nextAction: input.analysis.nextAction ?? null,
+              summary: input.analysis.summary,
+              recommendations: Array.isArray(input.analysis.recommendations)
+                ? (input.analysis.recommendations as PlantAnalysisRecord["recommendations"])
+                : [],
+              rawResult: input.analysis.rawResult as PlantAnalysisRecord["rawResult"],
+              model: input.analysis.model ?? undefined,
+              createdAt: toDateKey(new Date())
+            }
+          : null;
+
+        setState((current) => ({
+          ...current,
+          plants: [plant, ...current.plants],
+          photos: [...photos, ...current.photos],
+          milestones: [milestone, ...(wateringMilestone ? [wateringMilestone] : []), ...current.milestones],
+          analyses: [...(analysisRecord ? [analysisRecord] : []), ...current.analyses],
+          hypothesisResolutions: current.hypothesisResolutions,
+          careEvents: [
+            ...(input.lastWateredAt
+              ? [{ id: `${plant.id}-watered-${Date.now()}`, plantId: plant.id, type: "watered" as const, createdAt: input.lastWateredAt }]
+              : []),
+            ...current.careEvents
+          ]
+        }));
+
+        return plant.id;
+      } catch (error) {
+        const storagePaths = photos.map((photo) => photo.storagePath).filter(Boolean) as string[];
+        try {
+          await repositories.plants.deletePlant(plant.id, storagePaths);
+          console.warn("plant_creation_rollback_completed", {
+            stage: "plant_create_rollback",
+            failedStage: postCreateStage,
+            plantId: plant.id,
+            storagePathCount: storagePaths.length
+          });
+        } catch (rollbackError) {
+          console.error("plant_creation_rollback_failed", {
+            stage: "plant_create_rollback",
+            failedStage: postCreateStage,
+            plantId: plant.id,
+            message: rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error"
+          });
+        }
+        console.error("plant_creation_failed_after_plant_row", {
+          stage: postCreateStage,
+          plantId: plant.id,
+          message: error instanceof Error ? error.message : "Unknown post-create error",
+          selectedPhotoCount: input.photos?.length ?? 0
+        });
+        throw error;
+      }
     },
     [repositories]
   );
