@@ -5,17 +5,53 @@ import { useI18n } from "@/i18n/I18nProvider";
 import { appBuildStorageKey, appBuildVersion, isStandalonePwa } from "@/lib/app-version";
 import { PhotoStorageRepository, temporaryPhotoSchemaVersion } from "@/lib/photo-storage";
 
+const updateRequestedSessionKey = "my-plants-update-requested";
+const dismissedWorkerSessionKey = "my-plants-dismissed-update-worker";
+
+function canUseServiceWorker() {
+  return (
+    "serviceWorker" in navigator &&
+    (window.location.protocol === "https:" ||
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1")
+  );
+}
+
+function isActionableWaitingWorker(registration: ServiceWorkerRegistration, worker: ServiceWorker | null) {
+  const controller = navigator.serviceWorker.controller;
+  return Boolean(worker && controller && worker.scriptURL !== controller.scriptURL && registration.waiting === worker);
+}
+
+function logPwaUpdateDecision(registration: ServiceWorkerRegistration, reason: string) {
+  if (process.env.NODE_ENV === "production") {
+    return;
+  }
+
+  console.info("pwa_update_state", {
+    reason,
+    controllerUrl: navigator.serviceWorker.controller?.scriptURL ?? null,
+    activeState: registration.active?.state ?? null,
+    waitingState: registration.waiting?.state ?? null,
+    installingState: registration.installing?.state ?? null,
+    activeUrl: registration.active?.scriptURL ?? null,
+    waitingUrl: registration.waiting?.scriptURL ?? null,
+    installingUrl: registration.installing?.scriptURL ?? null
+  });
+}
+
 export function ServiceWorkerRegistration() {
   const { t } = useI18n();
   const [isUpdateReady, setIsUpdateReady] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
 
   useEffect(() => {
-    if (!("serviceWorker" in navigator) || window.location.protocol !== "https:" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+    if (!canUseServiceWorker()) {
       return;
     }
 
     let hasReloadedForControllerChange = false;
+    let registrationRef: ServiceWorkerRegistration | null = null;
     const previousVersion = window.localStorage.getItem(appBuildStorageKey);
     const shouldClearDisposablePhotos = !previousVersion || previousVersion !== appBuildVersion;
 
@@ -28,20 +64,37 @@ export function ServiceWorkerRegistration() {
         })
         .finally(() => {
           window.localStorage.setItem(appBuildStorageKey, appBuildVersion);
-          if (previousVersion) {
-            setIsUpdateReady(true);
-          }
         });
     } else {
       window.localStorage.setItem(appBuildStorageKey, appBuildVersion);
     }
 
     navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(appBuildVersion)}`).then((registration) => {
-      const controllerUrl = navigator.serviceWorker.controller?.scriptURL ?? "";
-      if (controllerUrl && !controllerUrl.includes(encodeURIComponent(appBuildVersion))) {
+      registrationRef = registration;
+
+      const hideUpdateBanner = (reason: string) => {
+        setWaitingWorker(null);
+        setIsUpdateReady(false);
+        window.sessionStorage.removeItem(updateRequestedSessionKey);
+        logPwaUpdateDecision(registration, reason);
+      };
+
+      const showUpdateBannerIfActionable = (worker: ServiceWorker | null, reason: string) => {
+        const dismissedWorkerUrl = window.sessionStorage.getItem(dismissedWorkerSessionKey);
+        if (!isActionableWaitingWorker(registration, worker)) {
+          hideUpdateBanner(reason);
+          return;
+        }
+
+        if (worker?.scriptURL && dismissedWorkerUrl === worker.scriptURL) {
+          hideUpdateBanner("waiting_worker_dismissed_for_session");
+          return;
+        }
+
+        setWaitingWorker(worker);
         setIsUpdateReady(true);
-        void registration.update();
-      }
+        logPwaUpdateDecision(registration, reason);
+      };
 
       const reportDiagnostics = async () => {
         if (process.env.NODE_ENV === "production") {
@@ -66,21 +119,26 @@ export function ServiceWorkerRegistration() {
 
       void reportDiagnostics();
 
-      if (registration.waiting) {
-        setWaitingWorker(registration.waiting);
-        setIsUpdateReady(true);
-      }
+      showUpdateBannerIfActionable(registration.waiting, registration.waiting ? "existing_waiting_worker" : "no_waiting_worker");
+      void registration.update().then(() => {
+        showUpdateBannerIfActionable(registration.waiting, registration.waiting ? "waiting_worker_after_update_check" : "no_waiting_worker_after_update_check");
+      }).catch((error) => {
+        console.info("service_worker_update_check_failed", {
+          message: error instanceof Error ? error.message : "Unknown error"
+        });
+      });
 
       registration.addEventListener("updatefound", () => {
         const nextWorker = registration.installing;
         if (!nextWorker) {
+          hideUpdateBanner("updatefound_without_installing_worker");
           return;
         }
 
+        logPwaUpdateDecision(registration, "updatefound");
         nextWorker.addEventListener("statechange", () => {
-          if (nextWorker.state === "installed" && navigator.serviceWorker.controller) {
-            setWaitingWorker(nextWorker);
-            setIsUpdateReady(true);
+          if (nextWorker.state === "installed") {
+            showUpdateBannerIfActionable(nextWorker, "installing_worker_installed");
           }
         });
       });
@@ -96,13 +154,18 @@ export function ServiceWorkerRegistration() {
       }
 
       hasReloadedForControllerChange = true;
-      if (window.sessionStorage.getItem("my-plants-update-requested") === "1") {
-        window.sessionStorage.removeItem("my-plants-update-requested");
+      window.localStorage.setItem(appBuildStorageKey, appBuildVersion);
+      if (window.sessionStorage.getItem(updateRequestedSessionKey) === "1") {
+        window.sessionStorage.removeItem(updateRequestedSessionKey);
         window.location.reload();
         return;
       }
 
-      setIsUpdateReady(true);
+      if (registrationRef) {
+        logPwaUpdateDecision(registrationRef, "controller_changed_without_user_update_request");
+      }
+      setWaitingWorker(null);
+      setIsUpdateReady(false);
     };
 
     navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
@@ -113,14 +176,22 @@ export function ServiceWorkerRegistration() {
   }, []);
 
   const updateApp = () => {
-    window.sessionStorage.setItem("my-plants-update-requested", "1");
-
-    if (waitingWorker) {
-      waitingWorker.postMessage({ type: "SKIP_WAITING" });
+    if (!waitingWorker) {
+      setIsUpdateReady(false);
       return;
     }
 
-    window.location.reload();
+    setIsUpdating(true);
+    window.sessionStorage.setItem(updateRequestedSessionKey, "1");
+    waitingWorker.postMessage({ type: "SKIP_WAITING" });
+  };
+
+  const dismissUpdate = () => {
+    if (waitingWorker?.scriptURL) {
+      window.sessionStorage.setItem(dismissedWorkerSessionKey, waitingWorker.scriptURL);
+    }
+    setWaitingWorker(null);
+    setIsUpdateReady(false);
   };
 
   if (!isUpdateReady) {
@@ -130,8 +201,16 @@ export function ServiceWorkerRegistration() {
   return (
     <div className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+16px)] z-[70] mx-auto flex max-w-[390px] items-center gap-3 rounded-[20px] bg-[#fffaf3] p-3 shadow-[0_14px_40px_rgba(0,0,0,0.16)]">
       <p className="min-w-0 flex-1 text-sm font-extrabold leading-5 text-[#3f3b35]">{t("pwa.updateReady")}</p>
-      <button type="button" onClick={updateApp} className="shrink-0 rounded-[14px] bg-[#ddf2dc] px-3 py-2 text-sm font-extrabold text-[#2d7a4f]">
-        {t("pwa.updateAction")}
+      <button
+        type="button"
+        onClick={updateApp}
+        disabled={isUpdating || !waitingWorker}
+        className="shrink-0 rounded-[14px] bg-[#ddf2dc] px-3 py-2 text-sm font-extrabold text-[#2d7a4f] disabled:opacity-60"
+      >
+        {isUpdating ? "..." : t("pwa.updateAction")}
+      </button>
+      <button type="button" onClick={dismissUpdate} className="shrink-0 rounded-[14px] px-2 py-2 text-sm font-extrabold text-[#7a7166]" aria-label={t("settings.close")}>
+        ×
       </button>
     </div>
   );
