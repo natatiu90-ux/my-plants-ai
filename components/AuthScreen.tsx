@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Leaf, Loader2 } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
@@ -11,6 +11,8 @@ function authRedirectUrl() {
   return `${window.location.origin}/auth/callback`;
 }
 
+const debugAuthStorageKey = "my_plants_debug_auth";
+
 type AuthDiagnostic = {
   origin: string;
   href: string;
@@ -19,6 +21,8 @@ type AuthDiagnostic = {
   supabaseProjectUrl: string;
   supabaseAnonKeySuffix: string;
   appBuildVersion: string;
+  serviceWorkerControllerUrl: string | null;
+  existingSession: boolean | null;
   errorMessage?: string;
   errorCode?: string;
   errorStatus?: number;
@@ -41,7 +45,7 @@ function safeSupabaseError(error: unknown) {
 export function AuthScreen() {
   const { t } = useI18n();
   const searchParams = useSearchParams();
-  const isDebugAuth = searchParams.get("debugAuth") === "1";
+  const [isDebugAuth, setIsDebugAuth] = useState(false);
   const [email, setEmail] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -49,16 +53,39 @@ export function AuthScreen() {
   const [diagnostic, setDiagnostic] = useState<AuthDiagnostic | null>(null);
   const canSubmit = useMemo(() => email.trim().includes("@") && !isSending, [email, isSending]);
 
-  const buildDiagnostic = (emailRedirectTo: string, nextError?: unknown): AuthDiagnostic => ({
-    origin: window.location.origin,
-    href: window.location.href,
-    displayMode: isStandalonePwa() ? "standalone" : "browser",
-    emailRedirectTo,
-    supabaseProjectUrl,
-    supabaseAnonKeySuffix,
-    appBuildVersion,
-    ...(nextError ? safeSupabaseError(nextError) : {})
-  });
+  useEffect(() => {
+    const debugParam = searchParams.get("debugAuth");
+    if (debugParam === "1") {
+      window.localStorage.setItem(debugAuthStorageKey, "1");
+      setIsDebugAuth(true);
+      return;
+    }
+
+    if (debugParam === "0") {
+      window.localStorage.removeItem(debugAuthStorageKey);
+      setIsDebugAuth(false);
+      return;
+    }
+
+    setIsDebugAuth(window.localStorage.getItem(debugAuthStorageKey) === "1");
+  }, [searchParams]);
+
+  const buildDiagnostic = async (emailRedirectTo: string, nextError?: unknown): Promise<AuthDiagnostic> => {
+    const sessionResult = supabase ? await supabase.auth.getSession().catch(() => null) : null;
+
+    return {
+      origin: window.location.origin,
+      href: window.location.href,
+      displayMode: isStandalonePwa() ? "standalone" : "browser",
+      emailRedirectTo,
+      supabaseProjectUrl,
+      supabaseAnonKeySuffix,
+      appBuildVersion,
+      serviceWorkerControllerUrl: navigator.serviceWorker?.controller?.scriptURL ?? null,
+      existingSession: sessionResult ? Boolean(sessionResult.data.session) : null,
+      ...(nextError ? safeSupabaseError(nextError) : {})
+    };
+  };
 
   const copyDiagnostic = () => {
     if (!diagnostic) {
@@ -79,7 +106,7 @@ export function AuthScreen() {
     setError(null);
     setDiagnostic(null);
     const emailRedirectTo = authRedirectUrl();
-    const startDiagnostic = buildDiagnostic(emailRedirectTo);
+    const startDiagnostic = await buildDiagnostic(emailRedirectTo);
     console.info("magic_link_send_started", startDiagnostic);
     if (isDebugAuth) {
       setDiagnostic(startDiagnostic);
@@ -97,7 +124,7 @@ export function AuthScreen() {
       console.info("magic_link_send_completed", startDiagnostic);
       setMessage(t("auth.magicLinkSent"));
     } catch (nextError) {
-      const nextDiagnostic = buildDiagnostic(emailRedirectTo, nextError);
+      const nextDiagnostic = await buildDiagnostic(emailRedirectTo, nextError);
       console.info("magic_link_send_failed", nextDiagnostic);
       setDiagnostic(nextDiagnostic);
       setError(t("auth.magicLinkError"));
@@ -114,6 +141,11 @@ export function AuthScreen() {
         </div>
         <h1 className="mt-5 font-rounded text-[32px] font-black leading-tight text-ink">{t("auth.title")}</h1>
         <p className="mt-2 text-sm font-bold leading-6 text-[#7a7166]">{t("auth.description")}</p>
+        {isDebugAuth ? (
+          <p className="mt-4 inline-flex rounded-full bg-[#fdeecf] px-3 py-1 text-xs font-black uppercase tracking-[0.06em] text-[#8a6230]">
+            Auth Debug ON
+          </p>
+        ) : null}
         <form onSubmit={submit} className="mt-6 grid gap-3">
           <label className="block text-sm font-extrabold text-[#4f4940]">
             {t("auth.emailLabel")}
@@ -139,22 +171,23 @@ export function AuthScreen() {
         {!isSupabaseConfigured ? <p className="mt-4 rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{t("auth.notConfigured")}</p> : null}
         {message ? <p className="mt-4 rounded-[18px] bg-[#edf8ed] p-3 text-sm font-bold leading-5 text-[#2d7a4f]">{message}</p> : null}
         {error ? <p className="mt-4 rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{error}</p> : null}
-        {isDebugAuth && diagnostic ? (
+        {isDebugAuth ? (
           <div className="mt-4 rounded-[18px] bg-white/75 p-3 text-left text-[11px] font-bold leading-5 text-[#5f594f]">
             <p className="text-xs font-extrabold text-ink">Auth diagnostic</p>
-            <p>origin: {diagnostic.origin}</p>
-            <p className="break-words">href: {diagnostic.href}</p>
-            <p>displayMode: {diagnostic.displayMode}</p>
-            <p className="break-words">emailRedirectTo: {diagnostic.emailRedirectTo}</p>
-            <p className="break-words">supabaseProjectUrl: {diagnostic.supabaseProjectUrl}</p>
-            <p>anonKeySuffix: {diagnostic.supabaseAnonKeySuffix || "none"}</p>
-            <p>appBuildVersion: {diagnostic.appBuildVersion}</p>
-            <p>error.message: {diagnostic.errorMessage ?? "-"}</p>
-            <p>error.code: {diagnostic.errorCode ?? "-"}</p>
-            <p>error.status: {diagnostic.errorStatus ?? "-"}</p>
+            <p>mode: {diagnostic?.displayMode ?? (isStandalonePwa() ? "standalone" : "browser")}</p>
+            <p>current origin: {diagnostic?.origin ?? (typeof window !== "undefined" ? window.location.origin : "-")}</p>
+            <p className="break-words">emailRedirectTo: {diagnostic?.emailRedirectTo ?? (typeof window !== "undefined" ? authRedirectUrl() : "-")}</p>
+            <p>app build version: {diagnostic?.appBuildVersion ?? appBuildVersion}</p>
+            <p className="break-words">service worker controller URL: {diagnostic?.serviceWorkerControllerUrl ?? "none"}</p>
+            <p className="break-words">Supabase project URL: {diagnostic?.supabaseProjectUrl ?? supabaseProjectUrl}</p>
+            <p>existing session: {diagnostic?.existingSession == null ? "unknown" : diagnostic.existingSession ? "yes" : "no"}</p>
+            <p>error message: {diagnostic?.errorMessage ?? "-"}</p>
+            <p>error code: {diagnostic?.errorCode ?? "-"}</p>
+            <p>HTTP status: {diagnostic?.errorStatus ?? "-"}</p>
             <button
               type="button"
               onClick={copyDiagnostic}
+              disabled={!diagnostic}
               className="mt-3 min-h-10 rounded-[14px] bg-[#ddf2dc] px-3 text-xs font-extrabold text-[#2d7a4f]"
             >
               Copy diagnostic
