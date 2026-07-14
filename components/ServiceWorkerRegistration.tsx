@@ -37,6 +37,12 @@ export function ServiceWorkerRegistration() {
     }
 
     navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(appBuildVersion)}`).then((registration) => {
+      const controllerUrl = navigator.serviceWorker.controller?.scriptURL ?? "";
+      if (controllerUrl && !controllerUrl.includes(encodeURIComponent(appBuildVersion))) {
+        setIsUpdateReady(true);
+        void registration.update();
+      }
+
       const reportDiagnostics = async () => {
         if (process.env.NODE_ENV === "production") {
           return;
