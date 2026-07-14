@@ -87,6 +87,7 @@ const analysisStageCount = 4;
 const analysisImageTargetBytes = 500 * 1024;
 const analysisRequestTargetBytes = 3 * 1024 * 1024;
 const maxSelectedPhotos = 5;
+const plantSaveDebugStorageKey = "my_plants_debug_plant_save";
 const defaultNicknames = {
   en: ["Sprout", "Pebble", "Mochi", "Button", "Pickle", "Clover", "Poppy", "Bean", "Sunny", "Olive", "Noodle", "Dot", "Minty", "Pumpkin", "Biscuit", "Twiggy"],
   ru: ["Плюша", "Листик", "Кнопка", "Пышка", "Ростик", "Зелёныш", "Фисташка", "Плющинка", "Бублик", "Капля", "Мята", "Печенька", "Пуговка", "Тучка", "Крошка", "Лапка"]
@@ -151,7 +152,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const searchParams = useSearchParams();
   const { locale, t } = useI18n();
   const { addPlant, plants, rooms, status, userId } = usePlantStore();
-  const isPlantSaveDebugEnabled = searchParams.get("debugPlantSave") === "1";
+  const [isPlantSaveDebugEnabled, setIsPlantSaveDebugEnabled] = useState(false);
   const [step, setStep] = useState<Step>("pick");
   const [selectedPhotos, setSelectedPhotos] = useState<PendingPhotoUpload[]>([]);
   const [rejectedPhotoCount, setRejectedPhotoCount] = useState(0);
@@ -180,6 +181,23 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [analysisAttempt, setAnalysisAttempt] = useState(0);
   const nicknameInputRef = useRef<HTMLInputElement>(null);
   const generatedNicknameRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const debugParam = searchParams.get("debugPlantSave");
+    if (debugParam === "1") {
+      window.localStorage.setItem(plantSaveDebugStorageKey, "1");
+      setIsPlantSaveDebugEnabled(true);
+      return;
+    }
+
+    if (debugParam === "0") {
+      window.localStorage.removeItem(plantSaveDebugStorageKey);
+      setIsPlantSaveDebugEnabled(false);
+      return;
+    }
+
+    setIsPlantSaveDebugEnabled(window.localStorage.getItem(plantSaveDebugStorageKey) === "1");
+  }, [searchParams]);
 
   const generateNicknameOnce = useCallback((extraExistingNames: string[] = []) => {
     const existingNames = [...plants.map((plant) => plant.homeName ?? ""), ...extraExistingNames];
@@ -848,6 +866,11 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           <h2 className="font-rounded text-2xl font-extrabold text-ink">{t("addPlant.title")}</h2>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
+          {isPlantSaveDebugEnabled && step === "confirm" ? (
+            <p className="mb-3 inline-flex rounded-full bg-[#1f2937] px-3 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-white">
+              PLANT SAVE DEBUG ON
+            </p>
+          ) : null}
           {coverPhoto ? (
             <div className={step === "confirm" ? "relative mt-1 h-64 overflow-hidden rounded-[24px] bg-[#dde8dc]" : "relative mt-1 h-48 overflow-hidden rounded-[24px] bg-[#dde8dc]"}>
               <PhotoImage src={coverPhoto.url} alt={t("photos.photoAlt")} className="h-full w-full object-cover" />

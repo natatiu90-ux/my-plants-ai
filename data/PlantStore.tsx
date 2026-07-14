@@ -6,7 +6,7 @@ import { addDays, toDateKey } from "@/lib/date-format";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/client";
 import { createRepositories } from "@/lib/repositories/supabase-repositories";
 import { commonNameFromScientificName } from "@/lib/plant-display";
-import { plantCreationDiagnosticFromError, plantCreationError, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
+import { PlantCreationError, plantCreationDiagnosticFromError, plantCreationError, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { calculateSoilCheckCareResolution } from "@/lib/soil-care";
 import type { PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
 
@@ -576,7 +576,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           plantId: plant.id,
           selectedPhotoCount: input.photos?.length ?? 0
         });
-        throw plantCreationError(new Error(diagnostic.message), diagnostic);
+        throw new PlantCreationError(diagnostic, error);
       }
     },
     [repositories]
