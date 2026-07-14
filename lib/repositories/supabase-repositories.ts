@@ -13,6 +13,54 @@ const signedUrlTtlSeconds = 60 * 60;
 const signedPhotoUrlCache = new Map<string, { url: string; expiresAt: number }>();
 const signedPhotoUrlRequests = new Map<string, Promise<string>>();
 
+function idSuffix(value: string | null | undefined) {
+  return value ? value.slice(-6) : null;
+}
+
+function safeSupabaseError(error: unknown) {
+  const value = (typeof error === "object" && error ? error : {}) as {
+    message?: unknown;
+    code?: unknown;
+    details?: unknown;
+    hint?: unknown;
+    status?: unknown;
+    statusCode?: unknown;
+  };
+
+  const numberValue = (input: unknown) => {
+    if (typeof input === "number") {
+      return input;
+    }
+
+    if (typeof input === "string" && input.trim() && Number.isFinite(Number(input))) {
+      return Number(input);
+    }
+
+    return undefined;
+  };
+
+  return {
+    message: error instanceof Error ? error.message : typeof value.message === "string" ? value.message : "Unknown error",
+    code: typeof value.code === "string" ? value.code : undefined,
+    details: typeof value.details === "string" ? value.details : undefined,
+    hint: typeof value.hint === "string" ? value.hint : undefined,
+    status: numberValue(value.status) ?? numberValue(value.statusCode)
+  };
+}
+
+function logSupabaseStageError(
+  eventName: string,
+  stage: string,
+  error: unknown,
+  context: Record<string, unknown>
+) {
+  console.error(eventName, {
+    stage,
+    ...context,
+    ...safeSupabaseError(error)
+  });
+}
+
 function assertNoError(error: { message: string } | null) {
   if (error) {
     throw new Error(error.message);
@@ -87,6 +135,35 @@ async function withThumbnailPhotoUrls(supabase: SupabaseClient, rows: PlantPhoto
 export class PlantRepository {
   constructor(private supabase: SupabaseClient, private user: User) {}
 
+  private async assertCurrentAuthenticatedUser(stage: string) {
+    const { data, error } = await this.supabase.auth.getUser();
+    if (error) {
+      logSupabaseStageError("plant_creation_auth_check_failed", stage, error, {
+        repositoryUserIdSuffix: idSuffix(this.user.id)
+      });
+      throw plantCreationError(error, {
+        stage: "create_plant",
+        authenticatedUserIdSuffix: null,
+        insertedOwnerIdSuffix: idSuffix(this.user.id)
+      });
+    }
+
+    if (data.user?.id !== this.user.id) {
+      const message = "Authenticated Supabase user changed before plant creation.";
+      console.error("plant_creation_auth_user_mismatch", {
+        stage,
+        authenticatedUserIdSuffix: idSuffix(data.user?.id),
+        insertedOwnerIdSuffix: idSuffix(this.user.id)
+      });
+      throw plantCreationError(new Error(message), {
+        stage: "create_plant",
+        message,
+        authenticatedUserIdSuffix: idSuffix(data.user?.id),
+        insertedOwnerIdSuffix: idSuffix(this.user.id)
+      });
+    }
+  }
+
   async listPlants() {
     const { data, error } = await this.supabase
       .from("plants")
@@ -110,6 +187,7 @@ export class PlantRepository {
     nextCheckAt?: string;
     careScheduleStatus?: CareScheduleStatus;
   }) {
+    await this.assertCurrentAuthenticatedUser("create_plant");
     const { data, error } = await this.supabase
       .from("plants")
       .insert({
@@ -129,7 +207,17 @@ export class PlantRepository {
       .select("*")
       .single();
 
-    assertNoError(error);
+    if (error) {
+      logSupabaseStageError("plant_creation_supabase_error", "create_plant", error, {
+        authenticatedUserIdSuffix: idSuffix(this.user.id),
+        insertedOwnerIdSuffix: idSuffix(this.user.id)
+      });
+      throw plantCreationError(error, {
+        stage: "create_plant",
+        authenticatedUserIdSuffix: idSuffix(this.user.id),
+        insertedOwnerIdSuffix: idSuffix(this.user.id)
+      });
+    }
     return mapPlant(data);
   }
 
@@ -243,6 +331,36 @@ export class PlantRepository {
 export class PhotoRepository {
   constructor(private supabase: SupabaseClient, private user: User) {}
 
+  private async assertCurrentAuthenticatedUser() {
+    const { data, error } = await this.supabase.auth.getUser();
+    if (error) {
+      logSupabaseStageError("photo_upload_auth_check_failed", "upload_storage", error, {
+        authenticatedUserIdSuffix: null,
+        insertedOwnerIdSuffix: idSuffix(this.user.id)
+      });
+      throw plantCreationError(error, {
+        stage: "upload_storage",
+        authenticatedUserIdSuffix: null,
+        insertedOwnerIdSuffix: idSuffix(this.user.id)
+      });
+    }
+
+    if (data.user?.id !== this.user.id) {
+      const message = "Authenticated Supabase user changed before photo upload.";
+      console.error("photo_upload_auth_user_mismatch", {
+        stage: "upload_storage",
+        authenticatedUserIdSuffix: idSuffix(data.user?.id),
+        insertedOwnerIdSuffix: idSuffix(this.user.id)
+      });
+      throw plantCreationError(new Error(message), {
+        stage: "upload_storage",
+        message,
+        authenticatedUserIdSuffix: idSuffix(data.user?.id),
+        insertedOwnerIdSuffix: idSuffix(this.user.id)
+      });
+    }
+  }
+
   async listPhotos() {
     const { data, error } = await this.supabase
       .from("plant_photos")
@@ -259,7 +377,8 @@ export class PhotoRepository {
     return signedPhotoUrl(this.supabase, storagePath, "full");
   }
 
-  async addPhotos(plantId: string, inputs: { url: string; type: PhotoType; isCover?: boolean; debugId?: string }[], hasExistingPhotos: boolean) {
+  async addPhotos(plantId: string, inputs: { url: string; storageId?: string; type: PhotoType; isCover?: boolean; debugId?: string }[], hasExistingPhotos: boolean) {
+    await this.assertCurrentAuthenticatedUser();
     const createdRows: PlantPhotoRow[] = [];
     const uploadedStoragePaths: string[] = [];
     const selectedCoverIndex = inputs.findIndex((photo) => photo.isCover);
@@ -269,7 +388,7 @@ export class PhotoRepository {
     try {
       for (let index = 0; index < inputs.length; index += 1) {
         const input = inputs[index];
-        const storageId = temporaryPhotoStorageIdFromUrl(input.url);
+        const storageId = input.storageId ?? temporaryPhotoStorageIdFromUrl(input.url);
         if (!storageId) {
           continue;
         }
@@ -299,13 +418,16 @@ export class PhotoRepository {
             photoStorageId: input.url,
             parsedTemporaryStorageId: storageId,
             photoIndex: index,
-            blobFound: false
+            blobFound: false,
+            authenticatedUserIdSuffix: idSuffix(this.user.id),
+            insertedOwnerIdSuffix: idSuffix(this.user.id)
           });
         }
 
         const [display, exifOrientation] = await Promise.all([inspectImageDisplay(blob), readJpegExifOrientation(blob)]);
         const photoId = crypto.randomUUID();
         const storagePath = `${this.user.id}/${plantId}/${photoId}.${extensionForBlob(blob)}`;
+        const storagePathPrefix = `${this.user.id}/${plantId}`;
         if (process.env.NODE_ENV !== "production") {
           console.info("photo_orientation_stage", {
             stage: "supabase_storage_upload",
@@ -328,14 +450,17 @@ export class PhotoRepository {
           upsert: false
         });
         if (uploadError) {
-          console.warn("photo_upload_failed", {
-            stage: "storage_upload",
+          logSupabaseStageError("photo_upload_failed", "upload_storage", uploadError, {
             plantId,
             storageId: input.url,
             parsedTemporaryPhotoId: storageId,
             uploadPath: storagePath,
+            storagePathPrefix,
+            authenticatedUserIdSuffix: idSuffix(this.user.id),
+            insertedOwnerIdSuffix: idSuffix(this.user.id),
+            blobMimeType: blob.type,
+            blobSize: blob.size,
             debugId: input.debugId,
-            message: uploadError.message
           });
           throw plantCreationError(uploadError, {
             stage: "upload_storage",
@@ -345,7 +470,10 @@ export class PhotoRepository {
             photoIndex: index,
             blobFound: true,
             blobMimeType: blob.type,
-            blobSize: blob.size
+            blobSize: blob.size,
+            authenticatedUserIdSuffix: idSuffix(this.user.id),
+            insertedOwnerIdSuffix: idSuffix(this.user.id),
+            storagePathPrefix
           });
         }
         uploadedStoragePaths.push(storagePath);
@@ -373,15 +501,16 @@ export class PhotoRepository {
           .single();
 
         if (error) {
-          console.warn("photo_upload_failed", {
-            stage: "photo_row_create",
+          logSupabaseStageError("photo_upload_failed", "insert_photo_row", error, {
             plantId,
             storageId: input.url,
             parsedTemporaryPhotoId: storageId,
             uploadPath: storagePath,
+            storagePathPrefix,
+            authenticatedUserIdSuffix: idSuffix(this.user.id),
+            insertedOwnerIdSuffix: idSuffix(this.user.id),
             debugId: input.debugId,
             photoId,
-            message: error.message
           });
           throw plantCreationError(error, {
             stage: "insert_photo_row",
@@ -391,7 +520,10 @@ export class PhotoRepository {
             photoIndex: index,
             blobFound: true,
             blobMimeType: blob.type,
-            blobSize: blob.size
+            blobSize: blob.size,
+            authenticatedUserIdSuffix: idSuffix(this.user.id),
+            insertedOwnerIdSuffix: idSuffix(this.user.id),
+            storagePathPrefix
           });
         }
         if (process.env.NODE_ENV !== "production") {
@@ -405,7 +537,7 @@ export class PhotoRepository {
         createdRows.push(data);
       }
 
-      const expectedTemporaryPhotos = inputs.filter((input) => temporaryPhotoStorageIdFromUrl(input.url)).length;
+      const expectedTemporaryPhotos = inputs.filter((input) => input.storageId ?? temporaryPhotoStorageIdFromUrl(input.url)).length;
       if (createdRows.length !== expectedTemporaryPhotos) {
         console.warn("photo_upload_failed", {
           stage: "photo_count_mismatch",
@@ -427,15 +559,17 @@ export class PhotoRepository {
           .eq("plant_id", plantId)
           .eq("user_id", this.user.id);
         if (clearError) {
-          console.warn("photo_upload_failed", {
-            stage: "cover_clear",
+          logSupabaseStageError("photo_upload_failed", "assign_cover", clearError, {
             plantId,
             selectedCoverId: coverPhoto.id,
-            message: clearError.message
+            authenticatedUserIdSuffix: idSuffix(this.user.id),
+            insertedOwnerIdSuffix: idSuffix(this.user.id)
           });
           throw plantCreationError(clearError, {
             stage: "assign_cover",
-            plantId
+            plantId,
+            authenticatedUserIdSuffix: idSuffix(this.user.id),
+            insertedOwnerIdSuffix: idSuffix(this.user.id)
           });
         }
 
@@ -446,15 +580,17 @@ export class PhotoRepository {
           .eq("plant_id", plantId)
           .eq("user_id", this.user.id);
         if (error) {
-          console.warn("photo_upload_failed", {
-            stage: "cover_update",
+          logSupabaseStageError("photo_upload_failed", "assign_cover", error, {
             plantId,
             selectedCoverId: coverPhoto.id,
-            message: error.message
+            authenticatedUserIdSuffix: idSuffix(this.user.id),
+            insertedOwnerIdSuffix: idSuffix(this.user.id)
           });
           throw plantCreationError(error, {
             stage: "assign_cover",
-            plantId
+            plantId,
+            authenticatedUserIdSuffix: idSuffix(this.user.id),
+            insertedOwnerIdSuffix: idSuffix(this.user.id)
           });
         }
         createdRows.forEach((row) => {
@@ -640,7 +776,14 @@ export class MilestoneRepository {
       .select("*")
       .single();
 
-    assertNoError(error);
+    if (error) {
+      logSupabaseStageError("plant_creation_supabase_error", "create_milestone", error, {
+        plantId,
+        authenticatedUserIdSuffix: idSuffix(this.user.id),
+        insertedOwnerIdSuffix: idSuffix(this.user.id)
+      });
+      throw error;
+    }
     return mapMilestone(data);
   }
 
@@ -688,7 +831,14 @@ export class CareEventRepository {
       metadata: input.metadata ?? {}
     });
 
-    assertNoError(error);
+    if (error) {
+      logSupabaseStageError("plant_creation_supabase_error", "create_watering_event", error, {
+        plantId,
+        authenticatedUserIdSuffix: idSuffix(this.user.id),
+        insertedOwnerIdSuffix: idSuffix(this.user.id)
+      });
+      throw error;
+    }
   }
 }
 
@@ -735,7 +885,14 @@ export class AnalysisRepository {
       model: input.model ?? null
     });
 
-    assertNoError(error);
+    if (error) {
+      logSupabaseStageError("plant_creation_supabase_error", "save_analysis", error, {
+        plantId: input.plantId,
+        authenticatedUserIdSuffix: idSuffix(this.user.id),
+        insertedOwnerIdSuffix: idSuffix(this.user.id)
+      });
+      throw error;
+    }
   }
 
   async resolveLatestActiveRecommendation(

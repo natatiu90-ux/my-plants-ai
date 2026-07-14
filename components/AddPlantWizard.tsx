@@ -700,7 +700,8 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     appBuildVersion,
     previousAppBuildVersion: window.localStorage.getItem(appBuildStorageKey),
     authStatus: status === "ready" && userId ? "authenticated" : status === "unauthenticated" ? "unauthenticated" : "unknown",
-    userIdSuffix: userId?.slice(-6) ?? null
+    userIdSuffix: userId?.slice(-6) ?? null,
+    authenticatedUserIdSuffix: diagnostic.authenticatedUserIdSuffix ?? userId?.slice(-6) ?? null
   });
 
   const copySaveDiagnostic = () => {
@@ -863,12 +864,19 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                   <p className="font-extrabold text-[#3f3b35]">Plant save diagnostic</p>
                   <p>Failed stage: {saveDiagnostic.stage}</p>
                   <p>Error code: {saveDiagnostic.code ?? "none"}</p>
+                  <p>HTTP status: {saveDiagnostic.status ?? "unknown"}</p>
                   <p>Sanitized message: {saveDiagnostic.message}</p>
+                  <p>Details: {saveDiagnostic.details ?? "none"}</p>
+                  <p>Hint: {saveDiagnostic.hint ?? "none"}</p>
                   <p>Photo index: {saveDiagnostic.photoIndex ?? "n/a"}</p>
                   <p>Parsed temporary storage id: {saveDiagnostic.parsedTemporaryStorageId ?? saveDiagnostic.photoStorageId ?? "n/a"}</p>
                   <p>IndexedDB blob found: {saveDiagnostic.blobFound == null ? "unknown" : String(saveDiagnostic.blobFound)}</p>
                   <p>Blob MIME type: {saveDiagnostic.blobMimeType ?? "unknown"}</p>
                   <p>Blob byte size: {saveDiagnostic.blobSize ?? "unknown"}</p>
+                  <p>Authenticated user suffix: {saveDiagnostic.authenticatedUserIdSuffix ?? saveDiagnostic.userIdSuffix ?? "none"}</p>
+                  <p>Inserted owner suffix: {saveDiagnostic.insertedOwnerIdSuffix ?? "unknown"}</p>
+                  <p>Storage path prefix: {saveDiagnostic.storagePathPrefix ?? "n/a"}</p>
+                  <p>Rollback result: {saveDiagnostic.rollbackResult ?? "unknown"}</p>
                   <p>Mode: {saveDiagnostic.standaloneMode ?? "unknown"}</p>
                   <p>Build version: {saveDiagnostic.appBuildVersion ?? "unknown"}</p>
                   <p>Previous build version: {saveDiagnostic.previousAppBuildVersion ?? "unknown"}</p>

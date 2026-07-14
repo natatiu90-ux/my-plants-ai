@@ -31,7 +31,7 @@ type AddPlantInput = {
   coverPhotoUrl?: string;
   notes?: string;
   lastWateredAt?: string;
-  photos?: { url: string; type: PhotoType; isCover?: boolean; debugId?: string }[];
+  photos?: { url: string; storageId?: string; type: PhotoType; isCover?: boolean; debugId?: string }[];
   analysis?: {
     detectedSpecies?: string | null;
     confidence?: number | null;
@@ -65,8 +65,8 @@ type PlantStoreValue = PlantState & {
   addRoom: (name: string) => Promise<Room>;
   deleteRoom: (roomId: string, replacementRoomKey?: Plant["roomKey"]) => Promise<void>;
   roomExists: (name: string) => boolean;
-  addPlantPhoto: (plantId: string, input: { url: string; type: PhotoType; isCover?: boolean; debugId?: string }) => Promise<PlantPhoto | undefined>;
-  addPlantPhotos: (plantId: string, inputs: { url: string; type: PhotoType; isCover?: boolean; debugId?: string }[]) => Promise<PlantPhoto[]>;
+  addPlantPhoto: (plantId: string, input: { url: string; storageId?: string; type: PhotoType; isCover?: boolean; debugId?: string }) => Promise<PlantPhoto | undefined>;
+  addPlantPhotos: (plantId: string, inputs: { url: string; storageId?: string; type: PhotoType; isCover?: boolean; debugId?: string }[]) => Promise<PlantPhoto[]>;
   setCoverPhoto: (plantId: string, photoId: string) => Promise<void>;
   updatePhotoType: (photoId: string, type: PhotoType) => Promise<void>;
   deletePlantPhoto: (plantId: string, photoId: string) => Promise<"deleted" | "only-photo">;
@@ -368,7 +368,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
   );
 
   const addPlantPhotos = useCallback(
-    async (plantId: string, inputs: { url: string; type: PhotoType; isCover?: boolean }[]) => {
+    async (plantId: string, inputs: { url: string; storageId?: string; type: PhotoType; isCover?: boolean; debugId?: string }[]) => {
       if (!repositories || !inputs.length) {
         return [];
       }
@@ -542,13 +542,17 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
 
         return plant.id;
       } catch (error) {
-        const diagnostic = plantCreationDiagnosticFromError(error, {
+        let diagnostic = plantCreationDiagnosticFromError(error, {
           stage: postCreateStage,
           plantId: plant.id
         });
         const storagePaths = photos.map((photo) => photo.storagePath).filter(Boolean) as string[];
         try {
           await repositories.plants.deletePlant(plant.id, storagePaths);
+          diagnostic = {
+            ...diagnostic,
+            rollbackResult: `plant_deleted storage_paths=${storagePaths.length}`
+          };
           console.warn("plant_creation_rollback_completed", {
             stage: "plant_create_rollback",
             failedStage: postCreateStage,
@@ -556,6 +560,10 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
             storagePathCount: storagePaths.length
           });
         } catch (rollbackError) {
+          diagnostic = {
+            ...diagnostic,
+            rollbackResult: rollbackError instanceof Error ? `rollback_failed: ${rollbackError.message}` : "rollback_failed"
+          };
           console.error("plant_creation_rollback_failed", {
             stage: "plant_create_rollback",
             failedStage: postCreateStage,
@@ -568,7 +576,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           plantId: plant.id,
           selectedPhotoCount: input.photos?.length ?? 0
         });
-        throw error;
+        throw plantCreationError(new Error(diagnostic.message), diagnostic);
       }
     },
     [repositories]
@@ -597,7 +605,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
   );
 
   const addPlantPhoto = useCallback(
-    async (plantId: string, input: { url: string; type: PhotoType; isCover?: boolean }) => {
+    async (plantId: string, input: { url: string; storageId?: string; type: PhotoType; isCover?: boolean }) => {
       const photos = await addPlantPhotos(plantId, [input]);
       return photos[0];
     },

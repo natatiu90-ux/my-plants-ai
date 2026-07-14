@@ -17,6 +17,7 @@ export type PlantCreationDiagnostic = {
   code?: string;
   details?: string;
   hint?: string;
+  status?: number;
   plantId?: string;
   photoStorageId?: string;
   parsedTemporaryStorageId?: string;
@@ -24,6 +25,10 @@ export type PlantCreationDiagnostic = {
   blobFound?: boolean;
   blobMimeType?: string | null;
   blobSize?: number | null;
+  authenticatedUserIdSuffix?: string | null;
+  insertedOwnerIdSuffix?: string | null;
+  storagePathPrefix?: string | null;
+  rollbackResult?: string | null;
   standaloneMode?: "standalone" | "browser";
   appBuildVersion?: string;
   previousAppBuildVersion?: string | null;
@@ -36,10 +41,24 @@ type ErrorLike = {
   code?: unknown;
   details?: unknown;
   hint?: unknown;
+  status?: unknown;
+  statusCode?: unknown;
 };
 
 function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function numberValue(value: unknown) {
+  if (typeof value === "number") {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+
+  return undefined;
 }
 
 function safeErrorFields(error: unknown) {
@@ -48,7 +67,8 @@ function safeErrorFields(error: unknown) {
     message: error instanceof Error ? error.message : stringValue(value.message) ?? "Unknown error",
     code: stringValue(value.code),
     details: stringValue(value.details),
-    hint: stringValue(value.hint)
+    hint: stringValue(value.hint),
+    status: numberValue(value.status) ?? numberValue(value.statusCode)
   };
 }
 
@@ -77,7 +97,8 @@ export function plantCreationDiagnosticFromError(
     message: fallback.message ?? safe.message,
     code: fallback.code ?? safe.code,
     details: fallback.details ?? safe.details,
-    hint: fallback.hint ?? safe.hint
+    hint: fallback.hint ?? safe.hint,
+    status: fallback.status ?? safe.status
   };
 }
 
