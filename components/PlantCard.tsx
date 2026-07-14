@@ -55,7 +55,7 @@ export function PlantCard({ plant, coverPhotoUrl }: { plant: Plant; coverPhotoUr
               logNavigationEvent("detail", plant.id, "cover_thumbnail_ready");
             }}
             alt={`${displayName}, ${commonName}`}
-            className="h-full w-full object-contain"
+            className="h-full w-full object-cover"
           />
           <div className={`pointer-events-none absolute inset-x-0 bottom-0 h-[72px] bg-gradient-to-b ${styles.fade}`} />
           <div className="absolute bottom-3.5 left-4 right-4">

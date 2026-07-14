@@ -25,6 +25,10 @@ function extensionForBlob(blob: Blob) {
   return "jpg";
 }
 
+function storageIdFromTemporaryPhotoUrl(url: string) {
+  return url.startsWith("photo://") ? url.replace("photo://", "").split(/[?#]/)[0] : undefined;
+}
+
 function normalizeAction(action: Plant["nextAction"]) {
   return action ?? "none";
 }
@@ -265,14 +269,20 @@ export class PhotoRepository {
 
     for (let index = 0; index < inputs.length; index += 1) {
       const input = inputs[index];
-      const storageId = input.url.startsWith("photo://") ? input.url.replace("photo://", "") : undefined;
+      const storageId = storageIdFromTemporaryPhotoUrl(input.url);
       if (!storageId) {
         continue;
       }
 
       const blob = await PhotoStorageRepository.getPhoto(storageId);
       if (!blob) {
-        continue;
+        console.warn("photo_upload_failed", {
+          stage: "indexeddb_blob_missing",
+          plantId,
+          temporaryStorageId: storageId,
+          debugId: input.debugId
+        });
+        throw new Error("photo_upload_failed");
       }
 
       const [display, exifOrientation] = await Promise.all([inspectImageDisplay(blob), readJpegExifOrientation(blob)]);
@@ -281,7 +291,9 @@ export class PhotoRepository {
       if (process.env.NODE_ENV !== "production") {
         console.info("photo_orientation_stage", {
           stage: "supabase_storage_upload",
+          plantId,
           photoId,
+          temporaryStorageId: storageId,
           debugId: input.debugId,
           mimeType: blob.type,
           byteSize: blob.size,
@@ -296,7 +308,25 @@ export class PhotoRepository {
         contentType: blob.type || "image/jpeg",
         upsert: false
       });
+      if (uploadError) {
+        console.warn("photo_upload_failed", {
+          stage: "storage_upload",
+          plantId,
+          temporaryStorageId: storageId,
+          debugId: input.debugId,
+          message: uploadError.message
+        });
+      }
       assertNoError(uploadError);
+      if (process.env.NODE_ENV !== "production") {
+        console.info("photo_upload_succeeded", {
+          stage: "storage_upload",
+          plantId,
+          temporaryStorageId: storageId,
+          photoId,
+          storagePath
+        });
+      }
 
       const { data, error } = await this.supabase
         .from("plant_photos")
@@ -311,8 +341,37 @@ export class PhotoRepository {
         .select("*")
         .single();
 
+      if (error) {
+        console.warn("photo_upload_failed", {
+          stage: "photo_row_create",
+          plantId,
+          temporaryStorageId: storageId,
+          debugId: input.debugId,
+          photoId,
+          message: error.message
+        });
+      }
       assertNoError(error);
+      if (process.env.NODE_ENV !== "production") {
+        console.info("photo_row_created", {
+          plantId,
+          temporaryStorageId: storageId,
+          photoId: data.id,
+          isCover: data.is_cover
+        });
+      }
       createdRows.push(data);
+    }
+
+    const expectedTemporaryPhotos = inputs.filter((input) => storageIdFromTemporaryPhotoUrl(input.url)).length;
+    if (createdRows.length !== expectedTemporaryPhotos) {
+      console.warn("photo_upload_failed", {
+        stage: "photo_count_mismatch",
+        plantId,
+        expected: expectedTemporaryPhotos,
+        created: createdRows.length
+      });
+      throw new Error("photo_upload_failed");
     }
 
     if (shouldAssignCover && createdRows.length) {
@@ -324,6 +383,15 @@ export class PhotoRepository {
     }
 
     const signedRows = await withThumbnailPhotoUrls(this.supabase, createdRows);
+    if (process.env.NODE_ENV !== "production") {
+      const coverPhoto = signedRows.find((row) => row.is_cover);
+      console.info("photos_saved_for_plant", {
+        plantId,
+        selectedCoverId: coverPhoto?.id ?? null,
+        finalSavedCoverUrl: coverPhoto?.thumbnail_url ?? coverPhoto?.signed_url ?? null,
+        returnedPhotoCount: signedRows.length
+      });
+    }
     return signedRows.map(mapPhoto);
   }
 

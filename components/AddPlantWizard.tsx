@@ -753,7 +753,16 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           : undefined
       });
       logAddPlantDebug("plant_save_completed", { plantId });
-      void cleanupTemporaryPhotos(selectedPhotos);
+      logAddPlantDebug("temporary_photo_cleanup_started", {
+        plantId,
+        photoCount: selectedPhotos.length,
+        temporaryStorageIds: selectedPhotos.map((photo) => photo.storageId)
+      });
+      await cleanupTemporaryPhotos(selectedPhotos);
+      logAddPlantDebug("temporary_photo_cleanup_completed", {
+        plantId,
+        photoCount: selectedPhotos.length
+      });
       router.push(`/plants/${plantId}`);
       router.refresh();
       logAddPlantDebug("modal_close_started", { plantId });
@@ -782,7 +791,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
           {coverPhoto ? (
             <div className={step === "confirm" ? "relative mt-1 h-64 overflow-hidden rounded-[24px] bg-[#dde8dc]" : "relative mt-1 h-48 overflow-hidden rounded-[24px] bg-[#dde8dc]"}>
-              <PhotoImage src={coverPhoto.url} alt={t("photos.photoAlt")} className="h-full w-full object-contain" />
+              <PhotoImage src={coverPhoto.url} alt={t("photos.photoAlt")} className="h-full w-full object-cover" />
             </div>
           ) : null}
           {analysisFailed ? (
@@ -947,7 +956,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                       <PhotoImage
                         src={photo.url}
                         alt={t("photos.photoAlt")}
-                        className="h-full w-full object-contain"
+                        className="h-full w-full object-cover"
                         onLoad={() => {
                           if (process.env.NODE_ENV === "production") return;
                           logAddPlantDebug("photo_orientation_stage", {

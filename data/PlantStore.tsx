@@ -383,6 +383,15 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       });
 
       const photos = await repositories.photos.addPhotos(plant.id, input.photos ?? [], false);
+      if (process.env.NODE_ENV !== "production") {
+        const coverPhoto = photos.find((photo) => photo.isCover);
+        console.info("plant_photos_attached", {
+          plantId: plant.id,
+          returnedPhotoCount: photos.length,
+          selectedCoverId: coverPhoto?.id ?? null,
+          finalSavedCoverUrl: coverPhoto?.thumbnailUrl ?? coverPhoto?.url ?? null
+        });
+      }
       const milestone = await repositories.milestones.addMilestone(plant.id, {
         type: "plant_added",
         eventDate: toDateKey(new Date())
