@@ -6,6 +6,7 @@ import { addDays, toDateKey } from "@/lib/date-format";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/client";
 import { createRepositories } from "@/lib/repositories/supabase-repositories";
 import { commonNameFromScientificName } from "@/lib/plant-display";
+import { plantCreationDiagnosticFromError, plantCreationError, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { calculateSoilCheckCareResolution } from "@/lib/soil-care";
 import type { PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
 
@@ -369,21 +370,34 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           : input.lastWateredAt
             ? toDateKey(addDays(reminderStartDate, 4))
             : undefined;
-      const plant = await repositories.plants.createPlant({
-        homeName: input.homeName,
-        speciesName: input.speciesName,
-        scientificName: input.scientificName,
-        roomKey: input.roomKey,
-        notes: input.notes,
-        status: input.analysis?.condition ?? "unknown",
-        nextAction: input.analysis?.nextAction ?? null,
-        lastWateredAt: input.lastWateredAt,
-        nextCheckAt,
-        careScheduleStatus: input.lastWateredAt ? "active" : "needs_first_check"
-      });
+      let plant: Plant;
+      try {
+        plant = await repositories.plants.createPlant({
+          homeName: input.homeName,
+          speciesName: input.speciesName,
+          scientificName: input.scientificName,
+          roomKey: input.roomKey,
+          notes: input.notes,
+          status: input.analysis?.condition ?? "unknown",
+          nextAction: input.analysis?.nextAction ?? null,
+          lastWateredAt: input.lastWateredAt,
+          nextCheckAt,
+          careScheduleStatus: input.lastWateredAt ? "active" : "needs_first_check"
+        });
+      } catch (error) {
+        throw plantCreationError(error, { stage: "create_plant" });
+      }
+
+      const runPostCreateStage = async <T,>(stage: PlantCreationStage, task: () => Promise<T>) => {
+        try {
+          return await task();
+        } catch (error) {
+          throw plantCreationError(error, { stage, plantId: plant.id });
+        }
+      };
 
       let photos: PlantPhoto[] = [];
-      let postCreateStage = "photo_save";
+      let postCreateStage: PlantCreationStage = "read_temporary_blob";
       try {
         photos = await repositories.photos.addPhotos(plant.id, input.photos ?? [], false);
         if (process.env.NODE_ENV !== "production") {
@@ -395,38 +409,40 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
             finalSavedCoverUrl: coverPhoto?.thumbnailUrl ?? coverPhoto?.url ?? null
           });
         }
-        postCreateStage = "plant_added_milestone";
-        const milestone = await repositories.milestones.addMilestone(plant.id, {
+        postCreateStage = "create_milestone";
+        const milestone = await runPostCreateStage("create_milestone", () => repositories.milestones.addMilestone(plant.id, {
           type: "plant_added",
           eventDate: toDateKey(new Date())
-        });
-        postCreateStage = "watering_milestone";
-        const wateringMilestone = input.lastWateredAt
-          ? await repositories.milestones.addMilestone(plant.id, {
+        }));
+        postCreateStage = "create_watering_event";
+        const lastWateredAt = input.lastWateredAt;
+        const wateringMilestone = lastWateredAt
+          ? await runPostCreateStage("create_watering_event", () => repositories.milestones.addMilestone(plant.id, {
               type: "watered",
-              eventDate: input.lastWateredAt
-            })
+              eventDate: lastWateredAt
+            }))
           : null;
-        if (input.lastWateredAt) {
-          postCreateStage = "watering_event";
-          await repositories.careEvents.addCareEvent(plant.id, { type: "watered", eventDate: input.lastWateredAt });
+        if (lastWateredAt) {
+          postCreateStage = "create_watering_event";
+          await runPostCreateStage("create_watering_event", () => repositories.careEvents.addCareEvent(plant.id, { type: "watered", eventDate: lastWateredAt }));
         }
 
-        if (input.analysis) {
-          postCreateStage = "analysis_record";
-          await repositories.analyses.addAnalysis({
+        const analysis = input.analysis;
+        if (analysis) {
+          postCreateStage = "save_analysis";
+          await runPostCreateStage("save_analysis", () => repositories.analyses.addAnalysis({
             plantId: plant.id,
             sourcePhotoIds: photos.map((photo) => photo.id),
-            detectedSpecies: input.analysis.detectedSpecies,
-            confidence: input.analysis.confidence,
-            condition: input.analysis.condition,
-            nextAction: input.analysis.nextAction,
-            summaryEn: input.analysis.summary?.en,
-            summaryRu: input.analysis.summary?.ru,
-            recommendations: input.analysis.recommendations,
-            rawResult: input.analysis.rawResult,
-            model: input.analysis.model
-          });
+            detectedSpecies: analysis.detectedSpecies,
+            confidence: analysis.confidence,
+            condition: analysis.condition,
+            nextAction: analysis.nextAction,
+            summaryEn: analysis.summary?.en,
+            summaryRu: analysis.summary?.ru,
+            recommendations: analysis.recommendations,
+            rawResult: analysis.rawResult,
+            model: analysis.model
+          }));
         }
 
         const analysisRecord: PlantAnalysisRecord | null = input.analysis
@@ -462,6 +478,10 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
 
         return plant.id;
       } catch (error) {
+        const diagnostic = plantCreationDiagnosticFromError(error, {
+          stage: postCreateStage,
+          plantId: plant.id
+        });
         const storagePaths = photos.map((photo) => photo.storagePath).filter(Boolean) as string[];
         try {
           await repositories.plants.deletePlant(plant.id, storagePaths);
@@ -480,9 +500,8 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           });
         }
         console.error("plant_creation_failed_after_plant_row", {
-          stage: postCreateStage,
+          ...diagnostic,
           plantId: plant.id,
-          message: error instanceof Error ? error.message : "Unknown post-create error",
           selectedPhotoCount: input.photos?.length ?? 0
         });
         throw error;

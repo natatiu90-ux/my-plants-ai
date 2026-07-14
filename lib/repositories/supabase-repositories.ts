@@ -3,6 +3,7 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { inspectImageDisplay, readJpegExifOrientation } from "@/lib/client-image-normalization";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
+import { plantCreationError } from "@/lib/plant-save-diagnostics";
 import { temporaryPhotoStorageIdFromUrl } from "@/lib/temporary-photo-url";
 import type { CareScheduleStatus, PhotoType, Plant, PlantCareEvent, PlantHypothesis, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
 import { mapAnalysis, mapCareEvent, mapHypothesisResolution, mapMilestone, mapPhoto, mapPlant, mapRoom, type PlantPhotoRow } from "./mappers";
@@ -292,7 +293,14 @@ export class PhotoRepository {
             parsedTemporaryPhotoId: storageId,
             debugId: input.debugId
           });
-          throw new Error("photo_upload_failed:indexeddb_blob_missing");
+          throw plantCreationError(new Error("Temporary photo blob was not found."), {
+            stage: "read_temporary_blob",
+            plantId,
+            photoStorageId: input.url,
+            parsedTemporaryStorageId: storageId,
+            photoIndex: index,
+            blobFound: false
+          });
         }
 
         const [display, exifOrientation] = await Promise.all([inspectImageDisplay(blob), readJpegExifOrientation(blob)]);
@@ -329,8 +337,17 @@ export class PhotoRepository {
             debugId: input.debugId,
             message: uploadError.message
           });
+          throw plantCreationError(uploadError, {
+            stage: "upload_storage",
+            plantId,
+            photoStorageId: input.url,
+            parsedTemporaryStorageId: storageId,
+            photoIndex: index,
+            blobFound: true,
+            blobMimeType: blob.type,
+            blobSize: blob.size
+          });
         }
-        assertNoError(uploadError);
         uploadedStoragePaths.push(storagePath);
         if (process.env.NODE_ENV !== "production") {
           console.info("photo_upload_succeeded", {
@@ -366,8 +383,17 @@ export class PhotoRepository {
             photoId,
             message: error.message
           });
+          throw plantCreationError(error, {
+            stage: "insert_photo_row",
+            plantId,
+            photoStorageId: input.url,
+            parsedTemporaryStorageId: storageId,
+            photoIndex: index,
+            blobFound: true,
+            blobMimeType: blob.type,
+            blobSize: blob.size
+          });
         }
-        assertNoError(error);
         if (process.env.NODE_ENV !== "production") {
           console.info("photo_row_created", {
             plantId,
@@ -387,7 +413,10 @@ export class PhotoRepository {
           expected: expectedTemporaryPhotos,
           created: createdRows.length
         });
-        throw new Error("photo_upload_failed:photo_count_mismatch");
+        throw plantCreationError(new Error("Not every temporary photo produced a saved photo row."), {
+          stage: "insert_photo_row",
+          plantId
+        });
       }
 
       if (shouldAssignCover && createdRows.length) {
@@ -404,8 +433,11 @@ export class PhotoRepository {
             selectedCoverId: coverPhoto.id,
             message: clearError.message
           });
+          throw plantCreationError(clearError, {
+            stage: "assign_cover",
+            plantId
+          });
         }
-        assertNoError(clearError);
 
         const { error } = await this.supabase
           .from("plant_photos")
@@ -420,8 +452,11 @@ export class PhotoRepository {
             selectedCoverId: coverPhoto.id,
             message: error.message
           });
+          throw plantCreationError(error, {
+            stage: "assign_cover",
+            plantId
+          });
         }
-        assertNoError(error);
         createdRows.forEach((row) => {
           row.is_cover = row.id === coverPhoto.id;
         });

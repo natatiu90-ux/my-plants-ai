@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
 import { inspectImageDisplay, readJpegExifOrientation } from "@/lib/client-image-normalization";
 import { addDays, formatRelativeDate, formatShortDate, toDateKey } from "@/lib/date-format";
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
+import { plantCreationDiagnosticFromError, type PlantCreationDiagnostic, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
 import { MultiPhotoPicker } from "./MultiPhotoPicker";
 import { PhotoBatchReview } from "./PhotoBatchReview";
@@ -146,8 +147,10 @@ async function prepareImageForAnalysis(blob: Blob, fileName: string) {
 
 export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { locale, t } = useI18n();
   const { addPlant, plants, rooms } = usePlantStore();
+  const isPlantSaveDebugEnabled = searchParams.get("debugPlantSave") === "1";
   const [step, setStep] = useState<Step>("pick");
   const [selectedPhotos, setSelectedPhotos] = useState<PendingPhotoUpload[]>([]);
   const [rejectedPhotoCount, setRejectedPhotoCount] = useState(0);
@@ -169,6 +172,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [clientPreparationDiagnostics, setClientPreparationDiagnostics] = useState<ClientImagePreparationDiagnostic[]>([]);
   const [analysisErrorCode, setAnalysisErrorCode] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [saveDiagnostic, setSaveDiagnostic] = useState<PlantCreationDiagnostic | null>(null);
   const [analysisStageIndex, setAnalysisStageIndex] = useState(0);
   const [showLongAnalysisHint, setShowLongAnalysisHint] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -689,11 +693,21 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     setActivePicker(null);
   };
 
+  const copySaveDiagnostic = () => {
+    if (!saveDiagnostic) {
+      return;
+    }
+
+    void navigator.clipboard?.writeText(JSON.stringify(saveDiagnostic, null, 2));
+  };
+
   const save = async () => {
     if (isSaving || !selectedPhotos.length || !coverPhoto) {
       return;
     }
 
+    let activeSaveStage: PlantCreationStage = "unknown";
+    let savedPlantId: string | undefined;
     logAddPlantDebug("plant_submit_started", {
       photoCount: selectedPhotos.length,
       hasRoom: Boolean(roomKey),
@@ -702,6 +716,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     });
     setIsSaving(true);
     setSubmitError(null);
+    setSaveDiagnostic(null);
 
     try {
       logAddPlantDebug("plant_save_started", {
@@ -731,6 +746,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           return;
         }
       }
+      activeSaveStage = "create_plant";
       const plantId = await addPlant({
         homeName: savedNickname,
         speciesName: savedCommonName,
@@ -752,12 +768,14 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             }
           : undefined
       });
+      savedPlantId = plantId;
       logAddPlantDebug("plant_save_completed", { plantId });
       logAddPlantDebug("temporary_photo_cleanup_started", {
         plantId,
         photoCount: selectedPhotos.length,
         temporaryStorageIds: selectedPhotos.map((photo) => photo.storageId)
       });
+      activeSaveStage = "cleanup";
       await cleanupTemporaryPhotos(selectedPhotos);
       logAddPlantDebug("temporary_photo_cleanup_completed", {
         plantId,
@@ -768,11 +786,16 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       logAddPlantDebug("modal_close_started", { plantId });
       onClose();
     } catch (error) {
+      const diagnostic = plantCreationDiagnosticFromError(error, {
+        stage: activeSaveStage,
+        plantId: savedPlantId
+      });
       console.error("plant_save_failed", {
-        message: error instanceof Error ? error.message : "Unknown error",
+        ...diagnostic,
         photoCount: selectedPhotos.length,
         roomKey
       });
+      setSaveDiagnostic(diagnostic);
       setSubmitError(t("addPlant.submitFailed"));
       setIsSaving(false);
     }
@@ -798,7 +821,29 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             <p className="mt-4 rounded-[18px] bg-[#fff1d8] p-3 text-sm font-bold leading-5 text-[#8a6230]">{t("addPlant.analysisFailed")}</p>
           ) : null}
           {submitError ? (
-            <p className="mt-4 rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{submitError}</p>
+            <div className="mt-4 rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">
+              <p>{submitError}</p>
+              {isPlantSaveDebugEnabled && saveDiagnostic ? (
+                <div className="mt-3 rounded-[14px] bg-white/70 p-3 text-left text-[11px] leading-5 text-[#5f594f]">
+                  <p className="font-extrabold text-[#3f3b35]">Plant save diagnostic</p>
+                  <p>Failed stage: {saveDiagnostic.stage}</p>
+                  <p>Error code: {saveDiagnostic.code ?? "none"}</p>
+                  <p>Sanitized message: {saveDiagnostic.message}</p>
+                  <p>Photo index: {saveDiagnostic.photoIndex ?? "n/a"}</p>
+                  <p>Parsed temporary storage id: {saveDiagnostic.parsedTemporaryStorageId ?? saveDiagnostic.photoStorageId ?? "n/a"}</p>
+                  <p>IndexedDB blob found: {saveDiagnostic.blobFound == null ? "unknown" : String(saveDiagnostic.blobFound)}</p>
+                  <p>Blob MIME type: {saveDiagnostic.blobMimeType ?? "unknown"}</p>
+                  <p>Blob byte size: {saveDiagnostic.blobSize ?? "unknown"}</p>
+                  <button
+                    type="button"
+                    onClick={copySaveDiagnostic}
+                    className="mt-3 min-h-10 rounded-[14px] bg-[#ddf2dc] px-3 text-xs font-extrabold text-[#2d7a4f]"
+                  >
+                    Copy diagnostic
+                  </button>
+                </div>
+              ) : null}
+            </div>
           ) : null}
           {step === "confirm" && isTechnicalAnalysisFailure ? (
             <div className="pt-5">
