@@ -146,10 +146,14 @@ async function loadBitmap(blob: Blob): Promise<LoadedImage> {
         orientationSource: "raw_pixels"
       };
     } catch {
-      return {
-        image: await createImageBitmap(blob),
-        orientationSource: "browser_display"
-      };
+      try {
+        return {
+          image: await createImageBitmap(blob),
+          orientationSource: "browser_display"
+        };
+      } catch {
+        // iOS can display some gallery formats in <img> even when createImageBitmap rejects them.
+      }
     }
   }
 

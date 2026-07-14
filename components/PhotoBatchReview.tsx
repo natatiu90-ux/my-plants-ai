@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { rotateImageBlob, type ImageRotationDegrees } from "@/lib/client-image-normalization";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
@@ -21,6 +22,7 @@ export function PhotoBatchReview({
   onPhotosChange,
   onAddMore,
   onDiscardPhoto,
+  debugPanel,
   onCancel,
   onSave
 }: {
@@ -37,6 +39,7 @@ export function PhotoBatchReview({
   onPhotosChange?: (photos: PendingPhotoUpload[]) => void;
   onAddMore?: () => void;
   onDiscardPhoto?: (photo: PendingPhotoUpload) => void;
+  debugPanel?: ReactNode;
   onCancel: () => void;
   onSave: (photos: PendingPhotoUpload[]) => void;
 }) {
@@ -176,6 +179,7 @@ export function PhotoBatchReview({
             {t("photos.partialAdded", { added: initialPhotos.length, rejected: rejectedCount })}
           </p>
         ) : null}
+        {debugPanel}
         <div className="mt-4">
           {photos.length ? (
             <PhotoReviewGrid

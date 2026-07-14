@@ -11,7 +11,7 @@ import { addDays, formatRelativeDate, formatShortDate, toDateKey } from "@/lib/d
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
 import { plantCreationDiagnosticFromError, type PlantCreationDiagnostic, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
-import { MultiPhotoPicker } from "./MultiPhotoPicker";
+import { MultiPhotoPicker, type PhotoPickerDiagnostic } from "./MultiPhotoPicker";
 import { PhotoBatchReview } from "./PhotoBatchReview";
 import { PhotoImage } from "./PhotoImage";
 import { RoomPicker } from "./RoomPicker";
@@ -88,6 +88,7 @@ const analysisImageTargetBytes = 500 * 1024;
 const analysisRequestTargetBytes = 3 * 1024 * 1024;
 const maxSelectedPhotos = 5;
 const plantSaveDebugStorageKey = "my_plants_debug_plant_save";
+const photoPickerDebugStorageKey = "my_plants_debug_photo_picker";
 const defaultNicknames = {
   en: ["Sprout", "Pebble", "Mochi", "Button", "Pickle", "Clover", "Poppy", "Bean", "Sunny", "Olive", "Noodle", "Dot", "Minty", "Pumpkin", "Biscuit", "Twiggy"],
   ru: ["Плюша", "Листик", "Кнопка", "Пышка", "Ростик", "Зелёныш", "Фисташка", "Плющинка", "Бублик", "Капля", "Мята", "Печенька", "Пуговка", "Тучка", "Крошка", "Лапка"]
@@ -153,6 +154,8 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const { locale, t } = useI18n();
   const { addPlant, plants, rooms, status, userId } = usePlantStore();
   const [isPlantSaveDebugEnabled, setIsPlantSaveDebugEnabled] = useState(false);
+  const [isPhotoPickerDebugEnabled, setIsPhotoPickerDebugEnabled] = useState(false);
+  const [photoPickerDiagnostic, setPhotoPickerDiagnostic] = useState<PhotoPickerDiagnostic | null>(null);
   const [step, setStep] = useState<Step>("pick");
   const [selectedPhotos, setSelectedPhotos] = useState<PendingPhotoUpload[]>([]);
   const [rejectedPhotoCount, setRejectedPhotoCount] = useState(0);
@@ -199,6 +202,23 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     setIsPlantSaveDebugEnabled(window.localStorage.getItem(plantSaveDebugStorageKey) === "1");
   }, [searchParams]);
 
+  useEffect(() => {
+    const debugParam = searchParams.get("debugPhotoPicker");
+    if (debugParam === "1") {
+      window.localStorage.setItem(photoPickerDebugStorageKey, "1");
+      setIsPhotoPickerDebugEnabled(true);
+      return;
+    }
+
+    if (debugParam === "0") {
+      window.localStorage.removeItem(photoPickerDebugStorageKey);
+      setIsPhotoPickerDebugEnabled(false);
+      return;
+    }
+
+    setIsPhotoPickerDebugEnabled(window.localStorage.getItem(photoPickerDebugStorageKey) === "1");
+  }, [searchParams]);
+
   const generateNicknameOnce = useCallback((extraExistingNames: string[] = []) => {
     const existingNames = [...plants.map((plant) => plant.homeName ?? ""), ...extraExistingNames];
     const nickname = suggestedNickname(locale, existingNames);
@@ -230,6 +250,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const appendSelectedPhotos = useCallback(
     (photos: PendingPhotoUpload[], rejectedFiles: number) => {
       setSelectedPhotos((current) => {
+        const selectedPhotosBefore = current.length;
         const existingKeys = new Set(current.map(photoDuplicateKey));
         const nextPhotos = [...current];
         let rejectedNext = rejectedFiles;
@@ -251,12 +272,32 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         }
 
         setRejectedPhotoCount(rejectedNext);
+        const finalize = (finalPhotos: PendingPhotoUpload[]) => {
+          setPhotoPickerDiagnostic((currentDiagnostic) => {
+            if (!currentDiagnostic) {
+              return currentDiagnostic;
+            }
+
+            const nextDiagnostic = {
+              ...currentDiagnostic,
+              accepted: Math.max(0, finalPhotos.length - selectedPhotosBefore),
+              rejected: rejectedNext,
+              selectedPhotosBefore,
+              selectedPhotosAfter: finalPhotos.length,
+              wizardStepAfter: finalPhotos.length ? "review" : currentDiagnostic.wizardStepBefore
+            };
+            console.info("photo_picker_diagnostic", nextDiagnostic);
+            return nextDiagnostic;
+          });
+          return finalPhotos;
+        };
+
         if (nextPhotos.length && !nextPhotos.some((photo) => photo.isCover)) {
           const preferredCover = nextPhotos.find((photo) => photo.type === "overview") ?? nextPhotos[0];
-          return nextPhotos.map((photo) => ({ ...photo, isCover: photo.id === preferredCover.id }));
+          return finalize(nextPhotos.map((photo) => ({ ...photo, isCover: photo.id === preferredCover.id })));
         }
 
-        return nextPhotos;
+        return finalize(nextPhotos);
       });
       setStep("review");
     },
@@ -538,6 +579,33 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     };
   }, [analysisAttempt, ensureSuggestedNickname, locale, selectedPhotos, step]);
 
+  const copyPhotoPickerDiagnostic = () => {
+    if (!photoPickerDiagnostic) {
+      return;
+    }
+
+    void navigator.clipboard?.writeText(JSON.stringify(photoPickerDiagnostic, null, 2));
+  };
+
+  const photoPickerDebugPanel = isPhotoPickerDebugEnabled ? (
+    <div className="mt-3 rounded-[18px] bg-[#1f2937] p-3 text-left text-[11px] font-bold leading-5 text-white">
+      <p className="font-black">PHOTO PICKER DEBUG ON</p>
+      <p>event fired: {photoPickerDiagnostic ? "yes" : "no"}</p>
+      <p>source: {photoPickerDiagnostic?.source ?? "none"}</p>
+      <p>files received: {photoPickerDiagnostic?.filesReceived ?? 0}</p>
+      <p>accepted: {photoPickerDiagnostic?.accepted ?? 0}</p>
+      <p>rejected: {photoPickerDiagnostic?.rejected ?? 0}</p>
+      <p>failure stage: {photoPickerDiagnostic?.failureStage ?? "none"}</p>
+      <p>message: {photoPickerDiagnostic?.failureMessage ?? "none"}</p>
+      <p>selectedPhotos before: {photoPickerDiagnostic?.selectedPhotosBefore ?? selectedPhotos.length}</p>
+      <p>selectedPhotos after: {photoPickerDiagnostic?.selectedPhotosAfter ?? selectedPhotos.length}</p>
+      <p>IndexedDB: {photoPickerDiagnostic?.indexedDbResult ?? "not_started"}</p>
+      <button type="button" onClick={copyPhotoPickerDiagnostic} className="mt-2 min-h-9 rounded-[12px] bg-white px-3 text-xs font-black text-[#1f2937]">
+        Copy diagnostic
+      </button>
+    </div>
+  ) : null;
+
   const analysisStages = [
     t("addPlant.uploadingPhotos"),
     t("addPlant.identifying"),
@@ -551,6 +619,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         title={t("addPlant.title")}
         onCancel={cancelAddPlant}
         onSelect={appendSelectedPhotos}
+        debugEnabled={isPhotoPickerDebugEnabled}
+        selectedPhotosCount={selectedPhotos.length}
+        wizardStep={step}
+        onDiagnostic={setPhotoPickerDiagnostic}
       />
     );
   }
@@ -561,6 +633,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         title={t("photos.addPhotos")}
         onCancel={() => setStep("review")}
         onSelect={appendSelectedPhotos}
+        debugEnabled={isPhotoPickerDebugEnabled}
+        selectedPhotosCount={selectedPhotos.length}
+        wizardStep={step}
+        onDiagnostic={setPhotoPickerDiagnostic}
       />
     );
   }
@@ -578,6 +654,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         emptyTitle={t("addPlant.noPhotosSelected")}
         emptyText={t("addPlant.noPhotosSelectedText")}
         limitReachedText={t("addPlant.photoLimitReached")}
+        debugPanel={photoPickerDebugPanel}
         onPhotosChange={updateSelectedPhotos}
         onDiscardPhoto={discardSelectedPhoto}
         onAddMore={() => setStep("pick_more")}
