@@ -5,7 +5,7 @@ import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { normalizeImageBlob, readJpegExifOrientation } from "@/lib/client-image-normalization";
-import { PhotoStorageRepository, validateImageFile } from "@/lib/photo-storage";
+import { IndexedDbPhotoStorageError, PhotoStorageRepository, validateImageFile, type IndexedDbPhotoStorageDiagnostic } from "@/lib/photo-storage";
 import type { PendingPhotoUpload } from "./photo-upload-types";
 
 export type PhotoPickerDiagnostic = {
@@ -19,6 +19,7 @@ export type PhotoPickerDiagnostic = {
   wizardStepBefore?: string;
   wizardStepAfter?: string;
   indexedDbResult?: string;
+  indexedDb?: IndexedDbPhotoStorageDiagnostic;
   failureStage?: string;
   failureMessage?: string;
   files: {
@@ -27,6 +28,7 @@ export type PhotoPickerDiagnostic = {
     size: number;
     status: "received" | "invalid" | "normalizing" | "normalized" | "stored" | "failed";
     storageId?: string;
+    indexedDb?: IndexedDbPhotoStorageDiagnostic;
     failureStage?: string;
     failureMessage?: string;
   }[];
@@ -80,6 +82,10 @@ function createPhotoDebugId() {
   }
 
   return `photo-debug-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function indexedDbDiagnosticFromError(error: unknown) {
+  return error instanceof IndexedDbPhotoStorageError ? error.diagnostic : undefined;
 }
 
 export function MultiPhotoPicker({
@@ -235,15 +241,19 @@ export function MultiPhotoPicker({
             storedPhoto = await PhotoStorageRepository.savePhoto(fileToStore);
           } catch (error) {
             rejectedCount += 1;
-            const message = error instanceof Error ? error.message : "indexeddb_write_failed";
+            const indexedDb = indexedDbDiagnosticFromError(error);
+            const message = indexedDb?.exceptionMessage ?? (error instanceof Error ? error.message : "indexeddb_write_failed");
             currentDiagnostic = {
               ...currentDiagnostic,
               rejected: rejectedCount,
               indexedDbResult: "failed",
+              indexedDb,
               failureStage: "indexeddb_write",
               failureMessage: message,
               files: currentDiagnostic.files.map((item) =>
-                item.name === file.name && item.size === file.size ? { ...item, status: "failed", failureStage: "indexeddb_write", failureMessage: message } : item
+                item.name === file.name && item.size === file.size
+                  ? { ...item, status: "failed", indexedDb, failureStage: "indexeddb_write", failureMessage: message }
+                  : item
               )
             };
             publishDiagnostic(currentDiagnostic);
@@ -405,6 +415,23 @@ export function MultiPhotoPicker({
               <p>selectedPhotos before: {diagnostic?.selectedPhotosBefore ?? selectedPhotosCount}</p>
               <p>selectedPhotos after: {diagnostic?.selectedPhotosAfter ?? "unknown"}</p>
               <p>IndexedDB: {diagnostic?.indexedDbResult ?? "not_started"}</p>
+              <p>exception.name: {diagnostic?.indexedDb?.exceptionName ?? "unknown"}</p>
+              <p>exception.message: {diagnostic?.indexedDb?.exceptionMessage ?? "unknown"}</p>
+              <p className="break-words">exception.stack: {diagnostic?.indexedDb?.exceptionStack ?? "none"}</p>
+              <p>DOMException.code: {diagnostic?.indexedDb?.domExceptionCode ?? "unknown"}</p>
+              <p>transaction mode: {diagnostic?.indexedDb?.transactionMode ?? "unknown"}</p>
+              <p>database: {diagnostic?.indexedDb?.databaseName ?? "unknown"}</p>
+              <p>object store: {diagnostic?.indexedDb?.objectStoreName ?? "unknown"}</p>
+              <p>key: {diagnostic?.indexedDb?.key ?? "unknown"}</p>
+              <p>blob: {diagnostic?.indexedDb ? `${diagnostic.indexedDb.blobType || "unknown"} · ${diagnostic.indexedDb.blobSize} bytes` : "unknown"}</p>
+              <p>openDB succeeded: {diagnostic?.indexedDb ? String(diagnostic.indexedDb.openDbSucceeded) : "unknown"}</p>
+              <p>transaction started: {diagnostic?.indexedDb ? String(diagnostic.indexedDb.transactionStarted) : "unknown"}</p>
+              <p>put reached: {diagnostic?.indexedDb ? String(diagnostic.indexedDb.putReached) : "unknown"}</p>
+              <p>onabort fired: {diagnostic?.indexedDb ? String(diagnostic.indexedDb.transactionOnAbortFired) : "unknown"}</p>
+              <p>transaction.error: {diagnostic?.indexedDb?.transactionError?.message ?? diagnostic?.indexedDb?.transactionError?.name ?? "none"}</p>
+              <p>request.error: {diagnostic?.indexedDb?.requestError?.message ?? diagnostic?.indexedDb?.requestError?.name ?? "none"}</p>
+              <p>db.version: {diagnostic?.indexedDb?.dbVersion ?? "unknown"}</p>
+              <p>object store exists: {diagnostic?.indexedDb?.objectStoreExists == null ? "unknown" : String(diagnostic.indexedDb.objectStoreExists)}</p>
               <button type="button" onClick={copyDiagnostic} className="mt-2 min-h-9 rounded-[12px] bg-white px-3 text-xs font-black text-[#1f2937]">
                 Copy diagnostic
               </button>

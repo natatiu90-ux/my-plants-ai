@@ -600,6 +600,23 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       <p>selectedPhotos before: {photoPickerDiagnostic?.selectedPhotosBefore ?? selectedPhotos.length}</p>
       <p>selectedPhotos after: {photoPickerDiagnostic?.selectedPhotosAfter ?? selectedPhotos.length}</p>
       <p>IndexedDB: {photoPickerDiagnostic?.indexedDbResult ?? "not_started"}</p>
+      <p>exception.name: {photoPickerDiagnostic?.indexedDb?.exceptionName ?? "unknown"}</p>
+      <p>exception.message: {photoPickerDiagnostic?.indexedDb?.exceptionMessage ?? "unknown"}</p>
+      <p className="break-words">exception.stack: {photoPickerDiagnostic?.indexedDb?.exceptionStack ?? "none"}</p>
+      <p>DOMException.code: {photoPickerDiagnostic?.indexedDb?.domExceptionCode ?? "unknown"}</p>
+      <p>transaction mode: {photoPickerDiagnostic?.indexedDb?.transactionMode ?? "unknown"}</p>
+      <p>database: {photoPickerDiagnostic?.indexedDb?.databaseName ?? "unknown"}</p>
+      <p>object store: {photoPickerDiagnostic?.indexedDb?.objectStoreName ?? "unknown"}</p>
+      <p>key: {photoPickerDiagnostic?.indexedDb?.key ?? "unknown"}</p>
+      <p>blob: {photoPickerDiagnostic?.indexedDb ? `${photoPickerDiagnostic.indexedDb.blobType || "unknown"} · ${photoPickerDiagnostic.indexedDb.blobSize} bytes` : "unknown"}</p>
+      <p>openDB succeeded: {photoPickerDiagnostic?.indexedDb ? String(photoPickerDiagnostic.indexedDb.openDbSucceeded) : "unknown"}</p>
+      <p>transaction started: {photoPickerDiagnostic?.indexedDb ? String(photoPickerDiagnostic.indexedDb.transactionStarted) : "unknown"}</p>
+      <p>put reached: {photoPickerDiagnostic?.indexedDb ? String(photoPickerDiagnostic.indexedDb.putReached) : "unknown"}</p>
+      <p>onabort fired: {photoPickerDiagnostic?.indexedDb ? String(photoPickerDiagnostic.indexedDb.transactionOnAbortFired) : "unknown"}</p>
+      <p>transaction.error: {photoPickerDiagnostic?.indexedDb?.transactionError?.message ?? photoPickerDiagnostic?.indexedDb?.transactionError?.name ?? "none"}</p>
+      <p>request.error: {photoPickerDiagnostic?.indexedDb?.requestError?.message ?? photoPickerDiagnostic?.indexedDb?.requestError?.name ?? "none"}</p>
+      <p>db.version: {photoPickerDiagnostic?.indexedDb?.dbVersion ?? "unknown"}</p>
+      <p>object store exists: {photoPickerDiagnostic?.indexedDb?.objectStoreExists == null ? "unknown" : String(photoPickerDiagnostic.indexedDb.objectStoreExists)}</p>
       <button type="button" onClick={copyPhotoPickerDiagnostic} className="mt-2 min-h-9 rounded-[12px] bg-white px-3 text-xs font-black text-[#1f2937]">
         Copy diagnostic
       </button>
