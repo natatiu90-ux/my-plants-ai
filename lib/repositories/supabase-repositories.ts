@@ -3,6 +3,7 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { inspectImageDisplay, readJpegExifOrientation } from "@/lib/client-image-normalization";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
+import { temporaryPhotoStorageIdFromUrl } from "@/lib/temporary-photo-url";
 import type { CareScheduleStatus, PhotoType, Plant, PlantCareEvent, PlantHypothesis, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
 import { mapAnalysis, mapCareEvent, mapHypothesisResolution, mapMilestone, mapPhoto, mapPlant, mapRoom, type PlantPhotoRow } from "./mappers";
 
@@ -23,10 +24,6 @@ function extensionForBlob(blob: Blob) {
   if (blob.type === "image/heif") return "heif";
   if (blob.type === "image/webp") return "webp";
   return "jpg";
-}
-
-function storageIdFromTemporaryPhotoUrl(url: string) {
-  return url.startsWith("photo://") ? url.replace("photo://", "").split(/[?#]/)[0] : undefined;
 }
 
 function normalizeAction(action: Plant["nextAction"]) {
@@ -271,7 +268,7 @@ export class PhotoRepository {
     try {
       for (let index = 0; index < inputs.length; index += 1) {
         const input = inputs[index];
-        const storageId = storageIdFromTemporaryPhotoUrl(input.url);
+        const storageId = temporaryPhotoStorageIdFromUrl(input.url);
         if (!storageId) {
           continue;
         }
@@ -382,7 +379,7 @@ export class PhotoRepository {
         createdRows.push(data);
       }
 
-      const expectedTemporaryPhotos = inputs.filter((input) => storageIdFromTemporaryPhotoUrl(input.url)).length;
+      const expectedTemporaryPhotos = inputs.filter((input) => temporaryPhotoStorageIdFromUrl(input.url)).length;
       if (createdRows.length !== expectedTemporaryPhotos) {
         console.warn("photo_upload_failed", {
           stage: "photo_count_mismatch",

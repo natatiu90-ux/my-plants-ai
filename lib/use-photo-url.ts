@@ -2,25 +2,24 @@
 
 import { useEffect, useState } from "react";
 import { PhotoStorageRepository } from "./photo-storage";
-
-function storageIdFromPhotoUrl(url: string) {
-  return url.replace("photo://", "").split(/[?#]/)[0];
-}
+import { isTemporaryPhotoUrl, temporaryPhotoStorageIdFromUrl } from "./temporary-photo-url";
 
 export function usePhotoUrl(url: string) {
-  const [resolvedUrl, setResolvedUrl] = useState(url);
+  const [resolvedUrl, setResolvedUrl] = useState<string | undefined>(() => (isTemporaryPhotoUrl(url) ? undefined : url));
 
   useEffect(() => {
     let objectUrl: string | null = null;
     let isMounted = true;
 
     async function resolve() {
-      if (!url.startsWith("photo://")) {
+      if (!isTemporaryPhotoUrl(url)) {
         setResolvedUrl(url);
         return;
       }
 
-      const blob = await PhotoStorageRepository.getPhoto(storageIdFromPhotoUrl(url));
+      setResolvedUrl(undefined);
+      const storageId = temporaryPhotoStorageIdFromUrl(url);
+      const blob = storageId ? await PhotoStorageRepository.getPhoto(storageId) : null;
       if (!blob || !isMounted) {
         return;
       }
