@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Leaf, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Leaf, Loader2 } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { appBuildVersion, isStandalonePwa } from "@/lib/app-version";
 import { isSupabaseConfigured, supabase, supabaseAnonKeySuffix, supabaseProjectUrl } from "@/lib/supabase/client";
@@ -12,6 +12,9 @@ function authRedirectUrl() {
 }
 
 const debugAuthStorageKey = "my_plants_debug_auth";
+const authMethodStorageKey = "my_plants_auth_method";
+
+type AuthMethod = "magic_link" | "password";
 
 type AuthDiagnostic = {
   origin: string;
@@ -46,12 +49,18 @@ export function AuthScreen() {
   const { t } = useI18n();
   const searchParams = useSearchParams();
   const [isDebugAuth, setIsDebugAuth] = useState(false);
+  const [authMethod, setAuthMethod] = useState<AuthMethod>("magic_link");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [diagnostic, setDiagnostic] = useState<AuthDiagnostic | null>(null);
-  const canSubmit = useMemo(() => email.trim().includes("@") && !isSending, [email, isSending]);
+  const canSubmit = useMemo(
+    () => email.trim().includes("@") && !isSending && (authMethod === "magic_link" || password.length > 0),
+    [authMethod, email, isSending, password]
+  );
 
   useEffect(() => {
     const debugParam = searchParams.get("debugAuth");
@@ -69,6 +78,24 @@ export function AuthScreen() {
 
     setIsDebugAuth(window.localStorage.getItem(debugAuthStorageKey) === "1");
   }, [searchParams]);
+
+  useEffect(() => {
+    const storedMethod = window.localStorage.getItem(authMethodStorageKey);
+    if (storedMethod === "magic_link" || storedMethod === "password") {
+      setAuthMethod(storedMethod);
+    }
+  }, []);
+
+  const chooseAuthMethod = (nextMethod: AuthMethod) => {
+    setAuthMethod(nextMethod);
+    window.localStorage.setItem(authMethodStorageKey, nextMethod);
+    setMessage(null);
+    setError(null);
+    if (nextMethod !== "password") {
+      setPassword("");
+      setIsPasswordVisible(false);
+    }
+  };
 
   const buildDiagnostic = async (emailRedirectTo: string, nextError?: unknown): Promise<AuthDiagnostic> => {
     const sessionResult = supabase ? await supabase.auth.getSession().catch(() => null) : null;
@@ -101,6 +128,11 @@ export function AuthScreen() {
       return;
     }
 
+    if (authMethod === "password" && !password) {
+      setError(t("auth.passwordMissing"));
+      return;
+    }
+
     setIsSending(true);
     setMessage(null);
     setError(null);
@@ -112,22 +144,39 @@ export function AuthScreen() {
       setDiagnostic(startDiagnostic);
     }
     try {
-      const { error: signInError } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
-        options: {
-          emailRedirectTo
-        }
-      });
+      const { error: signInError } =
+        authMethod === "magic_link"
+          ? await supabase.auth.signInWithOtp({
+              email: email.trim(),
+              options: {
+                emailRedirectTo
+              }
+            })
+          : await supabase.auth.signInWithPassword({
+              email: email.trim(),
+              password
+            });
       if (signInError) {
         throw signInError;
       }
       console.info("magic_link_send_completed", startDiagnostic);
-      setMessage(t("auth.magicLinkSent"));
+      setMessage(authMethod === "magic_link" ? t("auth.magicLinkSent") : t("auth.passwordSignedIn"));
     } catch (nextError) {
       const nextDiagnostic = await buildDiagnostic(emailRedirectTo, nextError);
       console.info("magic_link_send_failed", nextDiagnostic);
       setDiagnostic(nextDiagnostic);
-      setError(t("auth.magicLinkError"));
+      const message = `${nextDiagnostic.errorMessage ?? ""} ${nextDiagnostic.errorCode ?? ""}`.toLowerCase();
+      if (authMethod === "magic_link" && (message.includes("rate") || message.includes("too many") || nextDiagnostic.errorStatus === 429)) {
+        setError(t("auth.rateLimit"));
+      } else if (authMethod === "magic_link" && (message.includes("email") || nextDiagnostic.errorStatus === 400)) {
+        setError(t("auth.invalidEmail"));
+      } else if (authMethod === "password" && (message.includes("invalid") || message.includes("credentials") || nextDiagnostic.errorStatus === 400)) {
+        setError(t("auth.invalidCredentials"));
+      } else if (message.includes("network") || message.includes("fetch")) {
+        setError(t("auth.networkError"));
+      } else {
+        setError(authMethod === "magic_link" ? t("auth.magicLinkError") : t("auth.passwordSignInError"));
+      }
     } finally {
       setIsSending(false);
     }
@@ -146,6 +195,28 @@ export function AuthScreen() {
             Auth Debug ON
           </p>
         ) : null}
+        <div className="mt-6 grid grid-cols-2 rounded-[18px] bg-white/70 p-1">
+          <button
+            type="button"
+            onClick={() => chooseAuthMethod("magic_link")}
+            className={[
+              "min-h-10 rounded-[14px] px-3 text-sm font-extrabold transition",
+              authMethod === "magic_link" ? "bg-[#ddf2dc] text-[#2d7a4f] shadow-[0_1px_6px_rgba(0,0,0,0.06)]" : "text-[#7a7166]"
+            ].join(" ")}
+          >
+            {t("auth.methodMagicLink")}
+          </button>
+          <button
+            type="button"
+            onClick={() => chooseAuthMethod("password")}
+            className={[
+              "min-h-10 rounded-[14px] px-3 text-sm font-extrabold transition",
+              authMethod === "password" ? "bg-[#ddf2dc] text-[#2d7a4f] shadow-[0_1px_6px_rgba(0,0,0,0.06)]" : "text-[#7a7166]"
+            ].join(" ")}
+          >
+            {t("auth.methodPassword")}
+          </button>
+        </div>
         <form onSubmit={submit} className="mt-6 grid gap-3">
           <label className="block text-sm font-extrabold text-[#4f4940]">
             {t("auth.emailLabel")}
@@ -159,13 +230,36 @@ export function AuthScreen() {
               className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none focus:ring-2 focus:ring-[#b7d8a8] disabled:opacity-60"
             />
           </label>
+          {authMethod === "password" ? (
+            <label className="block text-sm font-extrabold text-[#4f4940]">
+              {t("auth.passwordLabel")}
+              <span className="mt-2 flex min-h-12 items-center rounded-[18px] bg-white/80 pr-2 focus-within:ring-2 focus-within:ring-[#b7d8a8]">
+                <input
+                  type={isPasswordVisible ? "text" : "password"}
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  disabled={isSending || !isSupabaseConfigured}
+                  className="min-h-12 min-w-0 flex-1 rounded-[18px] bg-transparent px-4 text-base outline-none disabled:opacity-60"
+                />
+                <button
+                  type="button"
+                  onClick={() => setIsPasswordVisible((current) => !current)}
+                  aria-label={isPasswordVisible ? t("auth.hidePassword") : t("auth.showPassword")}
+                  className="flex size-10 shrink-0 items-center justify-center rounded-[14px] text-[#7a7166]"
+                >
+                  {isPasswordVisible ? <EyeOff aria-hidden="true" size={18} /> : <Eye aria-hidden="true" size={18} />}
+                </button>
+              </span>
+            </label>
+          ) : null}
           <button
             type="submit"
             disabled={!canSubmit || !isSupabaseConfigured}
             className="flex min-h-12 items-center justify-center gap-2 rounded-[18px] bg-gradient-to-br from-[#92cc90] to-[#6ba369] px-4 text-sm font-extrabold text-white shadow-fab disabled:opacity-60"
           >
             {isSending ? <Loader2 aria-hidden="true" size={16} className="animate-spin" /> : null}
-            {t("auth.sendLink")}
+            {authMethod === "magic_link" ? t("auth.sendLink") : t("auth.signIn")}
           </button>
         </form>
         {!isSupabaseConfigured ? <p className="mt-4 rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{t("auth.notConfigured")}</p> : null}

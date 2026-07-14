@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Bell, Home, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, Bell, Eye, EyeOff, Home, Trash2, UserRound } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
+import { supabase } from "@/lib/supabase/client";
 import {
   PushSetupError,
   collectPushDiagnostics,
@@ -37,6 +38,13 @@ export function SettingsPanel() {
   const [notificationMessage, setNotificationMessage] = useState<string | null>(null);
   const [isNotificationSaving, setIsNotificationSaving] = useState(false);
   const [pushDiagnostics, setPushDiagnostics] = useState<PushDiagnostics | null>(null);
+  const [isPasswordFormOpen, setIsPasswordFormOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isPasswordSaving, setIsPasswordSaving] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
   const selectedRoom = rooms.find((room) => room.id === roomToDelete);
   const selectedRoomPlantCount = plants.filter((plant) => plant.roomKey === roomToDelete).length;
   const isPermissionGranted = notificationPermission === "granted";
@@ -169,6 +177,43 @@ export function SettingsPanel() {
     }
   };
 
+  const savePassword = async () => {
+    if (isPasswordSaving) return;
+    setPasswordMessage(null);
+    if (newPassword.length < 8) {
+      setPasswordMessage(t("auth.passwordTooShort"));
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordMessage(t("auth.passwordMismatch"));
+      return;
+    }
+    if (!supabase) {
+      setPasswordMessage(t("auth.notConfigured"));
+      return;
+    }
+
+    setIsPasswordSaving(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) {
+        throw error;
+      }
+      setNewPassword("");
+      setConfirmPassword("");
+      setShowNewPassword(false);
+      setShowConfirmPassword(false);
+      setPasswordMessage(t("auth.passwordUpdated"));
+    } catch (error) {
+      console.info("password_update_failed", {
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+      setPasswordMessage(t("auth.passwordUpdateFailed"));
+    } finally {
+      setIsPasswordSaving(false);
+    }
+  };
+
   return (
     <main className="mx-auto min-h-screen w-full max-w-[430px] bg-cream px-5 pb-10 pt-12">
       <div className="mb-7 flex items-center justify-between">
@@ -205,6 +250,69 @@ export function SettingsPanel() {
         >
           {t("auth.logout")}
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            setIsPasswordFormOpen((current) => !current);
+            setPasswordMessage(null);
+          }}
+          className="mt-2 min-h-12 w-full rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]"
+        >
+          {t("auth.setPassword")}
+        </button>
+        {isPasswordFormOpen ? (
+          <div className="mt-3 rounded-[22px] bg-white/70 p-3">
+            <label className="block text-sm font-extrabold text-[#4f4940]">
+              {t("auth.newPassword")}
+              <span className="mt-2 flex min-h-12 items-center rounded-[18px] bg-[#fffaf3] pr-2 focus-within:ring-2 focus-within:ring-[#b7d8a8]">
+                <input
+                  type={showNewPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  className="min-h-12 min-w-0 flex-1 rounded-[18px] bg-transparent px-4 text-base outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword((current) => !current)}
+                  aria-label={showNewPassword ? t("auth.hidePassword") : t("auth.showPassword")}
+                  className="flex size-10 shrink-0 items-center justify-center rounded-[14px] text-[#7a7166]"
+                >
+                  {showNewPassword ? <EyeOff aria-hidden="true" size={18} /> : <Eye aria-hidden="true" size={18} />}
+                </button>
+              </span>
+            </label>
+            <label className="mt-3 block text-sm font-extrabold text-[#4f4940]">
+              {t("auth.confirmPassword")}
+              <span className="mt-2 flex min-h-12 items-center rounded-[18px] bg-[#fffaf3] pr-2 focus-within:ring-2 focus-within:ring-[#b7d8a8]">
+                <input
+                  type={showConfirmPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  className="min-h-12 min-w-0 flex-1 rounded-[18px] bg-transparent px-4 text-base outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword((current) => !current)}
+                  aria-label={showConfirmPassword ? t("auth.hidePassword") : t("auth.showPassword")}
+                  className="flex size-10 shrink-0 items-center justify-center rounded-[14px] text-[#7a7166]"
+                >
+                  {showConfirmPassword ? <EyeOff aria-hidden="true" size={18} /> : <Eye aria-hidden="true" size={18} />}
+                </button>
+              </span>
+            </label>
+            <button
+              type="button"
+              onClick={() => void savePassword()}
+              disabled={isPasswordSaving}
+              className="mt-3 min-h-11 w-full rounded-[16px] bg-[#2d7a4f] px-4 text-sm font-extrabold text-white disabled:opacity-60"
+            >
+              {isPasswordSaving ? t("auth.passwordSaving") : t("auth.savePassword")}
+            </button>
+            {passwordMessage ? <p className="mt-3 text-sm font-bold leading-5 text-[#6f675c]">{passwordMessage}</p> : null}
+          </div>
+        ) : null}
       </section>
 
       <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
