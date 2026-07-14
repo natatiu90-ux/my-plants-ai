@@ -24,6 +24,11 @@ export type PlantCreationDiagnostic = {
   blobFound?: boolean;
   blobMimeType?: string | null;
   blobSize?: number | null;
+  standaloneMode?: "standalone" | "browser";
+  appBuildVersion?: string;
+  previousAppBuildVersion?: string | null;
+  authStatus?: "authenticated" | "unauthenticated" | "unknown";
+  userIdSuffix?: string | null;
 };
 
 type ErrorLike = {

@@ -3,6 +3,7 @@ import { Manrope, Nunito } from "next/font/google";
 import "./globals.css";
 import { I18nProvider } from "@/i18n/I18nProvider";
 import { PlantStoreProvider } from "@/data/PlantStore";
+import { AuthGate } from "@/components/AuthGate";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 
 const nunito = Nunito({
@@ -42,7 +43,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <I18nProvider>
           <PlantStoreProvider>
             <ServiceWorkerRegistration />
-            {children}
+            <AuthGate>{children}</AuthGate>
           </PlantStoreProvider>
         </I18nProvider>
       </body>

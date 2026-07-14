@@ -19,13 +19,12 @@ import { LanguageSwitcher } from "./LanguageSwitcher";
 import { roomOptions } from "./RoomPicker";
 
 const futureSections = [
-  { key: "settings.home", icon: Home },
-  { key: "settings.account", icon: UserRound }
+  { key: "settings.home", icon: Home }
 ] as const;
 
 export function SettingsPanel() {
   const { locale, t } = useI18n();
-  const { rooms, plants, deleteRoom } = usePlantStore();
+  const { rooms, plants, deleteRoom, signOut, userEmail } = usePlantStore();
   const [roomToDelete, setRoomToDelete] = useState<string | null>(null);
   const [replacementRoomKey, setReplacementRoomKey] = useState("");
   const [isDeletingRoom, setIsDeletingRoom] = useState(false);
@@ -187,6 +186,25 @@ export function SettingsPanel() {
       <section className="rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
         <h2 className="mb-3 px-1 font-rounded text-xl font-extrabold text-ink">{t("settings.language")}</h2>
         <LanguageSwitcher />
+      </section>
+
+      <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
+        <div className="flex items-start gap-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-[#f1eadf] text-[#7d776b]">
+            <UserRound aria-hidden="true" size={18} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-rounded text-xl font-extrabold text-ink">{t("settings.account")}</h2>
+            <p className="mt-1 truncate text-sm font-bold leading-5 text-[#7a7166]">{userEmail ?? t("auth.emailAccount")}</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void signOut()}
+          className="mt-4 min-h-12 w-full rounded-[18px] bg-white/75 px-4 text-sm font-extrabold text-[#7d776b]"
+        >
+          {t("auth.logout")}
+        </button>
       </section>
 
       <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">

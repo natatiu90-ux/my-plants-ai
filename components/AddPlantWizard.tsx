@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
+import { appBuildStorageKey, appBuildVersion, isStandalonePwa } from "@/lib/app-version";
 import { inspectImageDisplay, readJpegExifOrientation } from "@/lib/client-image-normalization";
 import { addDays, formatRelativeDate, formatShortDate, toDateKey } from "@/lib/date-format";
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
@@ -149,7 +150,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { locale, t } = useI18n();
-  const { addPlant, plants, rooms } = usePlantStore();
+  const { addPlant, plants, rooms, status, userId } = usePlantStore();
   const isPlantSaveDebugEnabled = searchParams.get("debugPlantSave") === "1";
   const [step, setStep] = useState<Step>("pick");
   const [selectedPhotos, setSelectedPhotos] = useState<PendingPhotoUpload[]>([]);
@@ -693,6 +694,15 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     setActivePicker(null);
   };
 
+  const addRuntimeDiagnosticContext = (diagnostic: PlantCreationDiagnostic): PlantCreationDiagnostic => ({
+    ...diagnostic,
+    standaloneMode: isStandalonePwa() ? "standalone" : "browser",
+    appBuildVersion,
+    previousAppBuildVersion: window.localStorage.getItem(appBuildStorageKey),
+    authStatus: status === "ready" && userId ? "authenticated" : status === "unauthenticated" ? "unauthenticated" : "unknown",
+    userIdSuffix: userId?.slice(-6) ?? null
+  });
+
   const copySaveDiagnostic = () => {
     if (!saveDiagnostic) {
       return;
@@ -719,6 +729,29 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     setSaveDiagnostic(null);
 
     try {
+      const temporaryPhotoChecks = await Promise.all(selectedPhotos.map((photo) => PhotoStorageRepository.getPhoto(photo.storageId)));
+      const missingPhotoIndex = temporaryPhotoChecks.findIndex((blob) => !blob);
+      if (missingPhotoIndex >= 0) {
+        const missingPhoto = selectedPhotos[missingPhotoIndex];
+        const diagnostic = addRuntimeDiagnosticContext({
+          stage: "read_temporary_blob",
+          message: "Temporary photo is missing or incompatible with the current app version.",
+          photoStorageId: missingPhoto.url,
+          parsedTemporaryStorageId: missingPhoto.storageId,
+          photoIndex: missingPhotoIndex,
+          blobFound: false
+        });
+        console.error("plant_save_failed", {
+          ...diagnostic,
+          photoCount: selectedPhotos.length,
+          roomKey
+        });
+        setSaveDiagnostic(diagnostic);
+        setSubmitError(t("addPlant.temporaryPhotosExpired"));
+        setIsSaving(false);
+        return;
+      }
+
       logAddPlantDebug("plant_save_started", {
         photoCount: selectedPhotos.length,
         roomKey,
@@ -790,13 +823,15 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         stage: activeSaveStage,
         plantId: savedPlantId
       });
+      const diagnosticWithRuntime = addRuntimeDiagnosticContext(diagnostic);
       console.error("plant_save_failed", {
-        ...diagnostic,
+        ...diagnosticWithRuntime,
         photoCount: selectedPhotos.length,
         roomKey
       });
-      setSaveDiagnostic(diagnostic);
-      setSubmitError(t("addPlant.submitFailed"));
+      setSaveDiagnostic(diagnosticWithRuntime);
+      const authMessage = `${diagnosticWithRuntime.code ?? ""} ${diagnosticWithRuntime.message}`.toLowerCase();
+      setSubmitError(authMessage.includes("jwt") || authMessage.includes("auth") || authMessage.includes("session") || authMessage.includes("unauthorized") ? t("auth.reauthenticate") : t("addPlant.submitFailed"));
       setIsSaving(false);
     }
   };
@@ -834,6 +869,11 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                   <p>IndexedDB blob found: {saveDiagnostic.blobFound == null ? "unknown" : String(saveDiagnostic.blobFound)}</p>
                   <p>Blob MIME type: {saveDiagnostic.blobMimeType ?? "unknown"}</p>
                   <p>Blob byte size: {saveDiagnostic.blobSize ?? "unknown"}</p>
+                  <p>Mode: {saveDiagnostic.standaloneMode ?? "unknown"}</p>
+                  <p>Build version: {saveDiagnostic.appBuildVersion ?? "unknown"}</p>
+                  <p>Previous build version: {saveDiagnostic.previousAppBuildVersion ?? "unknown"}</p>
+                  <p>Auth status: {saveDiagnostic.authStatus ?? "unknown"}</p>
+                  <p>User id suffix: {saveDiagnostic.userIdSuffix ?? "none"}</p>
                   <button
                     type="button"
                     onClick={copySaveDiagnostic}

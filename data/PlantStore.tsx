@@ -1,7 +1,7 @@
 "use client";
 
 import type { User } from "@supabase/supabase-js";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { addDays, toDateKey } from "@/lib/date-format";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/client";
 import { createRepositories } from "@/lib/repositories/supabase-repositories";
@@ -21,7 +21,7 @@ type PlantState = {
   secondaryDataReady: boolean;
 };
 
-type StoreStatus = "loading" | "ready" | "error";
+type StoreStatus = "loading" | "ready" | "error" | "unauthenticated";
 
 type AddPlantInput = {
   homeName?: string;
@@ -49,7 +49,9 @@ type PlantStoreValue = PlantState & {
   status: StoreStatus;
   error: string | null;
   userId: string | null;
+  userEmail: string | null;
   retry: () => Promise<void>;
+  signOut: () => Promise<void>;
   getPlant: (id: string) => Plant | undefined;
   getPlantPhotos: (plantId: string) => PlantPhoto[];
   getCoverPhoto: (plantId: string) => PlantPhoto | undefined;
@@ -113,6 +115,15 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [repositories, setRepositories] = useState<Repositories | null>(null);
+  const attemptedLegacyClaimForUser = useRef<string | null>(null);
+
+  const resetToUnauthenticated = useCallback(() => {
+    setState(emptyState);
+    setUser(null);
+    setRepositories(null);
+    setStatus("unauthenticated");
+    setError(null);
+  }, []);
 
   const loadData = useCallback(async (nextRepositories: Repositories) => {
     console.info("ownership_query_user_id", { userId: nextRepositories.userId });
@@ -124,6 +135,26 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
     console.info("plants_loaded_count", { count: plants.length, userId: nextRepositories.userId });
     if (!plants.length) {
       console.info("recovery_required", { reason: "no_plants_for_current_identity", userId: nextRepositories.userId });
+      if (attemptedLegacyClaimForUser.current !== nextRepositories.userId && supabase) {
+        attemptedLegacyClaimForUser.current = nextRepositories.userId;
+        void supabase.auth.getSession().then(async ({ data }) => {
+          const token = data.session?.access_token;
+          if (!token) return;
+          const response = await fetch("/api/recovery/claim-legacy", {
+            method: "POST",
+            headers: { authorization: `Bearer ${token}` }
+          });
+          if (response.ok) {
+            console.info("legacy_account_claim_completed", { userId: nextRepositories.userId });
+            await loadData(nextRepositories);
+          }
+        }).catch((claimError) => {
+          console.info("legacy_account_claim_skipped", {
+            userId: nextRepositories.userId,
+            message: claimError instanceof Error ? claimError.message : "Unknown error"
+          });
+        });
+      }
     }
 
     setState((current) => ({ ...current, plants, photos, rooms, secondaryDataReady: false }));
@@ -158,21 +189,21 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         throw sessionError;
       }
 
-      let nextUser = sessionData.session?.user ?? null;
+      const nextUser = sessionData.session?.user ?? null;
       console.info("existing_session_found", { found: Boolean(nextUser) });
       if (!nextUser) {
-        const { data, error: signInError } = await supabase.auth.signInAnonymously();
-        if (signInError) {
-          throw signInError;
-        }
-        nextUser = data.user;
-        console.info("anonymous_session_created", { userId: nextUser?.id ?? null });
+        resetToUnauthenticated();
+        return;
       }
 
-      if (!nextUser) {
-        throw new Error("Anonymous session was not created.");
+      if ((nextUser as User & { is_anonymous?: boolean }).is_anonymous) {
+        window.localStorage.setItem("my-plants-legacy-anonymous-user-id", nextUser.id);
+        await supabase.auth.signOut();
+        console.info("identity_source", { source: "legacy_anonymous_session_blocked", userId: nextUser.id });
+        resetToUnauthenticated();
+        return;
       }
-      console.info("identity_source", { source: sessionData.session?.user ? "existing_supabase_session" : "new_supabase_anonymous_session", userId: nextUser.id });
+      console.info("identity_source", { source: "email_supabase_session", userId: nextUser.id });
 
       await Promise.all([
         supabase.from("profiles").upsert({ id: nextUser.id }, { onConflict: "id" }),
@@ -189,11 +220,44 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       setStatus("error");
       setError(nextError instanceof Error ? nextError.message : "Unknown error");
     }
-  }, [loadData]);
+  }, [loadData, resetToUnauthenticated]);
 
   useEffect(() => {
     void bootstrap();
-  }, [bootstrap]);
+    if (!supabase) {
+      return;
+    }
+
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      const nextUser = session?.user ?? null;
+      const isAnonymous = Boolean(nextUser && (nextUser as User & { is_anonymous?: boolean }).is_anonymous);
+      console.info("auth_state_changed", {
+        event,
+        signedIn: Boolean(nextUser && !isAnonymous),
+        userIdSuffix: nextUser?.id.slice(-6) ?? null
+      });
+
+      if (nextUser && !isAnonymous) {
+        void bootstrap();
+      } else if (event === "SIGNED_OUT" || isAnonymous) {
+        resetToUnauthenticated();
+      }
+    });
+
+    return () => {
+      data.subscription.unsubscribe();
+    };
+  }, [bootstrap, resetToUnauthenticated]);
+
+  const signOut = useCallback(async () => {
+    if (!supabase) {
+      resetToUnauthenticated();
+      return;
+    }
+
+    await supabase.auth.signOut();
+    resetToUnauthenticated();
+  }, [resetToUnauthenticated]);
 
   const getPlant = useCallback((id: string) => state.plants.find((plant) => plant.id === id), [state.plants]);
 
@@ -811,7 +875,9 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       status,
       error,
       userId: user?.id ?? null,
+      userEmail: user?.email ?? null,
       retry: bootstrap,
+      signOut,
       getPlant,
       getPlantPhotos,
       getCoverPhoto,
@@ -864,6 +930,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       resolvePlantHypothesis,
       roomExists,
       setCoverPhoto,
+      signOut,
       state,
       status,
       updateMilestone,
@@ -871,6 +938,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       updatePlant,
       updatePlantNextCheck,
       updatePlantNotification,
+      user?.email,
       user?.id,
       waterPlant
     ]
