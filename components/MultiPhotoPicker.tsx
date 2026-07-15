@@ -166,6 +166,11 @@ export function PhotoPickerDebugPanel({
               <p>request.error: {indexedDb?.requestError?.message ?? indexedDb?.requestError?.name ?? "none"}</p>
               <p>db.version: {indexedDb?.dbVersion ?? "unknown"}</p>
               <p>object store exists: {indexedDb?.objectStoreExists == null ? "unknown" : String(indexedDb.objectStoreExists)}</p>
+              <p>source constructor: {indexedDb?.sourceConstructorName ?? "unknown"}</p>
+              <p>stored representation: {indexedDb?.storedRepresentation ?? "unknown"}</p>
+              <p>stored constructor: {indexedDb?.storedConstructorName ?? "unknown"}</p>
+              <p>stored instanceof File: {indexedDb?.storedInstanceofFile == null ? "unknown" : String(indexedDb.storedInstanceofFile)}</p>
+              <p>fallback used: {indexedDb?.fallbackUsed == null ? "unknown" : String(indexedDb.fallbackUsed)}</p>
               <p>value.constructor.name: {putValue?.constructorName ?? "unknown"}</p>
               <p>value instanceof Blob: {putValue ? String(putValue.instanceofBlob) : "unknown"}</p>
               <p>value instanceof File: {putValue ? String(putValue.instanceofFile) : "unknown"}</p>
@@ -373,8 +378,9 @@ export function MultiPhotoPicker({
           currentDiagnostic = {
             ...currentDiagnostic,
             indexedDbResult: "success",
+            indexedDb: storedPhoto.diagnostic,
             files: currentDiagnostic.files.map((item) =>
-              item.name === file.name && item.size === file.size ? { ...item, status: "stored", storageId: storedPhoto.id } : item
+              item.name === file.name && item.size === file.size ? { ...item, status: "stored", storageId: storedPhoto.id, indexedDb: storedPhoto.diagnostic } : item
             )
           };
           publishDiagnostic(currentDiagnostic);

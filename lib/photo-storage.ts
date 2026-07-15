@@ -35,6 +35,11 @@ export type IndexedDbPhotoStorageDiagnostic = {
   } | null;
   dbVersion?: number;
   objectStoreExists?: boolean;
+  sourceConstructorName?: string;
+  storedRepresentation?: "blob" | "array_buffer_record";
+  storedConstructorName?: string;
+  storedInstanceofFile?: boolean;
+  fallbackUsed?: boolean;
   putValue?: {
     constructorName?: string;
     instanceofBlob: boolean;
@@ -79,6 +84,13 @@ export type IndexedDbPhotoStorageDiagnostic = {
       isFile: boolean;
     }[];
   };
+};
+
+type TemporaryPhotoRecord = {
+  kind: "temporary_photo_array_buffer";
+  bytes: ArrayBuffer;
+  type: string;
+  size: number;
 };
 
 function errorDetails(error: unknown): { name?: string; message?: string; stack?: string; code?: number } {
@@ -157,6 +169,47 @@ async function inspectIndexedDbPutValue(value: unknown) {
   return putValue;
 }
 
+async function serializeTemporaryPhoto(input: Blob) {
+  const type = input.type || "image/jpeg";
+  const bytes = await input.arrayBuffer();
+  const blob = new Blob([bytes], { type });
+  const record: TemporaryPhotoRecord = {
+    kind: "temporary_photo_array_buffer",
+    bytes: bytes.slice(0),
+    type,
+    size: bytes.byteLength
+  };
+
+  return {
+    blob,
+    record,
+    sourceConstructorName: input.constructor.name
+  };
+}
+
+export function deserializeTemporaryPhoto(value: unknown): Blob | null {
+  if (value instanceof Blob && value.size > 0 && (!value.type || supportedTypes.has(value.type))) {
+    return new Blob([value], { type: value.type || "image/jpeg" });
+  }
+
+  if (
+    value &&
+    typeof value === "object" &&
+    (value as TemporaryPhotoRecord).kind === "temporary_photo_array_buffer" &&
+    (value as TemporaryPhotoRecord).bytes instanceof ArrayBuffer
+  ) {
+    const record = value as TemporaryPhotoRecord;
+    const type = record.type || "image/jpeg";
+    if (!supportedTypes.has(type)) {
+      return null;
+    }
+
+    return new Blob([record.bytes], { type });
+  }
+
+  return null;
+}
+
 export class IndexedDbPhotoStorageError extends Error {
   diagnostic: IndexedDbPhotoStorageDiagnostic;
 
@@ -217,36 +270,30 @@ export function validateImageFile(file: File) {
   return file.size <= maxFileSize && (supportedTypes.has(file.type) || Boolean(extension && supportedExtensions.has(extension)));
 }
 
-function isCompatibleStoredPhoto(value: unknown): value is Blob {
-  return value instanceof Blob && value.size > 0 && (!value.type || supportedTypes.has(value.type));
-}
+function putValueInNewTransaction(db: IDBDatabase, key: string, source: Blob, value: Blob | TemporaryPhotoRecord, fallbackUsed: boolean): Promise<IndexedDbPhotoStorageDiagnostic> {
+  return new Promise<IndexedDbPhotoStorageDiagnostic>((resolve, reject) => {
+    let settled = false;
+    const rejectOnce = (diagnostic: IndexedDbPhotoStorageDiagnostic, error?: unknown) => {
+      if (settled) {
+        return;
+      }
 
-export const PhotoStorageRepository = {
-  async savePhoto(file: File): Promise<{ id: string; localUrl: string }> {
-    const id = `local-photo-${Date.now()}-${crypto.randomUUID()}`;
-    let db: IDBDatabase;
-    try {
-      db = await openDb();
-    } catch (error) {
-      throw new IndexedDbPhotoStorageError(createIndexedDbDiagnostic(id, file, { stage: "open_db" }, error), error);
-    }
-    const putValue = await inspectIndexedDbPutValue(file);
+      settled = true;
+      reject(new IndexedDbPhotoStorageError(diagnostic, error));
+    };
 
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const rejectOnce = (diagnostic: IndexedDbPhotoStorageDiagnostic, error?: unknown) => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        reject(new IndexedDbPhotoStorageError(diagnostic, error));
-      };
-
-      let diagnostic = createIndexedDbDiagnostic(id, file, {
+    void (async () => {
+      const putValue = await inspectIndexedDbPutValue(value);
+      const storedRepresentation = value instanceof Blob ? "blob" : "array_buffer_record";
+      let diagnostic = createIndexedDbDiagnostic(key, source, {
         openDbSucceeded: true,
         dbVersion: db.version,
         objectStoreExists: db.objectStoreNames.contains(storeName),
+        sourceConstructorName: source.constructor.name,
+        storedRepresentation,
+        storedConstructorName: value.constructor.name,
+        storedInstanceofFile: value instanceof File,
+        fallbackUsed,
         putValue
       });
       let transaction: IDBTransaction;
@@ -260,7 +307,7 @@ export const PhotoStorageRepository = {
           transactionStarted: true
         };
       } catch (error) {
-        rejectOnce(createIndexedDbDiagnostic(id, file, {
+        rejectOnce(createIndexedDbDiagnostic(key, source, {
           ...diagnostic,
           stage: "start_transaction"
         }, error), error);
@@ -268,14 +315,19 @@ export const PhotoStorageRepository = {
       }
 
       try {
-        request = transaction.objectStore(storeName).put(file, id);
+        request = transaction.objectStore(storeName).put(value, key);
         diagnostic = {
           ...diagnostic,
           stage: "put",
           putReached: true
         };
       } catch (error) {
-        rejectOnce(createIndexedDbDiagnostic(id, file, {
+        try {
+          transaction.abort();
+        } catch {
+          // The transaction may already be inactive.
+        }
+        rejectOnce(createIndexedDbDiagnostic(key, source, {
           ...diagnostic,
           stage: "put"
         }, error), error);
@@ -298,8 +350,8 @@ export const PhotoStorageRepository = {
         const requestError = errorDetails(request.error);
         rejectOnce(
           createIndexedDbDiagnostic(
-            id,
-            file,
+            key,
+            source,
             {
               ...diagnostic,
               stage: "transaction_abort",
@@ -332,22 +384,48 @@ export const PhotoStorageRepository = {
         }
 
         settled = true;
-        resolve();
+        resolve({
+          ...diagnostic,
+          stage: "put"
+        });
       };
+    })().catch((error) => {
+      rejectOnce(createIndexedDbDiagnostic(key, source, { stage: "unknown" }, error), error);
     });
+  });
+}
 
-    return { id, localUrl: URL.createObjectURL(file) };
+async function putSerializedTemporaryPhoto(db: IDBDatabase, key: string, source: Blob) {
+  const serialized = await serializeTemporaryPhoto(source);
+  try {
+    return await putValueInNewTransaction(db, key, source, serialized.blob, false);
+  } catch (blobError) {
+    console.warn("indexeddb_blob_put_failed_using_arraybuffer_fallback", {
+      key,
+      sourceConstructorName: serialized.sourceConstructorName,
+      message: blobError instanceof Error ? blobError.message : "Unknown error"
+    });
+    return await putValueInNewTransaction(db, key, source, serialized.record, true);
+  }
+}
+
+export const PhotoStorageRepository = {
+  async savePhoto(file: File): Promise<{ id: string; localUrl: string; diagnostic?: IndexedDbPhotoStorageDiagnostic }> {
+    const id = `local-photo-${Date.now()}-${crypto.randomUUID()}`;
+    let db: IDBDatabase;
+    try {
+      db = await openDb();
+    } catch (error) {
+      throw new IndexedDbPhotoStorageError(createIndexedDbDiagnostic(id, file, { stage: "open_db" }, error), error);
+    }
+    const diagnostic = await putSerializedTemporaryPhoto(db, id, file);
+
+    return { id, localUrl: URL.createObjectURL(file), diagnostic };
   },
 
   async replacePhoto(id: string, file: File): Promise<void> {
     const db = await openDb();
-
-    await new Promise<void>((resolve, reject) => {
-      const transaction = db.transaction(storeName, "readwrite");
-      transaction.objectStore(storeName).put(file, id);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-    });
+    await putSerializedTemporaryPhoto(db, id, file);
   },
 
   async getPhoto(id: string): Promise<Blob | null> {
@@ -356,7 +434,7 @@ export const PhotoStorageRepository = {
     const blob = await new Promise<Blob | null>((resolve, reject) => {
       const transaction = db.transaction(storeName, "readonly");
       const request = transaction.objectStore(storeName).get(id);
-      request.onsuccess = () => resolve(isCompatibleStoredPhoto(request.result) ? request.result : null);
+      request.onsuccess = () => resolve(deserializeTemporaryPhoto(request.result));
       request.onerror = () => reject(request.error);
     });
 
