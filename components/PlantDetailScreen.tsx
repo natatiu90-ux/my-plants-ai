@@ -107,26 +107,6 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     : null;
 
   useEffect(() => {
-    if (!plant || !careActionState || process.env.NODE_ENV === "production") {
-      return;
-    }
-
-    console.info("care_action_detail_state", {
-      plantId: plant.id,
-      rawNextAction: plant.nextAction,
-      nextCheckAt: plant.nextCheckAt,
-      lastSoilResult: plant.lastSoilResult,
-      lastSoilCheckedAt: plant.lastSoilCheckedAt,
-      derivedAction: careActionState.actionType,
-      status: careActionState.status,
-      actionable: careActionState.isActionable,
-      reason: careActionState.reason,
-      ctaVisible: careActionState.isActionable,
-      cardBadgeKey: careActionState.cardBadgeKey
-    });
-  }, [careActionState, plant]);
-
-  useEffect(() => {
     const action = searchParams.get("action");
     if (action !== "check_soil" || openedActionRef.current === `${plantId}:${action}`) {
       return;

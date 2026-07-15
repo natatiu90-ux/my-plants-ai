@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useI18n } from "@/i18n/I18nProvider";
-import { deriveCareActionState } from "@/lib/plant-action-eligibility";
+import type { DerivedCareActionState } from "@/lib/plant-action-eligibility";
 import { plantCommonName, plantDisplayName } from "@/lib/plant-display";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
-import type { Plant, PlantHypothesisResolution, PlantStatus } from "@/types/plant";
+import type { Plant, PlantStatus } from "@/types/plant";
 import { PhotoImage } from "./PhotoImage";
 import { StatusBadge } from "./StatusBadge";
 
@@ -34,40 +34,22 @@ const cardStyles: Record<PlantStatus, { card: string; image: string; fade: strin
 
 export function PlantCard({
   plant,
-  hypothesisResolutions,
-  isCareDataReady,
+  careAction,
   coverPhotoUrl
 }: {
   plant: Plant;
-  hypothesisResolutions: PlantHypothesisResolution[];
-  isCareDataReady: boolean;
+  careAction: DerivedCareActionState;
   coverPhotoUrl: string;
 }) {
   const { t } = useI18n();
   const styles = cardStyles[plant.status];
   const displayName = plantDisplayName(plant, t("plants.unknownName"));
   const commonName = plantCommonName(plant);
-  const careAction = deriveCareActionState(plant, hypothesisResolutions, new Date(), { isCareDataReady });
   const badgeStatus = careAction.isActionable || careAction.cardBadgeKey === "status.needsHelp" ? plant.status : "healthy";
-
-  if (process.env.NODE_ENV !== "production") {
-    console.info("care_action_card_state", {
-      plantId: plant.id,
-      rawNextAction: plant.nextAction,
-      nextCheckAt: plant.nextCheckAt,
-      lastSoilResult: plant.lastSoilResult,
-      lastSoilCheckedAt: plant.lastSoilCheckedAt,
-      derivedAction: careAction.actionType,
-      status: careAction.status,
-      actionable: careAction.isActionable,
-      reason: careAction.reason,
-      cardBadgeKey: careAction.cardBadgeKey,
-      cardMessageKey: careAction.cardMessageKey
-    });
-  }
 
   return (
     <Link
+      id={`plant-card-${plant.id}`}
       href={`/plants/${plant.id}`}
       onClick={() => {
         startNavigationLog("detail", plant.id, "plant_card_tapped");

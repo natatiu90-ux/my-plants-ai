@@ -1,4 +1,4 @@
-import { deriveCareActionState } from "@/lib/plant-action-eligibility";
+import { deriveCareActionState, isDueCareActionState } from "@/lib/plant-action-eligibility";
 import type { Plant, PlantHypothesisResolution } from "@/types/plant";
 
 const today = new Date("2026-07-15T12:00:00.000Z");
@@ -39,6 +39,7 @@ type CareActionFixture = {
     status: ReturnType<typeof deriveCareActionState>["status"];
     isActionable: boolean;
     cardBadgeKey: ReturnType<typeof deriveCareActionState>["cardBadgeKey"];
+    includedInAttentionCount: boolean;
   };
 };
 
@@ -51,7 +52,8 @@ export const careActionFixtures: CareActionFixture[] = [
       actionType: "check_soil",
       status: "due",
       isActionable: true,
-      cardBadgeKey: "status.checkSoilToday"
+      cardBadgeKey: "status.checkSoilToday",
+      includedInAttentionCount: true
     }
   },
   {
@@ -62,7 +64,8 @@ export const careActionFixtures: CareActionFixture[] = [
       actionType: "check_soil",
       status: "upcoming",
       isActionable: false,
-      cardBadgeKey: "status.doingGreat"
+      cardBadgeKey: "status.doingGreat",
+      includedInAttentionCount: false
     }
   },
   {
@@ -73,7 +76,8 @@ export const careActionFixtures: CareActionFixture[] = [
       actionType: "check_soil",
       status: "upcoming",
       isActionable: false,
-      cardBadgeKey: "status.doingGreat"
+      cardBadgeKey: "status.doingGreat",
+      includedInAttentionCount: false
     }
   },
   {
@@ -84,7 +88,8 @@ export const careActionFixtures: CareActionFixture[] = [
       actionType: "check_soil",
       status: "due",
       isActionable: true,
-      cardBadgeKey: "status.checkSoilToday"
+      cardBadgeKey: "status.checkSoilToday",
+      includedInAttentionCount: true
     }
   },
   {
@@ -95,7 +100,8 @@ export const careActionFixtures: CareActionFixture[] = [
       actionType: "check_soil",
       status: "completed",
       isActionable: false,
-      cardBadgeKey: "status.doingGreat"
+      cardBadgeKey: "status.doingGreat",
+      includedInAttentionCount: false
     }
   },
   {
@@ -106,7 +112,8 @@ export const careActionFixtures: CareActionFixture[] = [
       actionType: "check_soil",
       status: "blocked",
       isActionable: false,
-      cardBadgeKey: "status.doingGreat"
+      cardBadgeKey: "status.doingGreat",
+      includedInAttentionCount: false
     }
   }
 ];
@@ -119,8 +126,20 @@ careActionFixtures.forEach((fixture) => {
     actual.actionType !== fixture.expected.actionType ||
     actual.status !== fixture.expected.status ||
     actual.isActionable !== fixture.expected.isActionable ||
-    actual.cardBadgeKey !== fixture.expected.cardBadgeKey
+    actual.cardBadgeKey !== fixture.expected.cardBadgeKey ||
+    isDueCareActionState(actual) !== fixture.expected.includedInAttentionCount
   ) {
     throw new Error(`Care action fixture failed: ${fixture.name}`);
   }
 });
+
+const homeAttentionCount = careActionFixtures.filter((fixture) => {
+  const actual = deriveCareActionState(fixture.plant, fixture.resolutions, today, {
+    isCareDataReady: fixture.name.includes("waits for care context") ? false : true
+  });
+  return isDueCareActionState(actual);
+}).length;
+
+if (homeAttentionCount !== 2) {
+  throw new Error(`Expected 2 due attention fixtures, got ${homeAttentionCount}`);
+}

@@ -183,3 +183,11 @@ export function deriveCareActionState(
     reason: "no_actionable_primary_care_action"
   };
 }
+
+export function isDueCareActionState(careAction: DerivedCareActionState) {
+  if (careAction.status === "blocked") {
+    return false;
+  }
+
+  return careAction.isActionable && careAction.status === "due" && careAction.actionType !== "none";
+}

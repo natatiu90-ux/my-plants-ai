@@ -9,15 +9,12 @@ import { PlantList } from "./PlantList";
 import { AddPlantWizard } from "./AddPlantWizard";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
+import { deriveCareActionState, isDueCareActionState, type DerivedCareActionState } from "@/lib/plant-action-eligibility";
 import type { Plant } from "@/types/plant";
 
 function sortPlantsByPriority(plants: Plant[]) {
   const priority = { needs_attention: 0, check_soon: 1, unknown: 2, healthy: 3 };
   return [...plants].sort((a, b) => priority[a.status] - priority[b.status]);
-}
-
-function countPlantsNeedingAttention(plants: Plant[]) {
-  return plants.filter((plant) => plant.nextAction && plant.nextAction !== null).length;
 }
 
 function HomeSkeleton() {
@@ -80,20 +77,50 @@ function HomeErrorState({ onRetry }: { onRetry: () => void }) {
 
 export function HomeScreen() {
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const { plants: storedPlants, retry, status } = usePlantStore();
+  const { getPlantHypothesisResolutions, plants: storedPlants, retry, secondaryDataReady, status } = usePlantStore();
   const plants = useMemo(() => sortPlantsByPriority(storedPlants), [storedPlants]);
-  const attentionCount = useMemo(() => countPlantsNeedingAttention(storedPlants), [storedPlants]);
+  const careActionByPlantId = useMemo(() => {
+    const states = new Map<string, DerivedCareActionState>();
+    storedPlants.forEach((plant) => {
+      states.set(
+        plant.id,
+        deriveCareActionState(plant, getPlantHypothesisResolutions(plant.id), new Date(), {
+          isCareDataReady: secondaryDataReady
+        })
+      );
+    });
+    return states;
+  }, [getPlantHypothesisResolutions, secondaryDataReady, storedPlants]);
+  const duePlantIds = useMemo(
+    () =>
+      storedPlants
+        .filter((plant) => {
+          const careAction = careActionByPlantId.get(plant.id);
+          return careAction ? isDueCareActionState(careAction) : false;
+        })
+        .map((plant) => plant.id),
+    [careActionByPlantId, storedPlants]
+  );
+  const attentionCount = duePlantIds.length;
   const isReady = status === "ready";
+  const focusAttentionPlant = () => {
+    const firstDuePlantId = duePlantIds[0];
+    if (!firstDuePlantId) {
+      return;
+    }
+
+    document.getElementById(`plant-card-${firstDuePlantId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-[430px] bg-cream">
       <HomeHeader />
-      {isReady && plants.length > 0 ? <AttentionBanner count={attentionCount} /> : null}
+      {isReady && plants.length > 0 ? <AttentionBanner count={attentionCount} onActivate={focusAttentionPlant} /> : null}
       <div className="pb-[144px]">
         {status === "loading" ? <HomeSkeleton /> : null}
         {status === "error" ? <HomeErrorState onRetry={() => void retry()} /> : null}
         {isReady && plants.length === 0 ? <HomeEmptyState onAddPlant={() => setIsAddOpen(true)} /> : null}
-        {isReady && plants.length > 0 ? <PlantList plants={plants} /> : null}
+        {isReady && plants.length > 0 ? <PlantList plants={plants} careActionByPlantId={careActionByPlantId} /> : null}
       </div>
       <FloatingAddButton onClick={() => setIsAddOpen(true)} />
       {isAddOpen ? <AddPlantWizard onClose={() => setIsAddOpen(false)} /> : null}
