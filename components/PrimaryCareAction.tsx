@@ -2,20 +2,30 @@
 
 import { Camera, Droplets, Sprout } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
+import type { DerivedCareActionState } from "@/lib/plant-action-eligibility";
 import type { Plant, PlantAction } from "@/types/plant";
 
 const actionIcons: Exclude<PlantAction, null>[] = ["water", "check_soil", "take_photo"];
 
-export function PrimaryCareAction({ plant, onAction, disabled }: { plant: Plant; onAction: () => void; disabled?: boolean }) {
+export function PrimaryCareAction({
+  plant,
+  actionState,
+  onAction,
+  disabled
+}: {
+  plant: Plant;
+  actionState: DerivedCareActionState;
+  onAction: () => void;
+  disabled?: boolean;
+}) {
   const { t } = useI18n();
-  const action = plant.nextAction;
+  const action = actionState.isActionable ? actionState.actionType : null;
 
-  if (!action) {
+  if (!action || action === "none" || action === "observe" || !actionState.labelKey) {
     return null;
   }
 
   const Icon = action === "water" ? Droplets : action === "check_soil" ? Sprout : Camera;
-  const labelKey = action === "water" ? "actions.water" : action === "check_soil" ? "actions.check_soil" : "actions.take_photo";
   const tone =
     plant.status === "needs_attention"
       ? "from-[#e7899b] to-[#b94a61]"
@@ -32,7 +42,7 @@ export function PrimaryCareAction({ plant, onAction, disabled }: { plant: Plant;
         className={`flex min-h-[58px] w-full items-center justify-center gap-2 rounded-[22px] bg-gradient-to-br ${tone} px-5 text-base font-extrabold text-white shadow-fab transition hover:-translate-y-0.5 active:translate-y-0 disabled:translate-y-0 disabled:opacity-60`}
       >
         <Icon aria-hidden="true" size={20} />
-        {t(labelKey)}
+        {t(actionState.labelKey)}
       </button>
     </div>
   );

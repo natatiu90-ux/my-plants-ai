@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useI18n } from "@/i18n/I18nProvider";
+import { deriveCareActionState } from "@/lib/plant-action-eligibility";
 import { plantCommonName, plantDisplayName } from "@/lib/plant-display";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
-import type { Plant, PlantStatus } from "@/types/plant";
+import type { Plant, PlantHypothesisResolution, PlantStatus } from "@/types/plant";
 import { PhotoImage } from "./PhotoImage";
 import { StatusBadge } from "./StatusBadge";
 
@@ -31,11 +32,39 @@ const cardStyles: Record<PlantStatus, { card: string; image: string; fade: strin
   }
 };
 
-export function PlantCard({ plant, coverPhotoUrl }: { plant: Plant; coverPhotoUrl: string }) {
+export function PlantCard({
+  plant,
+  hypothesisResolutions,
+  isCareDataReady,
+  coverPhotoUrl
+}: {
+  plant: Plant;
+  hypothesisResolutions: PlantHypothesisResolution[];
+  isCareDataReady: boolean;
+  coverPhotoUrl: string;
+}) {
   const { t } = useI18n();
   const styles = cardStyles[plant.status];
   const displayName = plantDisplayName(plant, t("plants.unknownName"));
   const commonName = plantCommonName(plant);
+  const careAction = deriveCareActionState(plant, hypothesisResolutions, new Date(), { isCareDataReady });
+  const badgeStatus = careAction.isActionable || careAction.cardBadgeKey === "status.needsHelp" ? plant.status : "healthy";
+
+  if (process.env.NODE_ENV !== "production") {
+    console.info("care_action_card_state", {
+      plantId: plant.id,
+      rawNextAction: plant.nextAction,
+      nextCheckAt: plant.nextCheckAt,
+      lastSoilResult: plant.lastSoilResult,
+      lastSoilCheckedAt: plant.lastSoilCheckedAt,
+      derivedAction: careAction.actionType,
+      status: careAction.status,
+      actionable: careAction.isActionable,
+      reason: careAction.reason,
+      cardBadgeKey: careAction.cardBadgeKey,
+      cardMessageKey: careAction.cardMessageKey
+    });
+  }
 
   return (
     <Link
@@ -59,7 +88,7 @@ export function PlantCard({ plant, coverPhotoUrl }: { plant: Plant; coverPhotoUr
           />
           <div className={`pointer-events-none absolute inset-x-0 bottom-0 h-[72px] bg-gradient-to-b ${styles.fade}`} />
           <div className="absolute bottom-3.5 left-4 right-4">
-            <StatusBadge label={t(plant.statusLabelKey)} status={plant.status} />
+            {careAction.cardBadgeKey ? <StatusBadge label={t(careAction.cardBadgeKey)} status={badgeStatus} /> : null}
           </div>
         </div>
         <div className="px-5 pb-5 pt-3.5">
@@ -68,7 +97,7 @@ export function PlantCard({ plant, coverPhotoUrl }: { plant: Plant; coverPhotoUr
           </h2>
           {commonName ? <p className="mt-0.5 text-[13px] italic leading-5 text-[#9a9aa3]">{commonName}</p> : null}
           <p className="mt-2 line-clamp-3 text-[14.5px] leading-[1.55] text-[#4a4a54]">
-            {t(plant.messageKey)}
+            {t(careAction.cardMessageKey, careAction.cardMessageParams)}
           </p>
         </div>
       </article>

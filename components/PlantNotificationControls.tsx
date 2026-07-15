@@ -5,9 +5,10 @@ import { Bell, BellOff, CalendarDays } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
 import { formatRelativeDate, toDateKey } from "@/lib/date-format";
+import type { DerivedCareActionState } from "@/lib/plant-action-eligibility";
 import type { Plant } from "@/types/plant";
 
-export function PlantNotificationControls({ plant }: { plant: Plant }) {
+export function PlantNotificationControls({ plant, careActionState }: { plant: Plant; careActionState: DerivedCareActionState | null }) {
   const { locale, t } = useI18n();
   const { updatePlantNextCheck, updatePlantNotification } = usePlantStore();
   const [nextCheckAt, setNextCheckAt] = useState(plant.nextCheckAt ?? "");
@@ -34,6 +35,10 @@ export function PlantNotificationControls({ plant }: { plant: Plant }) {
       setIsSaving(false);
     }
   };
+  const nextCheckCopy =
+    careActionState?.actionType === "check_soil" && careActionState.status === "upcoming"
+      ? t(careActionState.detailMessageKey, careActionState.detailMessageParams)
+      : formatRelativeDate(plant.nextCheckAt, locale, t("plantDetail.notYet"));
 
   return (
     <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
@@ -41,7 +46,7 @@ export function PlantNotificationControls({ plant }: { plant: Plant }) {
         <div>
           <h2 className="font-rounded text-xl font-extrabold text-ink">{t("notifications.plantTitle")}</h2>
           <p className="mt-1 text-sm font-bold leading-5 text-[#8b8173]">
-            {formatRelativeDate(plant.nextCheckAt, locale, t("plantDetail.notYet"))}
+            {nextCheckCopy}
           </p>
         </div>
         <button

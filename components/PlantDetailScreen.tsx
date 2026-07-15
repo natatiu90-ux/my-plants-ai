@@ -6,7 +6,7 @@ import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
 import { addDays, toDateKey } from "@/lib/date-format";
 import { plantDisplayName } from "@/lib/plant-display";
-import { eligiblePrimaryCareAction, shouldShowSoilCheckAction } from "@/lib/plant-action-eligibility";
+import { deriveCareActionState } from "@/lib/plant-action-eligibility";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
 import { CareHistory } from "./CareHistory";
@@ -96,20 +96,47 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     logNavigationEvent("detail", plantId, "detail_shell_rendered");
   }, [plantId]);
 
-  const primaryCareAction = plant ? eligiblePrimaryCareAction(plant, hypothesisResolutions) : null;
-  const primaryActionPlant = useMemo(() => (plant ? { ...plant, nextAction: primaryCareAction } : plant), [plant, primaryCareAction]);
+  const careActionState = useMemo(
+    () => (plant ? deriveCareActionState(plant, hypothesisResolutions, new Date(), { isCareDataReady: secondaryDataReady }) : null),
+    [hypothesisResolutions, plant, secondaryDataReady]
+  );
+  const primaryCareAction = careActionState?.isActionable
+    ? careActionState.actionType === "observe" || careActionState.actionType === "none"
+      ? null
+      : careActionState.actionType
+    : null;
+
+  useEffect(() => {
+    if (!plant || !careActionState || process.env.NODE_ENV === "production") {
+      return;
+    }
+
+    console.info("care_action_detail_state", {
+      plantId: plant.id,
+      rawNextAction: plant.nextAction,
+      nextCheckAt: plant.nextCheckAt,
+      lastSoilResult: plant.lastSoilResult,
+      lastSoilCheckedAt: plant.lastSoilCheckedAt,
+      derivedAction: careActionState.actionType,
+      status: careActionState.status,
+      actionable: careActionState.isActionable,
+      reason: careActionState.reason,
+      ctaVisible: careActionState.isActionable,
+      cardBadgeKey: careActionState.cardBadgeKey
+    });
+  }, [careActionState, plant]);
 
   useEffect(() => {
     const action = searchParams.get("action");
     if (action !== "check_soil" || openedActionRef.current === `${plantId}:${action}`) {
       return;
     }
-    if (plant && !shouldShowSoilCheckAction(plant, hypothesisResolutions)) {
+    if (careActionState?.actionType !== "check_soil" || !careActionState.isActionable) {
       return;
     }
     openedActionRef.current = `${plantId}:${action}`;
     setSheet("check_soil");
-  }, [hypothesisResolutions, plant, plantId, searchParams]);
+  }, [careActionState, plantId, searchParams]);
 
   useEffect(() => {
     if (!plant || loggedEvents.current.has("plant_data_ready")) {
@@ -297,7 +324,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   };
 
   return (
-    <main className={`mx-auto min-h-screen w-full max-w-[430px] bg-cream px-5 ${primaryCareAction ? "pb-[calc(9rem+env(safe-area-inset-bottom))]" : "pb-10"}`}>
+    <main className={`mx-auto min-h-screen w-full max-w-[430px] bg-cream px-5 ${careActionState?.isActionable ? "pb-[calc(9rem+env(safe-area-inset-bottom))]" : "pb-10"}`}>
       <PlantDetailHeader
         title={plantName}
         isMenuOpen={isMenuOpen}
@@ -319,7 +346,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           logNavigationEvent("detail", plant.id, fullCoverUrl ? "cover_full_image_ready" : "cover_thumbnail_ready");
         }}
       />
-      <PlantStatusSection plant={plant} />
+      <PlantStatusSection plant={plant} careActionState={careActionState} />
       {baselineQuestion ? (
         <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
           <p className="text-xs font-bold uppercase text-[#a09a90]">{baselineQuestion === "watering" ? t("baseline.welcome") : t("baseline.thanks")}</p>
@@ -400,12 +427,12 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       >
         {t("photos.addNewPhotos")}
       </button>
-      <CareSummary plant={plant} />
-      <PlantNotificationControls plant={plant} />
+      <CareSummary plant={plant} careActionState={careActionState} />
+      <PlantNotificationControls plant={plant} careActionState={careActionState} />
       <PhotoGallery photos={photos} onAddPhoto={() => setSheet("add_photo")} />
       <CareHistory milestones={milestones} onAddEvent={() => setSheet("add_event")} />
 
-      {primaryActionPlant ? <PrimaryCareAction plant={primaryActionPlant} onAction={openPrimaryAction} disabled={isCompletingAction} /> : null}
+      {careActionState?.isActionable ? <PrimaryCareAction plant={plant} actionState={careActionState} onAction={openPrimaryAction} disabled={isCompletingAction} /> : null}
       {sheet === "check_soil" ? (
         <CheckSoilSheet
           onClose={() => setSheet(null)}

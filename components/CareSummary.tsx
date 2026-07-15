@@ -4,12 +4,13 @@ import { CalendarCheck, Droplets, MapPin, SunMedium } from "lucide-react";
 import { formatRelativeDate } from "@/lib/date-format";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
+import type { DerivedCareActionState } from "@/lib/plant-action-eligibility";
 import type { TranslationKey } from "@/i18n/dictionaries";
 import type { Plant } from "@/types/plant";
 import { CareInfoRow } from "./CareInfoRow";
 import { roomOptions } from "./RoomPicker";
 
-export function CareSummary({ plant }: { plant: Plant }) {
+export function CareSummary({ plant, careActionState }: { plant: Plant; careActionState: DerivedCareActionState | null }) {
   const { locale, t } = useI18n();
   const { rooms } = usePlantStore();
   const builtInRoomKeys = roomOptions as readonly string[];
@@ -27,7 +28,10 @@ export function CareSummary({ plant }: { plant: Plant }) {
     },
     {
       label: t("plantDetail.nextCheck"),
-      value: formatRelativeDate(plant.nextCheckAt, locale, t("plantDetail.notYet")),
+      value:
+        careActionState?.actionType === "check_soil" && careActionState.status === "upcoming"
+          ? t(careActionState.detailMessageKey, careActionState.detailMessageParams)
+          : formatRelativeDate(plant.nextCheckAt, locale, t("plantDetail.notYet")),
       icon: <CalendarCheck aria-hidden="true" size={18} />
     },
     ...(plant.roomKey

@@ -1,0 +1,126 @@
+import { deriveCareActionState } from "@/lib/plant-action-eligibility";
+import type { Plant, PlantHypothesisResolution } from "@/types/plant";
+
+const today = new Date("2026-07-15T12:00:00.000Z");
+
+function plant(overrides: Partial<Plant>): Plant {
+  return {
+    id: "plant-1",
+    speciesName: "Monstera deliciosa",
+    status: "healthy",
+    messageKey: "plants.afterWatering.message",
+    statusLabelKey: "status.doingGreat",
+    careScheduleStatus: "active",
+    notificationEnabled: true,
+    ...overrides
+  };
+}
+
+function soilResolution(overrides: Partial<PlantHypothesisResolution> = {}): PlantHypothesisResolution {
+  return {
+    id: "soil-1",
+    plantId: "plant-1",
+    hypothesis: "soil_condition",
+    status: "confirmed",
+    userResult: "slightly_damp",
+    resolvedAt: "2026-07-15T08:00:00.000Z",
+    createdAt: "2026-07-15T08:00:00.000Z",
+    ...overrides,
+    evidenceSource: overrides.evidenceSource ?? "user"
+  };
+}
+
+type CareActionFixture = {
+  name: string;
+  plant: Plant;
+  resolutions: PlantHypothesisResolution[];
+  expected: {
+    actionType: ReturnType<typeof deriveCareActionState>["actionType"];
+    status: ReturnType<typeof deriveCareActionState>["status"];
+    isActionable: boolean;
+    cardBadgeKey: ReturnType<typeof deriveCareActionState>["cardBadgeKey"];
+  };
+};
+
+export const careActionFixtures: CareActionFixture[] = [
+  {
+    name: "soil check due now",
+    plant: plant({ status: "check_soon", nextAction: "check_soil", nextCheckAt: "2026-07-15" }),
+    resolutions: [],
+    expected: {
+      actionType: "check_soil",
+      status: "due",
+      isActionable: true,
+      cardBadgeKey: "status.checkSoilToday"
+    }
+  },
+  {
+    name: "soil check upcoming",
+    plant: plant({ nextAction: "check_soil", nextCheckAt: "2026-07-18" }),
+    resolutions: [soilResolution()],
+    expected: {
+      actionType: "check_soil",
+      status: "upcoming",
+      isActionable: false,
+      cardBadgeKey: "status.doingGreat"
+    }
+  },
+  {
+    name: "fresh soil answer resolves current action",
+    plant: plant({ nextAction: "check_soil", nextCheckAt: "2026-07-19", lastSoilCheckedAt: "2026-07-15", lastSoilResult: "slightly_damp" }),
+    resolutions: [soilResolution()],
+    expected: {
+      actionType: "check_soil",
+      status: "upcoming",
+      isActionable: false,
+      cardBadgeKey: "status.doingGreat"
+    }
+  },
+  {
+    name: "healthy plant can still have due soil check",
+    plant: plant({ status: "healthy", nextAction: "check_soil", nextCheckAt: "2026-07-15" }),
+    resolutions: [],
+    expected: {
+      actionType: "check_soil",
+      status: "due",
+      isActionable: true,
+      cardBadgeKey: "status.checkSoilToday"
+    }
+  },
+  {
+    name: "stale stored action is ineligible after saved answer",
+    plant: plant({ nextAction: "check_soil" }),
+    resolutions: [soilResolution()],
+    expected: {
+      actionType: "check_soil",
+      status: "completed",
+      isActionable: false,
+      cardBadgeKey: "status.doingGreat"
+    }
+  },
+  {
+    name: "soil check waits for care context before showing due state",
+    plant: plant({ status: "check_soon", nextAction: "check_soil", nextCheckAt: "2026-07-15" }),
+    resolutions: [],
+    expected: {
+      actionType: "check_soil",
+      status: "blocked",
+      isActionable: false,
+      cardBadgeKey: "status.doingGreat"
+    }
+  }
+];
+
+careActionFixtures.forEach((fixture) => {
+  const actual = deriveCareActionState(fixture.plant, fixture.resolutions, today, {
+    isCareDataReady: fixture.name.includes("waits for care context") ? false : true
+  });
+  if (
+    actual.actionType !== fixture.expected.actionType ||
+    actual.status !== fixture.expected.status ||
+    actual.isActionable !== fixture.expected.isActionable ||
+    actual.cardBadgeKey !== fixture.expected.cardBadgeKey
+  ) {
+    throw new Error(`Care action fixture failed: ${fixture.name}`);
+  }
+});
