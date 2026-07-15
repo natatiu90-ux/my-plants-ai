@@ -9,26 +9,24 @@ import type { Plant, PlantStatus } from "@/types/plant";
 import { PhotoImage } from "./PhotoImage";
 import { StatusBadge } from "./StatusBadge";
 
-const cardStyles: Record<PlantStatus, { card: string; image: string; fade: string }> = {
+const cardStyles: Record<DerivedCareActionState["cardVisualState"], { card: string; image: string; fade: string; badgeStatus: PlantStatus }> = {
   healthy: {
     card: "border-[#6eaf6c]/20 bg-gradient-to-br from-[#ecf7eb] to-[#f6fcf6]",
     image: "bg-[#dde8dc]",
-    fade: "from-transparent to-[#ecf7eb]/95"
+    fade: "from-transparent to-[#ecf7eb]/95",
+    badgeStatus: "healthy"
   },
-  check_soon: {
+  observe: {
     card: "border-[#e6a050]/20 bg-gradient-to-br from-[#fef2e4] to-[#fef8f2]",
     image: "bg-[#ece0d2]",
-    fade: "from-transparent to-[#fef2e4]/95"
+    fade: "from-transparent to-[#fef2e4]/95",
+    badgeStatus: "check_soon"
   },
-  needs_attention: {
+  action_required: {
     card: "border-[#d26478]/20 bg-gradient-to-br from-[#fdeaf0] to-[#fef5f7]",
     image: "bg-[#eadde0]",
-    fade: "from-transparent to-[#fdeaf0]/95"
-  },
-  unknown: {
-    card: "border-[#b9a98d]/20 bg-gradient-to-br from-[#fffaf3] to-[#f8f1e6]",
-    image: "bg-[#dde8dc]",
-    fade: "from-transparent to-[#fffaf3]/95"
+    fade: "from-transparent to-[#fdeaf0]/95",
+    badgeStatus: "needs_attention"
   }
 };
 
@@ -42,10 +40,9 @@ export function PlantCard({
   coverPhotoUrl: string;
 }) {
   const { t } = useI18n();
-  const styles = cardStyles[plant.status];
+  const styles = cardStyles[careAction.cardVisualState];
   const displayName = plantDisplayName(plant, t("plants.unknownName"));
   const commonName = plantCommonName(plant);
-  const badgeStatus = careAction.isActionable || careAction.cardBadgeKey === "status.needsHelp" ? plant.status : "healthy";
 
   return (
     <Link
@@ -70,7 +67,7 @@ export function PlantCard({
           />
           <div className={`pointer-events-none absolute inset-x-0 bottom-0 h-[72px] bg-gradient-to-b ${styles.fade}`} />
           <div className="absolute bottom-3.5 left-4 right-4">
-            {careAction.cardBadgeKey ? <StatusBadge label={t(careAction.cardBadgeKey)} status={badgeStatus} /> : null}
+            {careAction.cardBadgeKey ? <StatusBadge label={t(careAction.cardBadgeKey)} status={styles.badgeStatus} /> : null}
           </div>
         </div>
         <div className="px-5 pb-5 pt-3.5">

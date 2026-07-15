@@ -4,14 +4,20 @@ import { StatusBadge } from "./StatusBadge";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { DerivedCareActionState } from "@/lib/plant-action-eligibility";
 import { plantCommonName } from "@/lib/plant-display";
-import type { Plant } from "@/types/plant";
+import type { Plant, PlantStatus } from "@/types/plant";
+
+const badgeStatusByVisualState: Record<DerivedCareActionState["cardVisualState"], PlantStatus> = {
+  healthy: "healthy",
+  observe: "check_soon",
+  action_required: "needs_attention"
+};
 
 export function PlantStatusSection({ plant, careActionState }: { plant: Plant; careActionState: DerivedCareActionState | null }) {
   const { t } = useI18n();
   const commonName = plantCommonName(plant);
   const badgeKey = careActionState?.cardBadgeKey ?? plant.statusLabelKey;
   const message = careActionState ? t(careActionState.detailMessageKey, careActionState.detailMessageParams) : t(plant.messageKey);
-  const badgeStatus = careActionState?.isActionable || badgeKey === "status.needsHelp" ? plant.status : "healthy";
+  const badgeStatus = careActionState ? badgeStatusByVisualState[careActionState.cardVisualState] : plant.status;
 
   return (
     <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-5 shadow-soft">

@@ -37,6 +37,7 @@ type CareActionFixture = {
   expected: {
     actionType: ReturnType<typeof deriveCareActionState>["actionType"];
     status: ReturnType<typeof deriveCareActionState>["status"];
+    cardVisualState: ReturnType<typeof deriveCareActionState>["cardVisualState"];
     isActionable: boolean;
     cardBadgeKey: ReturnType<typeof deriveCareActionState>["cardBadgeKey"];
     includedInAttentionCount: boolean;
@@ -51,6 +52,7 @@ export const careActionFixtures: CareActionFixture[] = [
     expected: {
       actionType: "check_soil",
       status: "due",
+      cardVisualState: "action_required",
       isActionable: true,
       cardBadgeKey: "status.checkSoilToday",
       includedInAttentionCount: true
@@ -63,8 +65,9 @@ export const careActionFixtures: CareActionFixture[] = [
     expected: {
       actionType: "check_soil",
       status: "upcoming",
+      cardVisualState: "observe",
       isActionable: false,
-      cardBadgeKey: "status.doingGreat",
+      cardBadgeKey: "status.observing",
       includedInAttentionCount: false
     }
   },
@@ -75,8 +78,9 @@ export const careActionFixtures: CareActionFixture[] = [
     expected: {
       actionType: "check_soil",
       status: "upcoming",
+      cardVisualState: "observe",
       isActionable: false,
-      cardBadgeKey: "status.doingGreat",
+      cardBadgeKey: "status.observing",
       includedInAttentionCount: false
     }
   },
@@ -87,6 +91,7 @@ export const careActionFixtures: CareActionFixture[] = [
     expected: {
       actionType: "check_soil",
       status: "due",
+      cardVisualState: "action_required",
       isActionable: true,
       cardBadgeKey: "status.checkSoilToday",
       includedInAttentionCount: true
@@ -99,8 +104,9 @@ export const careActionFixtures: CareActionFixture[] = [
     expected: {
       actionType: "check_soil",
       status: "completed",
+      cardVisualState: "observe",
       isActionable: false,
-      cardBadgeKey: "status.doingGreat",
+      cardBadgeKey: "status.observing",
       includedInAttentionCount: false
     }
   },
@@ -111,8 +117,9 @@ export const careActionFixtures: CareActionFixture[] = [
     expected: {
       actionType: "check_soil",
       status: "blocked",
+      cardVisualState: "observe",
       isActionable: false,
-      cardBadgeKey: "status.doingGreat",
+      cardBadgeKey: "status.observing",
       includedInAttentionCount: false
     }
   }
@@ -125,6 +132,7 @@ careActionFixtures.forEach((fixture) => {
   if (
     actual.actionType !== fixture.expected.actionType ||
     actual.status !== fixture.expected.status ||
+    actual.cardVisualState !== fixture.expected.cardVisualState ||
     actual.isActionable !== fixture.expected.isActionable ||
     actual.cardBadgeKey !== fixture.expected.cardBadgeKey ||
     isDueCareActionState(actual) !== fixture.expected.includedInAttentionCount

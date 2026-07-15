@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
 import { appBuildStorageKey, appBuildVersion, isStandalonePwa } from "@/lib/app-version";
@@ -1016,8 +1016,13 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         aria-modal="true"
         className="flex h-[100dvh] w-full flex-col overflow-hidden rounded-t-[28px] bg-[#fffaf3] shadow-[0_20px_60px_rgba(0,0,0,0.16)] sm:h-auto sm:max-h-[90dvh] sm:max-w-[390px] sm:rounded-[28px]"
       >
-        <div className="shrink-0 px-5 pb-3 pt-[calc(env(safe-area-inset-top)+20px)] sm:pt-5">
+        <div className="flex shrink-0 items-center justify-between gap-3 px-5 pb-3 pt-[calc(env(safe-area-inset-top)+20px)] sm:pt-5">
           <h2 className="font-rounded text-2xl font-extrabold text-ink">{t("addPlant.title")}</h2>
+          {step === "confirm" || step === "details" ? (
+            <button type="button" onClick={cancelAddPlant} aria-label={t("settings.close")} className="flex size-11 items-center justify-center rounded-2xl bg-white text-[#7d776b]">
+              <X aria-hidden="true" size={18} />
+            </button>
+          ) : null}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
           {isPlantSaveDebugEnabled && step === "confirm" ? (
@@ -1030,16 +1035,13 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
               <PhotoImage src={coverPhoto.url} alt={t("photos.photoAlt")} className="h-full w-full object-cover" />
             </div>
           ) : null}
-          {step === "confirm" ? (
-            <div className="mt-3 grid grid-cols-3 gap-2">
+          {step === "confirm" && isTechnicalAnalysisFailure ? (
+            <div className="mt-3 grid grid-cols-2 gap-2">
               <button type="button" onClick={() => setStep("review")} className="min-h-10 rounded-[16px] bg-white/75 px-2 text-xs font-extrabold text-[#5f594f]">
                 {t("addPlant.backToPhotos")}
               </button>
               <button type="button" onClick={retryAnalysis} className="min-h-10 rounded-[16px] bg-[#ddf2dc] px-2 text-xs font-extrabold text-[#2d7a4f]">
                 {t("addPlant.retryAnalysis")}
-              </button>
-              <button type="button" onClick={cancelAddPlant} className="min-h-10 rounded-[16px] bg-[#fdeaf0] px-2 text-xs font-extrabold text-[#9b2c3e]">
-                {t("addPlant.cancelAdding")}
               </button>
             </div>
           ) : null}
@@ -1219,6 +1221,9 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             </div>
           ) : (
             <>
+              <button type="button" onClick={() => setStep("review")} className="mt-2 min-h-10 rounded-[16px] bg-white/75 px-3 text-sm font-extrabold text-[#5f594f]">
+                {t("addPlant.backToPhotos")}
+              </button>
               {selectedPhotos.length > 1 ? (
                 <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
                   {selectedPhotos.map((photo) => (

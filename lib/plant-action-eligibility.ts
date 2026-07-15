@@ -4,10 +4,12 @@ import type { Plant, PlantAction, PlantHypothesisResolution } from "@/types/plan
 
 type CareActionType = "water" | "check_soil" | "take_photo" | "observe" | "none";
 type CareActionStatus = "due" | "upcoming" | "completed" | "blocked" | "none";
+export type CareCardVisualState = "healthy" | "observe" | "action_required";
 
 export type DerivedCareActionState = {
   actionType: CareActionType;
   status: CareActionStatus;
+  cardVisualState: CareCardVisualState;
   isActionable: boolean;
   dueAt: string | null;
   labelKey: TranslationKey | null;
@@ -84,10 +86,11 @@ export function deriveCareActionState(
     return {
       actionType: "check_soil",
       status: "blocked",
+      cardVisualState: "observe",
       isActionable: false,
       dueAt: plant.nextCheckAt ?? null,
       labelKey: null,
-      cardBadgeKey: "status.doingGreat",
+      cardBadgeKey: "status.observing",
       cardMessageKey: "careAction.noAction",
       detailMessageKey: "careAction.noAction",
       reason: "care_context_loading"
@@ -102,6 +105,7 @@ export function deriveCareActionState(
     return {
       actionType: "water",
       status: "due",
+      cardVisualState: "action_required",
       isActionable: true,
       dueAt: nextCheckAt,
       labelKey: "actions.water",
@@ -116,6 +120,7 @@ export function deriveCareActionState(
     return {
       actionType: "check_soil",
       status: "due",
+      cardVisualState: "action_required",
       isActionable: true,
       dueAt: nextCheckAt,
       labelKey: "actions.check_soil",
@@ -130,10 +135,11 @@ export function deriveCareActionState(
     return {
       actionType: "take_photo",
       status: "due",
+      cardVisualState: "action_required",
       isActionable: true,
       dueAt: nextCheckAt,
       labelKey: "actions.take_photo",
-      cardBadgeKey: "status.checkSoilToday",
+      cardBadgeKey: "status.takePhoto",
       cardMessageKey: "careAction.photoDue",
       detailMessageKey: "careAction.photoDue",
       reason: "primary_action_take_photo"
@@ -145,10 +151,11 @@ export function deriveCareActionState(
     return {
       actionType: "check_soil",
       status: "upcoming",
+      cardVisualState: "observe",
       isActionable: false,
       dueAt: nextCheckAt,
       labelKey: null,
-      cardBadgeKey: "status.doingGreat",
+      cardBadgeKey: "status.observing",
       cardMessageKey: message.key,
       cardMessageParams: message.params,
       detailMessageKey: message.key,
@@ -161,10 +168,11 @@ export function deriveCareActionState(
     return {
       actionType: "check_soil",
       status: "completed",
+      cardVisualState: "observe",
       isActionable: false,
       dueAt: nextCheckAt,
       labelKey: null,
-      cardBadgeKey: "status.doingGreat",
+      cardBadgeKey: "status.observing",
       cardMessageKey: "careAction.soilAnswered",
       detailMessageKey: "careAction.soilAnswered",
       reason: "fresh_soil_answer_resolved_action"
@@ -174,12 +182,13 @@ export function deriveCareActionState(
   return {
     actionType: "none",
     status: "none",
+    cardVisualState: plant.status === "healthy" ? "healthy" : "observe",
     isActionable: false,
     dueAt: nextCheckAt,
     labelKey: null,
-    cardBadgeKey: plant.status === "needs_attention" ? "status.needsHelp" : plant.status === "check_soon" ? "status.doingGreat" : "status.doingGreat",
-    cardMessageKey: "careAction.noAction",
-    detailMessageKey: "careAction.noAction",
+    cardBadgeKey: plant.status === "healthy" ? "status.doingGreat" : "status.observing",
+    cardMessageKey: plant.status === "healthy" ? "careAction.noAction" : "careAction.observe",
+    detailMessageKey: plant.status === "healthy" ? "careAction.noAction" : "careAction.observe",
     reason: "no_actionable_primary_care_action"
   };
 }
