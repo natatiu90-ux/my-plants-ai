@@ -102,6 +102,59 @@ const schema = {
           required: ["type", "priority", "en", "ru"]
         }
       },
+      hypotheses: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            type: { type: "string", enum: ["soil_condition", "repotting", "root_condition", "drainage", "direct_sun", "pests"] },
+            status: { type: "string", enum: ["supported", "possible", "unlikely", "resolved"] },
+            confidence: { type: "number", minimum: 0, maximum: 1 },
+            evidence: { type: "array", items: { type: "string" } },
+            missingEvidence: { type: "array", items: { type: "string" } },
+            canUserAnswerChangeRecommendation: { type: "boolean" },
+            clarificationQuestion: {
+              type: ["object", "null"],
+              additionalProperties: false,
+              properties: {
+                question: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: { en: { type: ["string", "null"] }, ru: { type: ["string", "null"] } },
+                  required: ["en", "ru"]
+                },
+                options: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      label: {
+                        type: "object",
+                        additionalProperties: false,
+                        properties: { en: { type: ["string", "null"] }, ru: { type: ["string", "null"] } },
+                        required: ["en", "ru"]
+                      },
+                      status: { type: "string", enum: ["confirmed", "ruled_out", "unknown"] },
+                      result: { type: "string" }
+                    },
+                    required: ["label", "status", "result"]
+                  }
+                },
+                reasonForAsking: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: { en: { type: ["string", "null"] }, ru: { type: ["string", "null"] } },
+                  required: ["en", "ru"]
+                }
+              },
+              required: ["question", "options", "reasonForAsking"]
+            }
+          },
+          required: ["type", "status", "confidence", "evidence", "missingEvidence", "canUserAnswerChangeRecommendation", "clarificationQuestion"]
+        }
+      },
       uncertainties: {
         type: "array",
         items: {
@@ -124,6 +177,7 @@ const schema = {
       "nextAction",
       "nextCheckInDays",
       "recommendations",
+      "hypotheses",
       "uncertainties"
     ]
   },
@@ -403,6 +457,14 @@ export async function POST(request: Request) {
           "Return only cautious, advisory plant-care analysis.",
           "When possible, provide commonName as a short human-readable plant name in English and Russian, and scientificName as Latin botanical name only.",
           "Separate visible observations from cautious inferences and user actions needed to verify.",
+          "Create hypothesis-driven clarification data for these canonical hypothesis types only: soil_condition, repotting, root_condition, drainage, direct_sun, pests.",
+          "Healthy-looking plants should have a positive status and no pest, repotting, drainage, root, or soil question unless there is concrete visual evidence that the answer would change the recommendation.",
+          "For each hypothesis, include evidence, missingEvidence, confidence, and whether a user answer can materially change the conclusion, urgency, action, or next check date.",
+          "If a clarification question is useful, ask only a direct practical question with answer options. Do not use passive AI limitation text as uncertainty.",
+          "Prefer conclusions over raw facts. Explain what an observation or user answer means for care.",
+          "If the plant looks healthy, do not manufacture problems. Say no urgent issues are visible and avoid unnecessary clarification questions.",
+          "Recommendations should feel like an expert changing their mind when new evidence or answers rule out a previous possibility.",
+          "Pay attention to photo types: overview for overall form/light response, leaf close-up for pests/damage, pot/soil for soil-zone clues, roots only for root observations, problem for visible damage.",
           "Do not claim measured soil moisture, root health when roots are not visible, pests that are not clearly visible, or exact disease diagnoses without sufficient visual evidence.",
           "For watering, prefer nextAction check_soil over water unless dry soil is directly visible or user-provided context confirms dryness.",
           `User locale: ${locale}. Photo types in order: ${photoTypes.join(", ") || "unknown"}.`

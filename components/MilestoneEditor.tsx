@@ -23,9 +23,11 @@ const milestoneTypes: PlantMilestoneType[] = [
 const milestoneTitleKeys: Record<PlantMilestoneType, TranslationKey> = {
   plant_added: "milestones.plant_added.title",
   watered: "milestones.watered.title",
+  watering_unknown: "milestones.watering_unknown.title",
   soil_checked: "milestones.soil_checked.title",
   moved_home: "milestones.moved_home.title",
   repotted: "milestones.repotted.title",
+  repotting_unknown: "milestones.repotting_unknown.title",
   fertilized: "milestones.fertilized.title",
   new_leaf: "milestones.new_leaf.title",
   bloomed: "milestones.bloomed.title",

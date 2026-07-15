@@ -14,7 +14,7 @@ export function PhotoUploadFlow({
   title: string;
   hasExistingCover?: boolean;
   onCancel: () => void;
-  onSave: (photos: PendingPhotoUpload[]) => void;
+  onSave: (photos: PendingPhotoUpload[]) => void | Promise<void>;
 }) {
   const [photos, setPhotos] = useState<PendingPhotoUpload[] | null>(null);
   const [rejectedCount, setRejectedCount] = useState(0);

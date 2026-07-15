@@ -15,9 +15,11 @@ export type PlantHypothesisStatus = "confirmed" | "ruled_out" | "unknown";
 export type PlantMilestoneType =
   | "plant_added"
   | "watered"
+  | "watering_unknown"
   | "soil_checked"
   | "moved_home"
   | "repotted"
+  | "repotting_unknown"
   | "fertilized"
   | "new_leaf"
   | "bloomed"
@@ -83,6 +85,33 @@ export interface PlantAnalysisRecord {
   rawResult?: {
     visibleObservations?: { en?: string; ru?: string }[];
     uncertainties?: { en?: string; ru?: string }[];
+    hypotheses?: {
+      type?: PlantHypothesis;
+      status?: "supported" | "possible" | "unlikely" | "resolved";
+      confidence?: number;
+      evidence?: string[];
+      missingEvidence?: string[];
+      canUserAnswerChangeRecommendation?: boolean;
+      clarificationQuestion?: {
+        question?: { en?: string | null; ru?: string | null };
+        options?: { label?: { en?: string | null; ru?: string | null }; status?: PlantHypothesisStatus; result?: string }[];
+        reasonForAsking?: { en?: string | null; ru?: string | null };
+      };
+    }[];
+    photoComparison?: {
+      analyzedPhotoIds?: string[];
+      analysisTimestamp?: string;
+      comparisonTargetPhotoIds?: string[];
+      observationsAdded?: string[];
+      observationsUnchanged?: string[];
+      observationsImproved?: string[];
+      observationsWorsened?: string[];
+      hypothesesChanged?: string[];
+      recommendationChanges?: string[];
+      confidenceChanges?: { previous?: number | null; current?: number | null };
+      reliableComparison?: boolean;
+      message?: { en?: string | null; ru?: string | null };
+    };
     [key: string]: unknown;
   };
   model?: string;

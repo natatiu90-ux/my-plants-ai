@@ -41,7 +41,7 @@ export function PhotoBatchReview({
   onDiscardPhoto?: (photo: PendingPhotoUpload) => void;
   debugPanel?: ReactNode;
   onCancel: () => void;
-  onSave: (photos: PendingPhotoUpload[]) => void;
+  onSave: (photos: PendingPhotoUpload[]) => void | Promise<void>;
 }) {
   const { t } = useI18n();
   const [internalPhotos, setInternalPhotos] = useState<PendingPhotoUpload[]>(() =>

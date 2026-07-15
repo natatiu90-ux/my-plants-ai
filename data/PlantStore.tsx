@@ -81,6 +81,22 @@ type PlantStoreValue = PlantState & {
   deleteMilestone: (milestoneId: string) => Promise<void>;
   waterPlant: (plantId: string) => Promise<void>;
   recordSoilChecked: (plantId: string, result: SoilCheckResult, note?: string) => Promise<void>;
+  saveBaselineHistory: (plantId: string, input: { kind: "watering" | "repotting"; eventDate?: string; unknown?: boolean }) => Promise<void>;
+  savePlantAnalysis: (
+    plantId: string,
+    input: {
+      sourcePhotoIds: string[];
+      detectedSpecies?: string | null;
+      confidence?: number | null;
+      condition?: Plant["status"];
+      nextAction?: Plant["nextAction"];
+      nextCheckInDays?: number | null;
+      summary?: { en?: string | null; ru?: string | null };
+      recommendations?: unknown;
+      rawResult?: unknown;
+      model?: string | null;
+    }
+  ) => Promise<void>;
   resolvePlantHypothesis: (plantId: string, hypothesis: PlantHypothesis, status: PlantHypothesisStatus, userResult: string) => Promise<void>;
   updatePlantNotification: (plantId: string, enabled: boolean) => Promise<void>;
   updatePlantNextCheck: (plantId: string, nextCheckAt?: string) => Promise<void>;
@@ -790,6 +806,124 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
     [repositories, state.hypothesisResolutions, state.milestones, state.plants]
   );
 
+  const saveBaselineHistory = useCallback(
+    async (plantId: string, input: { kind: "watering" | "repotting"; eventDate?: string; unknown?: boolean }) => {
+      if (!repositories) {
+        throw new Error("Plant collection is not ready.");
+      }
+
+      const today = toDateKey(new Date());
+      const eventDate = input.eventDate ?? today;
+      if (input.kind === "watering" && !input.unknown) {
+        const nextCheckAt = toDateKey(addDays(new Date(`${eventDate}T12:00:00`), 4));
+        const milestone = await repositories.milestones.addMilestone(plantId, { type: "watered", eventDate });
+        await repositories.careEvents.addCareEvent(plantId, { type: "watered", eventDate, metadata: { source: "baseline_history" } });
+        await repositories.plants.updateRecommendationState(plantId, {
+          status: state.plants.find((plant) => plant.id === plantId)?.status ?? "unknown",
+          nextAction: state.plants.find((plant) => plant.id === plantId)?.nextAction ?? null,
+          nextCheckAt,
+          lastWateredAt: eventDate,
+          careScheduleStatus: "active",
+          notificationDueCycleKey: null
+        });
+        setState((current) => ({
+          ...current,
+          plants: current.plants.map((plant) =>
+            plant.id === plantId
+              ? { ...plant, lastWateredAt: eventDate, nextCheckAt, careScheduleStatus: "active", notificationDueCycleKey: undefined }
+              : plant
+          ),
+          milestones: [milestone, ...current.milestones],
+          careEvents: [{ id: `${plantId}-baseline-watered-${Date.now()}`, plantId, type: "watered", createdAt: eventDate, metadata: { source: "baseline_history" } }, ...current.careEvents]
+        }));
+        return;
+      }
+
+      const milestoneType: PlantMilestone["type"] =
+        input.kind === "watering" ? (input.unknown ? "watering_unknown" : "watered") : input.unknown ? "repotting_unknown" : "repotted";
+      const milestone = await repositories.milestones.addMilestone(plantId, { type: milestoneType, eventDate });
+      setState((current) => ({ ...current, milestones: [milestone, ...current.milestones] }));
+    },
+    [repositories, state.plants]
+  );
+
+  const savePlantAnalysis = useCallback(
+    async (
+      plantId: string,
+      input: {
+        sourcePhotoIds: string[];
+        detectedSpecies?: string | null;
+        confidence?: number | null;
+        condition?: Plant["status"];
+        nextAction?: Plant["nextAction"];
+        nextCheckInDays?: number | null;
+        summary?: { en?: string | null; ru?: string | null };
+        recommendations?: unknown;
+        rawResult?: unknown;
+        model?: string | null;
+      }
+    ) => {
+      if (!repositories) {
+        throw new Error("Plant collection is not ready.");
+      }
+
+      await repositories.analyses.addAnalysis({
+        plantId,
+        sourcePhotoIds: input.sourcePhotoIds,
+        detectedSpecies: input.detectedSpecies,
+        confidence: input.confidence,
+        condition: input.condition,
+        nextAction: input.nextAction,
+        summaryEn: input.summary?.en,
+        summaryRu: input.summary?.ru,
+        recommendations: input.recommendations,
+        rawResult: input.rawResult,
+        model: input.model
+      });
+
+      const nextCheckAt = input.nextCheckInDays != null ? toDateKey(addDays(new Date(), input.nextCheckInDays)) : undefined;
+      if (input.condition || input.nextAction !== undefined || nextCheckAt) {
+        await repositories.plants.updateRecommendationState(plantId, {
+          status: input.condition ?? state.plants.find((plant) => plant.id === plantId)?.status ?? "unknown",
+          nextAction: input.nextAction ?? null,
+          nextCheckAt: nextCheckAt ?? state.plants.find((plant) => plant.id === plantId)?.nextCheckAt ?? null,
+          careScheduleStatus: nextCheckAt ? "active" : state.plants.find((plant) => plant.id === plantId)?.careScheduleStatus,
+          notificationDueCycleKey: null
+        });
+      }
+
+      const analysisRecord: PlantAnalysisRecord = {
+        id: `${plantId}-analysis-${Date.now()}`,
+        plantId,
+        condition: input.condition ?? "unknown",
+        nextAction: input.nextAction ?? null,
+        summary: input.summary,
+        recommendations: Array.isArray(input.recommendations) ? (input.recommendations as PlantAnalysisRecord["recommendations"]) : [],
+        rawResult: input.rawResult as PlantAnalysisRecord["rawResult"],
+        model: input.model ?? undefined,
+        createdAt: toDateKey(new Date())
+      };
+
+      setState((current) => ({
+        ...current,
+        plants: current.plants.map((plant) =>
+          plant.id === plantId
+            ? {
+                ...plant,
+                status: input.condition ?? plant.status,
+                nextAction: input.nextAction ?? null,
+                nextCheckAt: nextCheckAt ?? plant.nextCheckAt,
+                careScheduleStatus: nextCheckAt ? "active" : plant.careScheduleStatus,
+                notificationDueCycleKey: undefined
+              }
+            : plant
+        ),
+        analyses: [analysisRecord, ...current.analyses]
+      }));
+    },
+    [repositories, state.plants]
+  );
+
   const resolvePlantHypothesis = useCallback(
     async (plantId: string, hypothesis: PlantHypothesis, status: PlantHypothesisStatus, userResult: string) => {
       if (!repositories) {
@@ -909,6 +1043,8 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       deleteMilestone,
       waterPlant,
       recordSoilChecked,
+      saveBaselineHistory,
+      savePlantAnalysis,
       resolvePlantHypothesis,
       updatePlantNotification,
       updatePlantNextCheck,
@@ -935,6 +1071,8 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       getPlantMilestones,
       getPlantPhotos,
       recordSoilChecked,
+      saveBaselineHistory,
+      savePlantAnalysis,
       resolvePlantHypothesis,
       roomExists,
       setCoverPhoto,

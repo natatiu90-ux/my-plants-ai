@@ -17,7 +17,15 @@ type HypothesisView = {
 type FollowUpView = {
   hypothesis: PlantHypothesis;
   question: string;
+  reason: string;
   options: { label: string; status: PlantHypothesisStatus; result: string }[];
+};
+
+type StructuredHypothesis = {
+  type?: PlantHypothesis;
+  status?: "supported" | "possible" | "unlikely" | "resolved";
+  confidence?: number;
+  canUserAnswerChangeRecommendation?: boolean;
 };
 
 function localized(value: { en?: string | null; ru?: string | null } | undefined, locale: "en" | "ru") {
@@ -94,33 +102,49 @@ function classifyObservation(item: string, t: (key: TranslationKey) => string) {
   return `${t("plantAnalysis.observationNeutralPrefix")} ${item}`;
 }
 
-function checkedFactForResolution(resolution: PlantHypothesisResolution | undefined, t: (key: TranslationKey) => string) {
+function conclusionForSoilResult(result: string | undefined, t: (key: TranslationKey) => string) {
+  if (result === "dry") return t("plantAnalysis.conclusionSoilDry");
+  if (result === "slightly_damp") return t("plantAnalysis.conclusionSoilMoist");
+  if (result === "very_wet") return t("plantAnalysis.conclusionSoilWet");
+  if (result === "not_sure" || result === "unsure") return t("plantAnalysis.conclusionSoilUnsure");
+  return "";
+}
+
+function conclusionForResolution(resolution: PlantHypothesisResolution | undefined, t: (key: TranslationKey) => string) {
   if (!resolution) return "";
 
-  if (resolution.hypothesis === "repotting") {
-    if (resolution.userResult === "recently") return t("plantAnalysis.checkedRepotRecently");
-    if (resolution.userResult === "long_ago") return t("plantAnalysis.checkedRepotLongAgo");
-    return t("plantAnalysis.checkedRepotUnsure");
+  if (resolution.hypothesis === "pests") {
+    if (resolution.status === "ruled_out") return t("plantAnalysis.conclusionNoPests");
+    if (resolution.status === "confirmed") return t("plantAnalysis.conclusionPestsFound");
+    return t("plantAnalysis.conclusionPestsUnsure");
   }
 
   if (resolution.hypothesis === "soil_condition") {
-    if (resolution.userResult === "dry") return t("plantAnalysis.checkedSoilDry");
-    if (resolution.userResult === "slightly_damp") return t("plantAnalysis.checkedSoilSlightlyDamp");
-    if (resolution.userResult === "very_wet") return t("plantAnalysis.checkedSoilVeryWet");
-    return t("plantAnalysis.checkedSoilUnsure");
+    return conclusionForSoilResult(resolution.userResult, t);
   }
 
-  if (resolution.hypothesis === "drainage") {
-    if (resolution.userResult === "yes") return t("plantAnalysis.checkedDrainageYes");
-    if (resolution.userResult === "no") return t("plantAnalysis.checkedDrainageNo");
-    return t("plantAnalysis.checkedDrainageUnsure");
+  if (resolution.hypothesis === "repotting") {
+    if (resolution.userResult === "recently") return t("plantAnalysis.conclusionRecentRepot");
+    if (resolution.userResult === "long_ago") return t("plantAnalysis.conclusionOldRepot");
+    return t("plantAnalysis.conclusionRepotUnsure");
+  }
+
+  if (resolution.hypothesis === "root_condition") {
+    if (resolution.status === "ruled_out") return t("plantAnalysis.conclusionRootsNormal");
+    if (resolution.status === "confirmed") return t("plantAnalysis.conclusionRootsConcern");
+    return t("plantAnalysis.conclusionRootsUnsure");
   }
 
   if (resolution.hypothesis === "direct_sun") {
-    if (resolution.userResult === "yes") return t("plantAnalysis.checkedDirectSun");
-    if (resolution.userResult === "sometimes") return t("plantAnalysis.checkedSomeDirectSun");
-    if (resolution.userResult === "no") return t("plantAnalysis.checkedNoDirectSun");
-    return t("plantAnalysis.checkedSunUnsure");
+    if (resolution.userResult === "yes" || resolution.userResult === "sometimes") return t("plantAnalysis.conclusionDirectSun");
+    if (resolution.userResult === "no") return t("plantAnalysis.conclusionNoDirectSun");
+    return t("plantAnalysis.conclusionSunUnsure");
+  }
+
+  if (resolution.hypothesis === "drainage") {
+    if (resolution.userResult === "yes") return t("plantAnalysis.conclusionDrainageYes");
+    if (resolution.userResult === "no") return t("plantAnalysis.conclusionDrainageNo");
+    return t("plantAnalysis.conclusionDrainageUnsure");
   }
 
   return "";
@@ -145,6 +169,29 @@ function validateCurrentActions(actions: string[], context: { sunStressActive: b
 
     return true;
   });
+}
+
+function structuredHypothesesFrom(rawResult: PlantAnalysisRecord["rawResult"] | undefined) {
+  return Array.isArray(rawResult?.hypotheses) ? (rawResult.hypotheses as StructuredHypothesis[]) : [];
+}
+
+function structuredFor(hypotheses: StructuredHypothesis[], type: PlantHypothesis) {
+  return hypotheses.find((hypothesis) => hypothesis.type === type);
+}
+
+function structuredConfidence(hypothesis: StructuredHypothesis | undefined, fallback: number) {
+  return typeof hypothesis?.confidence === "number" ? hypothesis.confidence : fallback;
+}
+
+function structuredStatus(hypothesis: StructuredHypothesis | undefined, fallback: HypothesisView["status"]) {
+  if (!hypothesis) return fallback;
+  if (hypothesis.status === "resolved") return "confirmed";
+  if (hypothesis.status === "unlikely") return "ruled_out";
+  return "active";
+}
+
+function canAskStructuredQuestion(hypothesis: StructuredHypothesis | undefined, threshold: number) {
+  return Boolean(hypothesis?.canUserAnswerChangeRecommendation && typeof hypothesis.confidence === "number" && hypothesis.confidence >= threshold);
 }
 
 export function PlantAnalysisSection({
@@ -215,13 +262,21 @@ export function PlantAnalysisSection({
     const drainageMentioned = includesAny(combinedText, ["drainage", "drain", "дренаж", "отверст"]);
     const rootMentioned = includesAny(combinedTextWithoutUncertainty, ["root", "roots", "корн"]);
     const soilCheckedToday = plant.lastSoilCheckedAt ? daysSince(plant.lastSoilCheckedAt) === 0 : false;
+    const structuredHypotheses = structuredHypothesesFrom(analysis.rawResult);
+    const structuredSoil = structuredFor(structuredHypotheses, "soil_condition");
+    const structuredRepotting = structuredFor(structuredHypotheses, "repotting");
+    const structuredRoots = structuredFor(structuredHypotheses, "root_condition");
+    const structuredDrainage = structuredFor(structuredHypotheses, "drainage");
+    const structuredSun = structuredFor(structuredHypotheses, "direct_sun");
+    const structuredPests = structuredFor(structuredHypotheses, "pests");
+    const structuredQuestionsEnabled = structuredHypotheses.length > 0;
 
     const hypotheses: HypothesisView[] = [
       {
         id: "direct_sun",
-        confidence: sunResolution?.status === "confirmed" ? 0.9 : sunMentioned ? 0.72 : 0.2,
+        confidence: sunResolution?.status === "confirmed" ? 0.9 : structuredConfidence(structuredSun, sunMentioned ? 0.72 : 0.2),
         text: t("plantAnalysis.causeSunStress"),
-        status: statusFromResolution(sunResolution)
+        status: statusFromResolution(sunResolution) !== "active" ? statusFromResolution(sunResolution) : structuredStatus(structuredSun, "active")
       },
       {
         id: "recent_repotting_context",
@@ -231,33 +286,33 @@ export function PlantAnalysisSection({
       },
       {
         id: "soil_condition",
-        confidence: plant.nextAction === "water" || plant.nextAction === "check_soil" ? 0.7 : wateringMentioned ? 0.58 : 0.25,
+        confidence: structuredConfidence(structuredSoil, plant.nextAction === "water" || plant.nextAction === "check_soil" ? 0.7 : wateringMentioned ? 0.58 : 0.25),
         text: t("plantAnalysis.causeWatering"),
-        status: statusFromResolution(wateringResolution)
+        status: statusFromResolution(wateringResolution) !== "active" ? statusFromResolution(wateringResolution) : structuredStatus(structuredSoil, "active")
       },
       {
         id: "pests",
-        confidence: pestsConfirmed ? 0.82 : pestMentioned ? 0.45 : 0.15,
+        confidence: pestsConfirmed ? 0.82 : structuredConfidence(structuredPests, pestMentioned ? 0.45 : 0.15),
         text: t("plantAnalysis.causePests"),
-        status: noPests ? "ruled_out" : pestsConfirmed ? "confirmed" : "active"
+        status: noPests ? "ruled_out" : pestsConfirmed ? "confirmed" : structuredStatus(structuredPests, "active")
       },
       {
         id: "root_condition",
-        confidence: rootsConcernConfirmed ? 0.82 : rootMentioned && wasRepottedRecently && !rootsReportedNormal ? 0.45 : 0.12,
+        confidence: rootsConcernConfirmed ? 0.82 : structuredConfidence(structuredRoots, rootMentioned && wasRepottedRecently && !rootsReportedNormal ? 0.45 : 0.12),
         text: t("plantAnalysis.causeRoots"),
-        status: rootsConcernConfirmed ? "confirmed" : rootsReportedNormal ? "ruled_out" : "active"
+        status: rootsConcernConfirmed ? "confirmed" : rootsReportedNormal ? "ruled_out" : structuredStatus(structuredRoots, "active")
       },
       {
         id: "repotting",
-        confidence: oldSoilResolution?.status === "confirmed" ? 0.72 : wasRepottedRecently ? 0.05 : oldSoilMentioned ? 0.48 : 0.15,
+        confidence: oldSoilResolution?.status === "confirmed" ? 0.72 : wasRepottedRecently ? 0.05 : structuredConfidence(structuredRepotting, oldSoilMentioned ? 0.48 : 0.15),
         text: t("plantAnalysis.causeOldSoil"),
-        status: wasRepottedRecently ? "ruled_out" : statusFromResolution(oldSoilResolution)
+        status: wasRepottedRecently ? "ruled_out" : statusFromResolution(oldSoilResolution) !== "active" ? statusFromResolution(oldSoilResolution) : structuredStatus(structuredRepotting, "active")
       },
       {
         id: "drainage",
-        confidence: drainageResolution?.status === "confirmed" ? 0.66 : drainageMentioned ? 0.5 : 0.15,
+        confidence: drainageResolution?.status === "confirmed" ? 0.66 : structuredConfidence(structuredDrainage, drainageMentioned ? 0.5 : 0.15),
         text: t("plantAnalysis.causeDrainage"),
-        status: statusFromResolution(drainageResolution)
+        status: statusFromResolution(drainageResolution) !== "active" ? statusFromResolution(drainageResolution) : structuredStatus(structuredDrainage, "active")
       }
     ];
 
@@ -301,16 +356,15 @@ export function PlantAnalysisSection({
       sunRuledOut: sunResolution?.status === "ruled_out"
     }).slice(0, 3);
     const activeActions = actions.length ? actions : [t("plantAnalysis.actionNothingNow")];
-    const checkedFacts = unique([
-      noPests ? t("plantAnalysis.checkedNoPests") : "",
-      pestsConfirmed ? t("plantAnalysis.checkedPestsFound") : "",
-      rootsReportedNormal ? t("plantAnalysis.checkedRootsNormal") : rootsConcernConfirmed ? t("plantAnalysis.checkedRootsProblem") : "",
-      wasRepottedRecently && repotDate ? t("plantAnalysis.checkedRepotted").replace("{date}", formatRelativeDate(repotDate, locale, "")) : "",
-      plant.lastSoilCheckedAt ? t("plantAnalysis.checkedSoil").replace("{date}", formatRelativeDate(plant.lastSoilCheckedAt, locale, "")) : "",
-      checkedFactForResolution(sunResolution, t),
-      checkedFactForResolution(oldSoilResolution, t),
-      checkedFactForResolution(wateringResolution, t),
-      checkedFactForResolution(drainageResolution, t)
+    const answerConclusions = unique([
+      conclusionForResolution(pestsResolution, t),
+      conclusionForResolution(rootResolution, t),
+      wasRepottedRecently && repotDate ? t("plantAnalysis.conclusionRepottedDate").replace("{date}", formatRelativeDate(repotDate, locale, "")) : "",
+      conclusionForSoilResult(plant.lastSoilResult, t),
+      conclusionForResolution(sunResolution, t),
+      conclusionForResolution(oldSoilResolution, t),
+      conclusionForResolution(wateringResolution, t),
+      conclusionForResolution(drainageResolution, t)
     ]);
     const meaning = unique([
       ...activeHypotheses.map((hypothesis) => hypothesis.text),
@@ -318,50 +372,50 @@ export function PlantAnalysisSection({
       rootsReportedNormal ? t("plantAnalysis.meaningRootsNormal") : "",
       sunResolution?.status === "ruled_out" ? t("plantAnalysis.meaningSunRuledOut") : ""
     ]).slice(0, 2);
-    const needsSoilQuestion = !wateringResolution && !soilCheckedToday && (plant.nextAction === "check_soil" || plant.nextAction === "water" || wateringMentioned);
-    const needsDrainageQuestion = !drainageResolution && drainageMentioned && (wateringMentioned || plant.nextAction === "check_soil" || plant.nextAction === "water");
-    const followUp: FollowUpView | null = !pestsResolution && pestMentioned
-      ? { hypothesis: "pests" as const, question: t("plantAnalysis.questionPests"), options: [
+    const needsSoilQuestion = !wateringResolution && !soilCheckedToday && (structuredQuestionsEnabled ? canAskStructuredQuestion(structuredSoil, 0.45) : plant.nextAction === "check_soil" || plant.nextAction === "water" || wateringMentioned);
+    const needsDrainageQuestion = !drainageResolution && (structuredQuestionsEnabled ? canAskStructuredQuestion(structuredDrainage, 0.45) : drainageMentioned && (wateringMentioned || plant.nextAction === "check_soil" || plant.nextAction === "water"));
+    const followUp: FollowUpView | null = !pestsResolution && (structuredQuestionsEnabled ? canAskStructuredQuestion(structuredPests, 0.55) : pestMentioned)
+      ? { hypothesis: "pests" as const, question: t("plantAnalysis.questionPests"), reason: t("plantAnalysis.questionReasonPests"), options: [
           { label: t("plantAnalysis.answerYes"), status: "confirmed" as const, result: "yes" },
           { label: t("plantAnalysis.answerNo"), status: "ruled_out" as const, result: "no" },
           { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
         ] }
-      : !sunResolution && sunMentioned
-        ? { hypothesis: "direct_sun" as const, question: t("plantAnalysis.questionSun"), options: [
+      : !sunResolution && (structuredQuestionsEnabled ? canAskStructuredQuestion(structuredSun, 0.55) : sunMentioned)
+        ? { hypothesis: "direct_sun" as const, question: t("plantAnalysis.questionSun"), reason: t("plantAnalysis.questionReasonSun"), options: [
             { label: t("plantAnalysis.answerYes"), status: "confirmed" as const, result: "yes" },
             { label: t("plantAnalysis.answerNo"), status: "ruled_out" as const, result: "no" },
             { label: t("plantAnalysis.answerSometimes"), status: "confirmed" as const, result: "sometimes" },
             { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
           ] }
         : needsSoilQuestion
-          ? { hypothesis: "soil_condition" as const, question: t("plantAnalysis.questionSoil"), options: [
+          ? { hypothesis: "soil_condition" as const, question: t("plantAnalysis.questionSoil"), reason: t("plantAnalysis.questionReasonSoil"), options: [
               { label: t("plantAnalysis.answerSoilDry"), status: "confirmed" as const, result: "dry" },
               { label: t("plantAnalysis.answerSoilSlightlyDamp"), status: "ruled_out" as const, result: "slightly_damp" },
               { label: t("plantAnalysis.answerSoilVeryWet"), status: "confirmed" as const, result: "very_wet" },
               { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
             ] }
-          : wasRepottedRecently && rootMentioned && !rootResolution
-            ? { hypothesis: "root_condition" as const, question: t("plantAnalysis.questionRoots"), options: [
+          : wasRepottedRecently && !rootResolution && (structuredQuestionsEnabled ? canAskStructuredQuestion(structuredRoots, 0.55) : rootMentioned)
+            ? { hypothesis: "root_condition" as const, question: t("plantAnalysis.questionRoots"), reason: t("plantAnalysis.questionReasonRoots"), options: [
                 { label: t("plantAnalysis.answerRootsHealthy"), status: "ruled_out" as const, result: "healthy" },
                 { label: t("plantAnalysis.answerRootsProblem"), status: "confirmed" as const, result: "dark_or_soft" },
                 { label: t("plantAnalysis.answerRootsNotChecked"), status: "unknown" as const, result: "not_checked" },
                 { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
               ] }
-            : !wasRepottedRecently && oldSoilMentioned && !oldSoilResolution
-              ? { hypothesis: "repotting" as const, question: t("plantAnalysis.questionRepot"), options: [
+            : !wasRepottedRecently && !oldSoilResolution && (structuredQuestionsEnabled ? canAskStructuredQuestion(structuredRepotting, 0.55) : oldSoilMentioned)
+              ? { hypothesis: "repotting" as const, question: t("plantAnalysis.questionRepot"), reason: t("plantAnalysis.questionReasonRepot"), options: [
                   { label: t("plantAnalysis.answerRecently"), status: "ruled_out" as const, result: "recently" },
                   { label: t("plantAnalysis.answerLongAgo"), status: "confirmed" as const, result: "long_ago" },
                   { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
                 ] }
               : needsDrainageQuestion
-                ? { hypothesis: "drainage" as const, question: t("plantAnalysis.questionDrainage"), options: [
+                ? { hypothesis: "drainage" as const, question: t("plantAnalysis.questionDrainage"), reason: t("plantAnalysis.questionReasonDrainage"), options: [
                     { label: t("plantAnalysis.answerYes"), status: "ruled_out" as const, result: "yes" },
                     { label: t("plantAnalysis.answerNo"), status: "confirmed" as const, result: "no" },
                     { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
                   ] }
                 : null;
 
-    return { meaningfulObservations, statusSummary, statusDetail, meaning, lowConfidenceHypotheses, activeActions, checkedFacts, followUp };
+    return { meaningfulObservations, statusSummary, statusDetail, meaning, lowConfidenceHypotheses, activeActions, answerConclusions, followUp };
   }, [analysis, hypothesisResolutions, locale, milestones, plant, t]);
 
   if (!analysis || !view) {
@@ -396,29 +450,6 @@ export function PlantAnalysisSection({
           {view.statusDetail ? <p className="mt-1 text-sm font-bold leading-5 text-[#4f6946]">{view.statusDetail}</p> : null}
         </div>
 
-        <div className="rounded-[20px] bg-white/65 p-3">
-          <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.currentAction")}</p>
-          <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f]">
-            {view.activeActions.map((action) => (
-              <li key={action}>{action}</li>
-            ))}
-          </ul>
-        </div>
-
-        {view.checkedFacts.length ? (
-          <div className="rounded-[20px] bg-[#eef5e8] p-3">
-            <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.checkedFacts")}</p>
-            <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#4f6946]">
-              {view.checkedFacts.map((fact) => (
-                <li key={fact} className="flex gap-2">
-                  <Check aria-hidden="true" size={16} className="mt-0.5 shrink-0" />
-                  <span>{fact}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-
         {view.meaningfulObservations.length ? (
           <div className="rounded-[20px] bg-white/65 p-3">
             <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.observations")}</p>
@@ -432,7 +463,7 @@ export function PlantAnalysisSection({
 
         {view.meaning.length ? (
           <div className="rounded-[20px] bg-white/65 p-3">
-            <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.whatItMeans")}</p>
+            <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.mostLikelyCause")}</p>
             <ul className="mt-2 grid gap-2 text-sm font-bold leading-5 text-[#4f4940]">
               {view.meaning.map((item) => (
                 <li key={item}>{item}</li>
@@ -441,9 +472,19 @@ export function PlantAnalysisSection({
           </div>
         ) : null}
 
+        <div className="rounded-[20px] bg-white/65 p-3">
+          <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.currentAction")}</p>
+          <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f]">
+            {view.activeActions.map((action) => (
+              <li key={action}>{action}</li>
+            ))}
+          </ul>
+        </div>
+
         {view.followUp ? (
           <div className="rounded-[20px] bg-white/65 p-3">
             <p className="text-sm font-extrabold leading-5 text-[#4f4940]">{view.followUp.question}</p>
+            <p className="mt-1 text-xs font-bold leading-4 text-[#8a8378]">{view.followUp.reason}</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {view.followUp.options.map((option) => {
                 const answerKey = `${view.followUp!.hypothesis}:${option.result}`;
@@ -465,6 +506,20 @@ export function PlantAnalysisSection({
             </div>
             {answerError ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{answerError}</p> : null}
           </div>
+        ) : null}
+
+        {view.answerConclusions.length ? (
+          <details className="rounded-[20px] bg-[#eef5e8] p-3">
+            <summary className="cursor-pointer text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.checkedFacts")}</summary>
+            <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#4f6946]">
+              {view.answerConclusions.map((fact) => (
+                <li key={fact} className="flex gap-2">
+                  <Check aria-hidden="true" size={16} className="mt-0.5 shrink-0" />
+                  <span>{fact}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
         ) : null}
 
         {view.lowConfidenceHypotheses.length ? (
