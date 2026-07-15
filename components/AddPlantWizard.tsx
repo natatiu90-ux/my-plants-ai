@@ -11,7 +11,7 @@ import { addDays, formatRelativeDate, formatShortDate, toDateKey } from "@/lib/d
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
 import { plantCreationDiagnosticFromError, type PlantCreationDiagnostic, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
-import { MultiPhotoPicker, type PhotoPickerDiagnostic } from "./MultiPhotoPicker";
+import { MultiPhotoPicker, PhotoPickerDebugPanel, type PhotoPickerDiagnostic } from "./MultiPhotoPicker";
 import { PhotoBatchReview } from "./PhotoBatchReview";
 import { PhotoImage } from "./PhotoImage";
 import { RoomPicker } from "./RoomPicker";
@@ -588,39 +588,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   };
 
   const photoPickerDebugPanel = isPhotoPickerDebugEnabled ? (
-    <div className="mt-3 rounded-[18px] bg-[#1f2937] p-3 text-left text-[11px] font-bold leading-5 text-white">
-      <p className="font-black">PHOTO PICKER DEBUG ON</p>
-      <p>event fired: {photoPickerDiagnostic ? "yes" : "no"}</p>
-      <p>source: {photoPickerDiagnostic?.source ?? "none"}</p>
-      <p>files received: {photoPickerDiagnostic?.filesReceived ?? 0}</p>
-      <p>accepted: {photoPickerDiagnostic?.accepted ?? 0}</p>
-      <p>rejected: {photoPickerDiagnostic?.rejected ?? 0}</p>
-      <p>failure stage: {photoPickerDiagnostic?.failureStage ?? "none"}</p>
-      <p>message: {photoPickerDiagnostic?.failureMessage ?? "none"}</p>
-      <p>selectedPhotos before: {photoPickerDiagnostic?.selectedPhotosBefore ?? selectedPhotos.length}</p>
-      <p>selectedPhotos after: {photoPickerDiagnostic?.selectedPhotosAfter ?? selectedPhotos.length}</p>
-      <p>IndexedDB: {photoPickerDiagnostic?.indexedDbResult ?? "not_started"}</p>
-      <p>exception.name: {photoPickerDiagnostic?.indexedDb?.exceptionName ?? "unknown"}</p>
-      <p>exception.message: {photoPickerDiagnostic?.indexedDb?.exceptionMessage ?? "unknown"}</p>
-      <p className="break-words">exception.stack: {photoPickerDiagnostic?.indexedDb?.exceptionStack ?? "none"}</p>
-      <p>DOMException.code: {photoPickerDiagnostic?.indexedDb?.domExceptionCode ?? "unknown"}</p>
-      <p>transaction mode: {photoPickerDiagnostic?.indexedDb?.transactionMode ?? "unknown"}</p>
-      <p>database: {photoPickerDiagnostic?.indexedDb?.databaseName ?? "unknown"}</p>
-      <p>object store: {photoPickerDiagnostic?.indexedDb?.objectStoreName ?? "unknown"}</p>
-      <p>key: {photoPickerDiagnostic?.indexedDb?.key ?? "unknown"}</p>
-      <p>blob: {photoPickerDiagnostic?.indexedDb ? `${photoPickerDiagnostic.indexedDb.blobType || "unknown"} · ${photoPickerDiagnostic.indexedDb.blobSize} bytes` : "unknown"}</p>
-      <p>openDB succeeded: {photoPickerDiagnostic?.indexedDb ? String(photoPickerDiagnostic.indexedDb.openDbSucceeded) : "unknown"}</p>
-      <p>transaction started: {photoPickerDiagnostic?.indexedDb ? String(photoPickerDiagnostic.indexedDb.transactionStarted) : "unknown"}</p>
-      <p>put reached: {photoPickerDiagnostic?.indexedDb ? String(photoPickerDiagnostic.indexedDb.putReached) : "unknown"}</p>
-      <p>onabort fired: {photoPickerDiagnostic?.indexedDb ? String(photoPickerDiagnostic.indexedDb.transactionOnAbortFired) : "unknown"}</p>
-      <p>transaction.error: {photoPickerDiagnostic?.indexedDb?.transactionError?.message ?? photoPickerDiagnostic?.indexedDb?.transactionError?.name ?? "none"}</p>
-      <p>request.error: {photoPickerDiagnostic?.indexedDb?.requestError?.message ?? photoPickerDiagnostic?.indexedDb?.requestError?.name ?? "none"}</p>
-      <p>db.version: {photoPickerDiagnostic?.indexedDb?.dbVersion ?? "unknown"}</p>
-      <p>object store exists: {photoPickerDiagnostic?.indexedDb?.objectStoreExists == null ? "unknown" : String(photoPickerDiagnostic.indexedDb.objectStoreExists)}</p>
-      <button type="button" onClick={copyPhotoPickerDiagnostic} className="mt-2 min-h-9 rounded-[12px] bg-white px-3 text-xs font-black text-[#1f2937]">
-        Copy diagnostic
-      </button>
-    </div>
+    <PhotoPickerDebugPanel diagnostic={photoPickerDiagnostic} selectedPhotosCount={selectedPhotos.length} onCopy={copyPhotoPickerDiagnostic} />
   ) : null;
 
   const analysisStages = [

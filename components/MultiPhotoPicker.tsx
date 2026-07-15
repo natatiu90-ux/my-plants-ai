@@ -2,7 +2,7 @@
 
 import { Camera, ImageIcon, X } from "lucide-react";
 import type { ChangeEvent } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { normalizeImageBlob, readJpegExifOrientation } from "@/lib/client-image-normalization";
 import { IndexedDbPhotoStorageError, PhotoStorageRepository, validateImageFile, type IndexedDbPhotoStorageDiagnostic } from "@/lib/photo-storage";
@@ -86,6 +86,91 @@ function createPhotoDebugId() {
 
 function indexedDbDiagnosticFromError(error: unknown) {
   return error instanceof IndexedDbPhotoStorageError ? error.diagnostic : undefined;
+}
+
+export function PhotoPickerDebugPanel({
+  diagnostic,
+  selectedPhotosCount = 0,
+  onCopy
+}: {
+  diagnostic: PhotoPickerDiagnostic | null;
+  selectedPhotosCount?: number;
+  onCopy: () => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const hasDiagnostic = Boolean(diagnostic);
+  const shouldRenderPayload = Boolean(diagnostic && (diagnostic.eventFired || diagnostic.failureStage || diagnostic.filesReceived > 0));
+  const hasFailure = Boolean(diagnostic?.failureStage);
+
+  useEffect(() => {
+    setIsOpen(hasFailure);
+  }, [hasFailure, diagnostic]);
+
+  if (!shouldRenderPayload) {
+    return (
+      <p className="inline-flex w-fit rounded-full bg-[#1f2937] px-3 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-white">
+        PHOTO PICKER DEBUG ON
+      </p>
+    );
+  }
+
+  const indexedDb = diagnostic?.indexedDb;
+
+  return (
+    <div className="rounded-[18px] bg-[#1f2937] p-3 text-left text-[11px] font-bold leading-5 text-white">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-black">PHOTO PICKER DEBUG ON</p>
+        <div className="flex shrink-0 items-center gap-1">
+          {hasDiagnostic ? (
+            <button type="button" onClick={onCopy} className="rounded-[10px] bg-white px-2 py-1 text-[11px] font-black text-[#1f2937]">
+              Copy
+            </button>
+          ) : null}
+          <button type="button" onClick={() => setIsOpen((current) => !current)} className="rounded-[10px] bg-white/15 px-2 py-1 text-[11px] font-black text-white">
+            {isOpen ? "Hide" : "Show"}
+          </button>
+        </div>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+        <p>source: {diagnostic?.source ?? "none"}</p>
+        <p>files: {diagnostic?.filesReceived ?? 0}</p>
+        <p>accepted: {diagnostic?.accepted ?? 0}</p>
+        <p>rejected: {diagnostic?.rejected ?? 0}</p>
+        <p className="col-span-2">failure: {diagnostic?.failureStage ?? "none"}</p>
+      </div>
+      {isOpen ? (
+        <div className="mt-3 border-t border-white/15 pt-3">
+          <p>event fired: {hasDiagnostic ? "yes" : "no"}</p>
+          <p>message: {diagnostic?.failureMessage ?? "none"}</p>
+          <p>selectedPhotos before: {diagnostic?.selectedPhotosBefore ?? selectedPhotosCount}</p>
+          <p>selectedPhotos after: {diagnostic?.selectedPhotosAfter ?? selectedPhotosCount}</p>
+          <p>IndexedDB: {diagnostic?.indexedDbResult ?? "not_started"}</p>
+          <details className="mt-2 rounded-[12px] bg-white/10 p-2" open={hasFailure}>
+            <summary className="cursor-pointer font-black">Technical details</summary>
+            <div className="mt-2">
+              <p>exception.name: {indexedDb?.exceptionName ?? "unknown"}</p>
+              <p>exception.message: {indexedDb?.exceptionMessage ?? "unknown"}</p>
+              <p className="break-words">exception.stack: {indexedDb?.exceptionStack ?? "none"}</p>
+              <p>DOMException.code: {indexedDb?.domExceptionCode ?? "unknown"}</p>
+              <p>transaction mode: {indexedDb?.transactionMode ?? "unknown"}</p>
+              <p>database: {indexedDb?.databaseName ?? "unknown"}</p>
+              <p>object store: {indexedDb?.objectStoreName ?? "unknown"}</p>
+              <p>key: {indexedDb?.key ?? "unknown"}</p>
+              <p>blob: {indexedDb ? `${indexedDb.blobType || "unknown"} · ${indexedDb.blobSize} bytes` : "unknown"}</p>
+              <p>openDB succeeded: {indexedDb ? String(indexedDb.openDbSucceeded) : "unknown"}</p>
+              <p>transaction started: {indexedDb ? String(indexedDb.transactionStarted) : "unknown"}</p>
+              <p>put reached: {indexedDb ? String(indexedDb.putReached) : "unknown"}</p>
+              <p>onabort fired: {indexedDb ? String(indexedDb.transactionOnAbortFired) : "unknown"}</p>
+              <p>transaction.error: {indexedDb?.transactionError?.message ?? indexedDb?.transactionError?.name ?? "none"}</p>
+              <p>request.error: {indexedDb?.requestError?.message ?? indexedDb?.requestError?.name ?? "none"}</p>
+              <p>db.version: {indexedDb?.dbVersion ?? "unknown"}</p>
+              <p>object store exists: {indexedDb?.objectStoreExists == null ? "unknown" : String(indexedDb.objectStoreExists)}</p>
+            </div>
+          </details>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function MultiPhotoPicker({
@@ -359,7 +444,7 @@ export function MultiPhotoPicker({
 
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-[#1c1c1e]/20 px-4 pb-4 backdrop-blur-[2px] sm:items-center sm:pb-0">
-      <div role="dialog" aria-modal="true" className="w-full max-w-[390px] rounded-[28px] bg-[#fffaf3] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]">
+      <div role="dialog" aria-modal="true" className="max-h-[92dvh] w-full max-w-[390px] overflow-y-auto rounded-[28px] bg-[#fffaf3] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="font-rounded text-2xl font-extrabold text-ink">{title}</h2>
           <button type="button" onClick={onCancel} aria-label={t("settings.close")} className="flex size-11 items-center justify-center rounded-2xl bg-white text-[#7d776b]">
@@ -402,41 +487,7 @@ export function MultiPhotoPicker({
             {t("addPlant.chooseGallery")}
           </button>
           {error ? <p className="whitespace-pre-line rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{error}</p> : null}
-          {debugEnabled ? (
-            <div className="rounded-[18px] bg-[#1f2937] p-3 text-left text-[11px] font-bold leading-5 text-white">
-              <p className="font-black">PHOTO PICKER DEBUG ON</p>
-              <p>event fired: {diagnostic ? "yes" : "no"}</p>
-              <p>source: {diagnostic?.source ?? "none"}</p>
-              <p>files received: {diagnostic?.filesReceived ?? 0}</p>
-              <p>accepted: {diagnostic?.accepted ?? 0}</p>
-              <p>rejected: {diagnostic?.rejected ?? 0}</p>
-              <p>failure stage: {diagnostic?.failureStage ?? "none"}</p>
-              <p>message: {diagnostic?.failureMessage ?? "none"}</p>
-              <p>selectedPhotos before: {diagnostic?.selectedPhotosBefore ?? selectedPhotosCount}</p>
-              <p>selectedPhotos after: {diagnostic?.selectedPhotosAfter ?? "unknown"}</p>
-              <p>IndexedDB: {diagnostic?.indexedDbResult ?? "not_started"}</p>
-              <p>exception.name: {diagnostic?.indexedDb?.exceptionName ?? "unknown"}</p>
-              <p>exception.message: {diagnostic?.indexedDb?.exceptionMessage ?? "unknown"}</p>
-              <p className="break-words">exception.stack: {diagnostic?.indexedDb?.exceptionStack ?? "none"}</p>
-              <p>DOMException.code: {diagnostic?.indexedDb?.domExceptionCode ?? "unknown"}</p>
-              <p>transaction mode: {diagnostic?.indexedDb?.transactionMode ?? "unknown"}</p>
-              <p>database: {diagnostic?.indexedDb?.databaseName ?? "unknown"}</p>
-              <p>object store: {diagnostic?.indexedDb?.objectStoreName ?? "unknown"}</p>
-              <p>key: {diagnostic?.indexedDb?.key ?? "unknown"}</p>
-              <p>blob: {diagnostic?.indexedDb ? `${diagnostic.indexedDb.blobType || "unknown"} · ${diagnostic.indexedDb.blobSize} bytes` : "unknown"}</p>
-              <p>openDB succeeded: {diagnostic?.indexedDb ? String(diagnostic.indexedDb.openDbSucceeded) : "unknown"}</p>
-              <p>transaction started: {diagnostic?.indexedDb ? String(diagnostic.indexedDb.transactionStarted) : "unknown"}</p>
-              <p>put reached: {diagnostic?.indexedDb ? String(diagnostic.indexedDb.putReached) : "unknown"}</p>
-              <p>onabort fired: {diagnostic?.indexedDb ? String(diagnostic.indexedDb.transactionOnAbortFired) : "unknown"}</p>
-              <p>transaction.error: {diagnostic?.indexedDb?.transactionError?.message ?? diagnostic?.indexedDb?.transactionError?.name ?? "none"}</p>
-              <p>request.error: {diagnostic?.indexedDb?.requestError?.message ?? diagnostic?.indexedDb?.requestError?.name ?? "none"}</p>
-              <p>db.version: {diagnostic?.indexedDb?.dbVersion ?? "unknown"}</p>
-              <p>object store exists: {diagnostic?.indexedDb?.objectStoreExists == null ? "unknown" : String(diagnostic.indexedDb.objectStoreExists)}</p>
-              <button type="button" onClick={copyDiagnostic} className="mt-2 min-h-9 rounded-[12px] bg-white px-3 text-xs font-black text-[#1f2937]">
-                Copy diagnostic
-              </button>
-            </div>
-          ) : null}
+          {debugEnabled ? <PhotoPickerDebugPanel diagnostic={diagnostic} selectedPhotosCount={selectedPhotosCount} onCopy={copyDiagnostic} /> : null}
           <button type="button" onClick={onCancel} className="min-h-12 rounded-[18px] px-4 text-sm font-extrabold text-[#777167]">
             {t("plantDetail.cancel")}
           </button>
