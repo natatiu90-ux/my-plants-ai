@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import convertHeic from "heic-convert";
 import sharp from "sharp";
+import { selectSpeciesCareProfile, speciesProfilesPromptContext, speciesTraitsForAnalysis } from "@/lib/species-profiles";
 
 export const runtime = "nodejs";
 
@@ -54,6 +55,41 @@ type AnalyzeTraceEvent = {
   at: string;
   data?: Record<string, unknown>;
 };
+
+type AnalysisHypothesisPayload = {
+  type?: string;
+  confidence?: number;
+  canUserAnswerChangeRecommendation?: boolean;
+  clarificationQuestion?: unknown;
+};
+
+type AnalysisPayload = {
+  detectedSpecies?: unknown;
+  commonName?: unknown;
+  scientificName?: unknown;
+  condition?: unknown;
+  recommendations?: { type?: string; priority?: string; en?: string; ru?: string }[];
+  careRightNow?: { type?: string; priority?: string; action?: { en?: string; ru?: string }; reason?: { en?: string; ru?: string } }[];
+  aboutSpecies?: { bullets?: unknown } | null;
+  clarificationQuestions?: { hypothesis?: string }[];
+  alternativeCauses?: unknown[];
+  hypotheses?: AnalysisHypothesisPayload[];
+  speciesReasoning?: unknown;
+};
+
+const localizedStringSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: { en: { type: "string" }, ru: { type: "string" } },
+  required: ["en", "ru"]
+} as const;
+
+const localizedNullableStringSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: { en: { type: ["string", "null"] }, ru: { type: ["string", "null"] } },
+  required: ["en", "ru"]
+} as const;
 
 function traceEvent(trace: AnalyzeTraceEvent[], stage: string, data?: Record<string, unknown>) {
   const event = { stage, at: new Date().toISOString(), ...(data ? { data } : {}) };
@@ -142,6 +178,107 @@ const schema = {
           required: ["type", "priority", "en", "ru"]
         }
       },
+      careRightNow: {
+        type: "array",
+        maxItems: 3,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            type: { type: "string", enum: ["watering", "light", "location", "humidity", "repotting", "monitoring", "inspection", "none", "other"] },
+            priority: { type: "string", enum: ["low", "medium", "high"] },
+            action: localizedStringSchema,
+            reason: localizedStringSchema
+          },
+          required: ["type", "priority", "action", "reason"]
+        }
+      },
+      aboutSpecies: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          profileId: { type: ["string", "null"] },
+          displayName: { type: ["string", "null"] },
+          preferredLight: localizedStringSchema,
+          wateringPattern: localizedStringSchema,
+          humidity: localizedStringSchema,
+          temperature: localizedStringSchema,
+          growthBehavior: localizedStringSchema,
+          commonMistakes: { type: "array", maxItems: 3, items: localizedStringSchema },
+          normalBehaviors: { type: "array", maxItems: 3, items: localizedStringSchema },
+          warningSigns: { type: "array", maxItems: 3, items: localizedStringSchema },
+          beginnerTips: { type: "array", maxItems: 3, items: localizedStringSchema },
+          bullets: { type: "array", maxItems: 6, items: localizedStringSchema }
+        },
+        required: [
+          "profileId",
+          "displayName",
+          "preferredLight",
+          "wateringPattern",
+          "humidity",
+          "temperature",
+          "growthBehavior",
+          "commonMistakes",
+          "normalBehaviors",
+          "warningSigns",
+          "beginnerTips",
+          "bullets"
+        ]
+      },
+      clarificationQuestions: {
+        type: "array",
+        maxItems: 2,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            hypothesis: { type: "string", enum: ["soil_condition", "repotting", "root_condition", "drainage", "direct_sun", "pests"] },
+            question: localizedNullableStringSchema,
+            options: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  label: localizedNullableStringSchema,
+                  status: { type: "string", enum: ["confirmed", "ruled_out", "unknown"] },
+                  result: { type: "string" }
+                },
+                required: ["label", "status", "result"]
+              }
+            },
+            reasonForAsking: localizedNullableStringSchema,
+            expectedImpact: localizedStringSchema
+          },
+          required: ["hypothesis", "question", "options", "reasonForAsking", "expectedImpact"]
+        }
+      },
+      reasoning: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          currentSituation: localizedStringSchema,
+          speciesTraitsApplied: { type: "array", maxItems: 4, items: localizedStringSchema },
+          diagnosisLogic: localizedStringSchema,
+          whyThisMatters: localizedStringSchema
+        },
+        required: ["currentSituation", "speciesTraitsApplied", "diagnosisLogic", "whyThisMatters"]
+      },
+      alternativeCauses: {
+        type: "array",
+        maxItems: 3,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            hypothesis: { type: ["string", "null"], enum: ["soil_condition", "repotting", "root_condition", "drainage", "direct_sun", "pests", null] },
+            confidence: { type: "string", enum: ["low", "medium"] },
+            explanation: localizedStringSchema,
+            whyLowerPriority: localizedStringSchema
+          },
+          required: ["hypothesis", "confidence", "explanation", "whyLowerPriority"]
+        }
+      },
       hypotheses: {
         type: "array",
         items: {
@@ -217,6 +354,11 @@ const schema = {
       "nextAction",
       "nextCheckInDays",
       "recommendations",
+      "careRightNow",
+      "aboutSpecies",
+      "clarificationQuestions",
+      "reasoning",
+      "alternativeCauses",
       "hypotheses",
       "uncertainties"
     ]
@@ -336,6 +478,85 @@ function diagnosticResponse(message: string, status = 400, diagnostics?: ImageDi
   );
 }
 
+function hasClarificationQuestion(hypothesis: AnalysisHypothesisPayload) {
+  return Boolean(hypothesis.clarificationQuestion && typeof hypothesis.clarificationQuestion === "object");
+}
+
+function applySpeciesAwareQuestionLimits(analysis: AnalysisPayload) {
+  const profile = selectSpeciesCareProfile({
+    detectedSpecies: analysis.detectedSpecies,
+    scientificName: analysis.scientificName,
+    commonName: analysis.commonName
+  });
+  const selectedQuestions: string[] = [];
+  const removedQuestions: string[] = [];
+  const healthyAnalysis = analysis.condition === "healthy";
+
+  if (Array.isArray(analysis.hypotheses)) {
+    let keptQuestions = 0;
+
+    for (const hypothesis of analysis.hypotheses) {
+      if (!hasClarificationQuestion(hypothesis)) {
+        continue;
+      }
+
+      const confidence = typeof hypothesis.confidence === "number" ? hypothesis.confidence : 0;
+      const canChangeCare = hypothesis.canUserAnswerChangeRecommendation === true;
+      const canAsk =
+        canChangeCare &&
+        keptQuestions < 2 &&
+        confidence >= 0.45 &&
+        (!healthyAnalysis || confidence >= 0.75);
+
+      if (canAsk) {
+        keptQuestions += 1;
+        selectedQuestions.push(String(hypothesis.type ?? "unknown"));
+      } else {
+        removedQuestions.push(String(hypothesis.type ?? "unknown"));
+        hypothesis.clarificationQuestion = null;
+        hypothesis.canUserAnswerChangeRecommendation = false;
+      }
+    }
+  }
+
+  if (Array.isArray(analysis.careRightNow)) {
+    analysis.careRightNow = analysis.careRightNow.slice(0, 3);
+    analysis.recommendations = analysis.careRightNow.map((item) => ({
+      type: item.type,
+      priority: item.priority,
+      en: item.action?.en,
+      ru: item.action?.ru
+    }));
+  }
+
+  if (analysis.aboutSpecies && Array.isArray(analysis.aboutSpecies.bullets)) {
+    analysis.aboutSpecies.bullets = analysis.aboutSpecies.bullets.slice(0, 6);
+  }
+
+  if (Array.isArray(analysis.clarificationQuestions)) {
+    const selectedQuestionTypes = new Set(selectedQuestions);
+    analysis.clarificationQuestions = analysis.clarificationQuestions.filter((question) => selectedQuestionTypes.has(String(question.hypothesis))).slice(0, 2);
+  }
+
+  if (Array.isArray(analysis.alternativeCauses)) {
+    analysis.alternativeCauses = analysis.alternativeCauses.slice(0, 3);
+  }
+
+  analysis.speciesReasoning = {
+    profileId: profile?.id ?? "general_houseplant",
+    displayName: profile?.displayName ?? null,
+    traitsApplied: speciesTraitsForAnalysis(profile),
+    questionSelection: {
+      maxQuestions: 2,
+      selectedQuestions,
+      removedQuestions,
+      rule: "Questions must be species-relevant and able to change recommendation, urgency, action, or next check date."
+    }
+  };
+
+  return analysis;
+}
+
 function parseNumber(value: FormDataEntryValue | null) {
   if (typeof value !== "string" || !value) {
     return null;
@@ -370,6 +591,9 @@ export async function POST(request: Request) {
   traceEvent(trace, "form_data_read");
   const files = formData.getAll("photos").filter((value): value is File => value instanceof File);
   const locale = String(formData.get("locale") ?? "en");
+  const currentCommonName = String(formData.get("currentCommonName") ?? "");
+  const currentScientificName = String(formData.get("currentScientificName") ?? "");
+  const currentDetectedSpecies = String(formData.get("currentDetectedSpecies") ?? "");
   const photoTypes = formData.getAll("photoTypes").map(String);
   const photoSources = formData.getAll("photoSources").map(String);
   const clientFileNames = formData.getAll("clientFileNames").map(String);
@@ -417,6 +641,7 @@ export async function POST(request: Request) {
   traceEvent(trace, "request_payload_parsed", {
     imageCount: files.length,
     locale,
+    hasCurrentPlantContext: Boolean(currentCommonName || currentScientificName || currentDetectedSpecies),
     photoTypes,
     photoSources,
     files: diagnostics.map((diagnostic) => ({
@@ -540,6 +765,27 @@ export async function POST(request: Request) {
           "You are helping with houseplant care from user-provided photos.",
           "Return only cautious, advisory plant-care analysis.",
           "When possible, provide commonName as a short human-readable plant name in English and Russian, and scientificName as Latin botanical name only.",
+          "First identify the likely species, then reason from that plant's actual biology instead of applying a universal houseplant checklist.",
+          "Use the structured species profiles below as decision support. They are not encyclopedia text for the user; use them to rank hypotheses, choose actions, and decide which questions are worth asking.",
+          "Never output generic plant encyclopedia facts. Every species fact shown to the user must connect to this plant's current photos, current diagnosis, current action, or previous user answers.",
+          "Return the new recommendation model as independent sections: careRightNow, aboutSpecies, clarificationQuestions, reasoning, and alternativeCauses.",
+          "careRightNow is only for what the user should do now in the current state. Maximum 3 short actionable items. Do not include generic species facts there.",
+          "aboutSpecies is not a general species profile. It is a compact set of contextual teaching points for this exact plant. Include up to 6 concise bullets, and each bullet must help the owner make a decision about this plant now.",
+          "Bad aboutSpecies bullet: 'Monstera likes indirect light.' Good: 'Because your Monstera already shows slightly dry edges, avoid direct afternoon sun.'",
+          "Bad aboutSpecies bullet: 'Succulents tolerate drought.' Good: 'Since the soil is still moist, waiting before watering is the safest option for this succulent.'",
+          "clarificationQuestions must be derived after species reasoning, not before it. They should mirror the useful clarification questions in hypotheses.",
+          "reasoning explains how the current situation and species biology led to the recommendation. Keep it concise and useful.",
+          "alternativeCauses should include only plausible lower-priority possibilities, not a long generic differential list.",
+          "Species-aware question rule: every clarification question must be both relevant for this species and able to change the recommendation, urgency, current action, or next check date.",
+          "Ask at most two clarification questions. Choose the questions with the highest expected care impact. Do not ask generic pests, drainage, roots, sun, or soil questions just because they are possible.",
+          "Question copy should briefly teach why the question matters for this plant when helpful, not simply collect a raw fact.",
+          "Recommendations should explain why the advice matters for the species. For example, dry soil is often normal for succulents, but more important for moisture-loving plants.",
+          "For succulents and cacti, do not ask whether the soil is dry as a problem by itself. Prefer asking whether the soil stays wet for several days after watering when moisture risk matters.",
+          "For Calathea or prayer plants, prioritize humidity, water quality, and direct sunlight before pests unless pests are visually suggested.",
+          "For Monstera, explain dry tips or scorch through bright-indirect-light needs when the photo supports light stress; do not translate 'likes bright light' into harsh direct sun.",
+          "Do not repeat species descriptions unless the trait directly supports the current recommendation for this plant.",
+          "If a species trait does not change what the owner should do, watch, avoid, or ask next for this plant, omit it.",
+          "Keep legacy recommendations aligned with careRightNow. Do not put aboutSpecies facts into legacy recommendations.",
           "Separate visible observations from cautious inferences and user actions needed to verify.",
           "Create hypothesis-driven clarification data for these canonical hypothesis types only: soil_condition, repotting, root_condition, drainage, direct_sun, pests.",
           "Healthy-looking plants should have a positive status and no pest, repotting, drainage, root, or soil question unless there is concrete visual evidence that the answer would change the recommendation.",
@@ -551,7 +797,9 @@ export async function POST(request: Request) {
           "Pay attention to photo types: overview for overall form/light response, leaf close-up for pests/damage, pot/soil for soil-zone clues, roots only for root observations, problem for visible damage.",
           "Do not claim measured soil moisture, root health when roots are not visible, pests that are not clearly visible, or exact disease diagnoses without sufficient visual evidence.",
           "For watering, prefer nextAction check_soil over water unless dry soil is directly visible or user-provided context confirms dryness.",
-          `User locale: ${locale}. Photo types in order: ${photoTypes.join(", ") || "unknown"}.`
+          `User locale: ${locale}. Photo types in order: ${photoTypes.join(", ") || "unknown"}.`,
+          `Current plant context, if this is a follow-up photo analysis: commonName="${currentCommonName || "unknown"}", scientificName="${currentScientificName || "unknown"}", detectedSpecies="${currentDetectedSpecies || "unknown"}".`,
+          `Species care profiles: ${speciesProfilesPromptContext()}`
         ].join("\n")
       },
       ...optimizedImages.map((image) => ({ type: "input_image", image_url: image.dataUrl }))
@@ -626,10 +874,22 @@ export async function POST(request: Request) {
       schemaName: schema.name,
       strict: schema.strict
     });
+    failureStage = "species_reasoning_postprocess";
+    const speciesAwareAnalysis = applySpeciesAwareQuestionLimits(analysis);
+    traceEvent(trace, "species_reasoning_postprocess_completed", {
+      profileId:
+        typeof speciesAwareAnalysis.speciesReasoning === "object" && speciesAwareAnalysis.speciesReasoning && "profileId" in speciesAwareAnalysis.speciesReasoning
+          ? (speciesAwareAnalysis.speciesReasoning as { profileId?: unknown }).profileId
+          : null,
+      selectedQuestions:
+        typeof speciesAwareAnalysis.speciesReasoning === "object" && speciesAwareAnalysis.speciesReasoning && "questionSelection" in speciesAwareAnalysis.speciesReasoning
+          ? (speciesAwareAnalysis.speciesReasoning as { questionSelection?: { selectedQuestions?: unknown } }).questionSelection?.selectedQuestions ?? null
+          : null
+    });
 
     return NextResponse.json({
       ok: true,
-      analysis,
+      analysis: speciesAwareAnalysis,
       model: response.model ?? model,
       trace,
       ...(process.env.NODE_ENV !== "production" ? { diagnostics } : {})

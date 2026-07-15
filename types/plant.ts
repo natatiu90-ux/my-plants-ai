@@ -85,6 +85,45 @@ export interface PlantAnalysisRecord {
   rawResult?: {
     visibleObservations?: { en?: string; ru?: string }[];
     uncertainties?: { en?: string; ru?: string }[];
+    careRightNow?: {
+      type?: string;
+      priority?: string;
+      action?: { en?: string; ru?: string };
+      reason?: { en?: string; ru?: string };
+    }[];
+    aboutSpecies?: {
+      profileId?: string | null;
+      displayName?: string | null;
+      preferredLight?: { en?: string; ru?: string };
+      wateringPattern?: { en?: string; ru?: string };
+      humidity?: { en?: string; ru?: string };
+      temperature?: { en?: string; ru?: string };
+      growthBehavior?: { en?: string; ru?: string };
+      commonMistakes?: { en?: string; ru?: string }[];
+      normalBehaviors?: { en?: string; ru?: string }[];
+      warningSigns?: { en?: string; ru?: string }[];
+      beginnerTips?: { en?: string; ru?: string }[];
+      bullets?: { en?: string; ru?: string }[];
+    };
+    clarificationQuestions?: {
+      hypothesis?: PlantHypothesis;
+      question?: { en?: string | null; ru?: string | null };
+      options?: { label?: { en?: string | null; ru?: string | null }; status?: PlantHypothesisStatus; result?: string }[];
+      reasonForAsking?: { en?: string | null; ru?: string | null };
+      expectedImpact?: { en?: string; ru?: string };
+    }[];
+    reasoning?: {
+      currentSituation?: { en?: string; ru?: string };
+      speciesTraitsApplied?: { en?: string; ru?: string }[];
+      diagnosisLogic?: { en?: string; ru?: string };
+      whyThisMatters?: { en?: string; ru?: string };
+    };
+    alternativeCauses?: {
+      hypothesis?: PlantHypothesis | null;
+      confidence?: "low" | "medium";
+      explanation?: { en?: string; ru?: string };
+      whyLowerPriority?: { en?: string; ru?: string };
+    }[];
     hypotheses?: {
       type?: PlantHypothesis;
       status?: "supported" | "possible" | "unlikely" | "resolved";
@@ -98,6 +137,17 @@ export interface PlantAnalysisRecord {
         reasonForAsking?: { en?: string | null; ru?: string | null };
       };
     }[];
+    speciesReasoning?: {
+      profileId?: string;
+      displayName?: string | null;
+      traitsApplied?: string[];
+      questionSelection?: {
+        maxQuestions?: number;
+        selectedQuestions?: string[];
+        removedQuestions?: string[];
+        rule?: string;
+      };
+    };
     photoComparison?: {
       analyzedPhotoIds?: string[];
       analysisTimestamp?: string;

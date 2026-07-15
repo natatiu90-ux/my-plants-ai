@@ -246,6 +246,9 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         formData.append("clientDebugIds", photo.debugId ?? photo.id);
       }
       formData.append("locale", locale);
+      formData.append("currentCommonName", plant.speciesName ?? "");
+      formData.append("currentScientificName", plant.scientificName ?? "");
+      formData.append("currentDetectedSpecies", [plant.speciesName, plant.scientificName].filter(Boolean).join(" "));
 
       const response = await fetch("/api/analyze-plant", { method: "POST", body: formData });
       const payload = await response.json().catch(() => null);

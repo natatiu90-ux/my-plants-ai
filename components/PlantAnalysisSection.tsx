@@ -26,6 +26,11 @@ type StructuredHypothesis = {
   status?: "supported" | "possible" | "unlikely" | "resolved";
   confidence?: number;
   canUserAnswerChangeRecommendation?: boolean;
+  clarificationQuestion?: {
+    question?: { en?: string | null; ru?: string | null };
+    options?: { label?: { en?: string | null; ru?: string | null }; status?: PlantHypothesisStatus; result?: string }[];
+    reasonForAsking?: { en?: string | null; ru?: string | null };
+  } | null;
 };
 
 type RecommendationDensity = "healthy" | "minor" | "serious";
@@ -202,7 +207,35 @@ function structuredStatus(hypothesis: StructuredHypothesis | undefined, fallback
 }
 
 function canAskStructuredQuestion(hypothesis: StructuredHypothesis | undefined, threshold: number) {
-  return Boolean(hypothesis?.canUserAnswerChangeRecommendation && typeof hypothesis.confidence === "number" && hypothesis.confidence >= threshold);
+  return Boolean(
+    hypothesis?.canUserAnswerChangeRecommendation &&
+      typeof hypothesis.confidence === "number" &&
+      hypothesis.confidence >= threshold &&
+      hypothesis.clarificationQuestion?.question &&
+      hypothesis.clarificationQuestion.options?.length
+  );
+}
+
+function structuredFollowUp(hypothesis: StructuredHypothesis | undefined, locale: "en" | "ru"): FollowUpView | null {
+  if (!hypothesis?.type || !hypothesis.clarificationQuestion) return null;
+  const question = localized(hypothesis.clarificationQuestion.question, locale);
+  const reason = localized(hypothesis.clarificationQuestion.reasonForAsking, locale);
+  const options =
+    hypothesis.clarificationQuestion.options
+      ?.map((option) => ({
+        label: localized(option.label, locale),
+        status: option.status,
+        result: option.result
+      }))
+      .filter((option): option is { label: string; status: PlantHypothesisStatus; result: string } => Boolean(option.label && option.status && option.result)) ?? [];
+
+  if (!question || !options.length) return null;
+  return {
+    hypothesis: hypothesis.type,
+    question,
+    reason,
+    options
+  };
 }
 
 function recommendationDensity(analysis: PlantAnalysisRecord, activeHypotheses: HypothesisView[], followUpNeeded: boolean): RecommendationDensity {
@@ -364,40 +397,40 @@ export function PlantAnalysisSection({
     const needsSoilQuestion = !wateringResolution && !soilCheckedToday && (structuredQuestionsEnabled ? canAskStructuredQuestion(structuredSoil, 0.45) : plant.nextAction === "check_soil" || plant.nextAction === "water" || wateringMentioned);
     const needsDrainageQuestion = !drainageResolution && (structuredQuestionsEnabled ? canAskStructuredQuestion(structuredDrainage, 0.45) : drainageMentioned && (wateringMentioned || plant.nextAction === "check_soil" || plant.nextAction === "water"));
     const followUp: FollowUpView | null = !pestsResolution && (structuredQuestionsEnabled ? canAskStructuredQuestion(structuredPests, 0.55) : pestMentioned)
-      ? { hypothesis: "pests" as const, question: t("plantAnalysis.questionPests"), reason: t("plantAnalysis.questionReasonPests"), options: [
+      ? structuredFollowUp(structuredPests, locale) ?? { hypothesis: "pests" as const, question: t("plantAnalysis.questionPests"), reason: t("plantAnalysis.questionReasonPests"), options: [
           { label: t("plantAnalysis.answerYes"), status: "confirmed" as const, result: "yes" },
           { label: t("plantAnalysis.answerNo"), status: "ruled_out" as const, result: "no" },
           { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
         ] }
       : !sunResolution && (structuredQuestionsEnabled ? canAskStructuredQuestion(structuredSun, 0.55) : sunMentioned)
-        ? { hypothesis: "direct_sun" as const, question: t("plantAnalysis.questionSun"), reason: t("plantAnalysis.questionReasonSun"), options: [
+        ? structuredFollowUp(structuredSun, locale) ?? { hypothesis: "direct_sun" as const, question: t("plantAnalysis.questionSun"), reason: t("plantAnalysis.questionReasonSun"), options: [
             { label: t("plantAnalysis.answerYes"), status: "confirmed" as const, result: "yes" },
             { label: t("plantAnalysis.answerNo"), status: "ruled_out" as const, result: "no" },
             { label: t("plantAnalysis.answerSometimes"), status: "confirmed" as const, result: "sometimes" },
             { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
           ] }
         : needsSoilQuestion
-          ? { hypothesis: "soil_condition" as const, question: t("plantAnalysis.questionSoil"), reason: t("plantAnalysis.questionReasonSoil"), options: [
+          ? structuredFollowUp(structuredSoil, locale) ?? { hypothesis: "soil_condition" as const, question: t("plantAnalysis.questionSoil"), reason: t("plantAnalysis.questionReasonSoil"), options: [
               { label: t("plantAnalysis.answerSoilDry"), status: "confirmed" as const, result: "dry" },
               { label: t("plantAnalysis.answerSoilSlightlyDamp"), status: "ruled_out" as const, result: "slightly_damp" },
               { label: t("plantAnalysis.answerSoilVeryWet"), status: "confirmed" as const, result: "very_wet" },
               { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
             ] }
           : wasRepottedRecently && !rootResolution && (structuredQuestionsEnabled ? canAskStructuredQuestion(structuredRoots, 0.55) : rootMentioned)
-            ? { hypothesis: "root_condition" as const, question: t("plantAnalysis.questionRoots"), reason: t("plantAnalysis.questionReasonRoots"), options: [
+            ? structuredFollowUp(structuredRoots, locale) ?? { hypothesis: "root_condition" as const, question: t("plantAnalysis.questionRoots"), reason: t("plantAnalysis.questionReasonRoots"), options: [
                 { label: t("plantAnalysis.answerRootsHealthy"), status: "ruled_out" as const, result: "healthy" },
                 { label: t("plantAnalysis.answerRootsProblem"), status: "confirmed" as const, result: "dark_or_soft" },
                 { label: t("plantAnalysis.answerRootsNotChecked"), status: "unknown" as const, result: "not_checked" },
                 { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
               ] }
             : !wasRepottedRecently && !oldSoilResolution && (structuredQuestionsEnabled ? canAskStructuredQuestion(structuredRepotting, 0.55) : oldSoilMentioned)
-              ? { hypothesis: "repotting" as const, question: t("plantAnalysis.questionRepot"), reason: t("plantAnalysis.questionReasonRepot"), options: [
+              ? structuredFollowUp(structuredRepotting, locale) ?? { hypothesis: "repotting" as const, question: t("plantAnalysis.questionRepot"), reason: t("plantAnalysis.questionReasonRepot"), options: [
                   { label: t("plantAnalysis.answerRecently"), status: "ruled_out" as const, result: "recently" },
                   { label: t("plantAnalysis.answerLongAgo"), status: "confirmed" as const, result: "long_ago" },
                   { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
                 ] }
               : needsDrainageQuestion
-                ? { hypothesis: "drainage" as const, question: t("plantAnalysis.questionDrainage"), reason: t("plantAnalysis.questionReasonDrainage"), options: [
+                ? structuredFollowUp(structuredDrainage, locale) ?? { hypothesis: "drainage" as const, question: t("plantAnalysis.questionDrainage"), reason: t("plantAnalysis.questionReasonDrainage"), options: [
                     { label: t("plantAnalysis.answerYes"), status: "ruled_out" as const, result: "yes" },
                     { label: t("plantAnalysis.answerNo"), status: "confirmed" as const, result: "no" },
                     { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
