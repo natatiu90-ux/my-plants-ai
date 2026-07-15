@@ -6,7 +6,7 @@ import { Loader2 } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
 import { appBuildStorageKey, appBuildVersion, isStandalonePwa } from "@/lib/app-version";
-import { inspectImageDisplay, readJpegExifOrientation } from "@/lib/client-image-normalization";
+import { inspectImageDisplay, normalizeImageBlob, readJpegExifOrientation } from "@/lib/client-image-normalization";
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
 import { plantCreationDiagnosticFromError, type PlantCreationDiagnostic, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
@@ -83,9 +83,9 @@ type ClientImagePreparationDiagnostic = {
 };
 
 const analysisStageCount = 4;
-const analysisImageTargetBytes = 500 * 1024;
 const analysisRequestTargetBytes = 3 * 1024 * 1024;
-const maxSelectedPhotos = 5;
+const analysisCompressionQualities = [0.82, 0.78, 0.75, 0.7, 0.66, 0.62];
+const maxSelectedPhotos = 3;
 const plantSaveDebugStorageKey = "my_plants_debug_plant_save";
 const photoPickerDebugStorageKey = "my_plants_debug_photo_picker";
 const defaultNicknames = {
@@ -147,6 +147,13 @@ async function prepareImageForAnalysis(blob: Blob, fileName: string) {
   };
 }
 
+type PreparedAnalysisImage = Awaited<ReturnType<typeof prepareImageForAnalysis>>;
+
+async function prepareCompressedImageForAnalysis(blob: Blob, fileName: string, quality: number) {
+  const normalized = await normalizeImageBlob(blob, { maxSide: 1600, qualities: [quality] });
+  return prepareImageForAnalysis(normalized.blob, fileName);
+}
+
 export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -178,8 +185,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [showLongAnalysisHint, setShowLongAnalysisHint] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [analysisAttempt, setAnalysisAttempt] = useState(0);
+  const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
   const nicknameInputRef = useRef<HTMLInputElement>(null);
   const generatedNicknameRef = useRef<string | null>(null);
+  const analysisAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const debugParam = searchParams.get("debugPlantSave");
@@ -228,18 +237,22 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     await Promise.allSettled(photos.map((photo) => PhotoStorageRepository.deletePhoto(photo.storageId)));
   }, []);
 
-  const cancelAddPlant = useCallback(() => {
-    if (selectedPhotos.length) {
-      const shouldDiscard = window.confirm(t("addPlant.discardPhotosConfirm"));
-      if (!shouldDiscard) {
-        return;
-      }
-    }
-
+  const discardAddPlant = useCallback(() => {
+    analysisAbortRef.current?.abort();
     void cleanupTemporaryPhotos(selectedPhotos);
     setSelectedPhotos([]);
+    setIsCancelConfirmOpen(false);
     onClose();
-  }, [cleanupTemporaryPhotos, onClose, selectedPhotos, t]);
+  }, [cleanupTemporaryPhotos, onClose, selectedPhotos]);
+
+  const cancelAddPlant = useCallback(() => {
+    if (selectedPhotos.length) {
+      setIsCancelConfirmOpen(true);
+      return;
+    }
+
+    onClose();
+  }, [onClose, selectedPhotos.length]);
 
   const photoDuplicateKey = (photo: PendingPhotoUpload) => `${photo.originalName.trim().toLocaleLowerCase()}::${photo.originalType}::${photo.originalSize}`;
 
@@ -334,6 +347,8 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     }
 
     let isMounted = true;
+    const abortController = new AbortController();
+    analysisAbortRef.current = abortController;
     setAnalysisStageIndex(0);
     setShowLongAnalysisHint(false);
     setAnalysisErrorCode(null);
@@ -375,9 +390,20 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       try {
         const formData = new FormData();
         const nextPreparationDiagnostics: ClientImagePreparationDiagnostic[] = [];
+        const preparedItems: {
+          photo: PendingPhotoUpload;
+          blob: Blob;
+          fileName: string;
+          diagnostic: ClientImagePreparationDiagnostic;
+          preparedImage: PreparedAnalysisImage;
+        }[] = [];
         let totalOutgoingRequestSize = 0;
 
-        for (const photo of selectedPhotos.slice(0, 5)) {
+        for (const photo of selectedPhotos.slice(0, maxSelectedPhotos)) {
+          if (abortController.signal.aborted) {
+            throw new DOMException("Analysis cancelled", "AbortError");
+          }
+
           const blob = await PhotoStorageRepository.getPhoto(photo.storageId);
           if (blob) {
             const fileName = photo.originalName || `${photo.id}.${photo.originalExtension ?? "jpg"}`;
@@ -417,8 +443,17 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
 
             let preparedImage: Awaited<ReturnType<typeof prepareImageForAnalysis>>;
             try {
+              if (abortController.signal.aborted) {
+                throw new DOMException("Analysis cancelled", "AbortError");
+              }
               preparedImage = await prepareImageForAnalysis(blob, fileName);
+              if (abortController.signal.aborted) {
+                throw new DOMException("Analysis cancelled", "AbortError");
+              }
             } catch {
+              if (abortController.signal.aborted) {
+                throw new DOMException("Analysis cancelled", "AbortError");
+              }
               diagnostic.errorCode = "image_preparation_failed";
               diagnostic.errorName = "Error";
               diagnostic.errorMessage = "image_preparation_failed";
@@ -427,21 +462,6 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             }
 
             totalOutgoingRequestSize += preparedImage.file.size;
-            if (preparedImage.file.size > analysisImageTargetBytes || totalOutgoingRequestSize > analysisRequestTargetBytes) {
-              diagnostic.compressedSize = preparedImage.file.size;
-              diagnostic.originalWidth = preparedImage.originalWidth;
-              diagnostic.originalHeight = preparedImage.originalHeight;
-              diagnostic.finalWidth = preparedImage.finalWidth;
-              diagnostic.finalHeight = preparedImage.finalHeight;
-              diagnostic.exifOrientation = preparedImage.exifOrientation;
-              diagnostic.totalOutgoingRequestSize = totalOutgoingRequestSize;
-              diagnostic.errorCode = "image_preparation_failed";
-              diagnostic.errorName = "Error";
-              diagnostic.errorMessage = "image_preparation_failed";
-              setClientPreparationDiagnostics(nextPreparationDiagnostics);
-              throw new Error("image_preparation_failed");
-            }
-
             diagnostic.compressedSize = preparedImage.file.size;
             diagnostic.originalWidth = preparedImage.originalWidth;
             diagnostic.originalHeight = preparedImage.originalHeight;
@@ -450,39 +470,96 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             diagnostic.exifOrientation = preparedImage.exifOrientation;
             diagnostic.orientationSource = preparedImage.orientationSource;
             diagnostic.physicallyRotated = preparedImage.physicallyRotated;
-            diagnostic.includedInRequest = true;
-            logAddPlantDebug("photo_orientation_stage", {
-              stage: "formdata_openai_upload",
-              debugId: photo.debugId,
-              source: photo.source,
-              fileName: preparedImage.file.name,
-              mimeType: preparedImage.file.type,
-              byteSize: preparedImage.file.size,
-              width: preparedImage.finalWidth,
-              height: preparedImage.finalHeight,
-              exifOrientation: preparedImage.exifOrientation,
-              orientationSource: preparedImage.orientationSource,
-              physicallyRotated: preparedImage.physicallyRotated,
-              displayedInUi: `${preparedImage.finalWidth}x${preparedImage.finalHeight}`
-            });
-            formData.append("photos", preparedImage.file, preparedImage.file.name);
-            formData.append("photoTypes", photo.type);
-            formData.append("photoSources", photo.source);
-            formData.append("clientFileNames", photo.originalName);
-            formData.append("clientMimeTypes", preparedImage.file.type);
-            formData.append("clientExtensions", "jpg");
-            formData.append("clientByteSizes", String(preparedImage.file.size));
-            formData.append("clientDecodeSucceeded", "true");
-            formData.append("clientWidths", String(preparedImage.finalWidth));
-            formData.append("clientHeights", String(preparedImage.finalHeight));
-            formData.append("clientExifOrientations", String(preparedImage.exifOrientation ?? ""));
-            formData.append("clientPhysicallyRotated", String(preparedImage.physicallyRotated));
-            formData.append("clientOrientationSources", preparedImage.orientationSource);
-            if (photo.debugId) {
-              formData.append("clientDebugIds", photo.debugId);
-            }
+            preparedItems.push({ photo, blob, fileName, diagnostic, preparedImage });
           }
         }
+
+        if (totalOutgoingRequestSize > analysisRequestTargetBytes) {
+          let adaptiveItems = preparedItems;
+          let adaptiveTotalSize = totalOutgoingRequestSize;
+
+          for (const quality of analysisCompressionQualities.slice(1)) {
+            if (abortController.signal.aborted) {
+              throw new DOMException("Analysis cancelled", "AbortError");
+            }
+
+            const nextItems: typeof preparedItems = [];
+            let nextTotalSize = 0;
+            for (const item of preparedItems) {
+              if (abortController.signal.aborted) {
+                throw new DOMException("Analysis cancelled", "AbortError");
+              }
+
+              const preparedImage = await prepareCompressedImageForAnalysis(item.blob, item.fileName, quality);
+              nextTotalSize += preparedImage.file.size;
+              nextItems.push({ ...item, preparedImage });
+            }
+
+            adaptiveItems = nextItems;
+            adaptiveTotalSize = nextTotalSize;
+            if (nextTotalSize <= analysisRequestTargetBytes) {
+              break;
+            }
+          }
+
+          preparedItems.splice(0, preparedItems.length, ...adaptiveItems);
+          totalOutgoingRequestSize = adaptiveTotalSize;
+        }
+
+        if (totalOutgoingRequestSize > analysisRequestTargetBytes) {
+          nextPreparationDiagnostics.forEach((diagnostic) => {
+            diagnostic.totalOutgoingRequestSize = totalOutgoingRequestSize;
+            diagnostic.errorCode = "image_preparation_failed";
+            diagnostic.errorName = "Error";
+            diagnostic.errorMessage = "analysis_request_too_large";
+          });
+          setClientPreparationDiagnostics(nextPreparationDiagnostics);
+          throw new Error("image_preparation_failed");
+        }
+
+        for (const item of preparedItems) {
+          const { photo, diagnostic, preparedImage } = item;
+          diagnostic.compressedSize = preparedImage.file.size;
+          diagnostic.originalWidth = preparedImage.originalWidth;
+          diagnostic.originalHeight = preparedImage.originalHeight;
+          diagnostic.finalWidth = preparedImage.finalWidth;
+          diagnostic.finalHeight = preparedImage.finalHeight;
+          diagnostic.exifOrientation = preparedImage.exifOrientation;
+          diagnostic.orientationSource = preparedImage.orientationSource;
+          diagnostic.physicallyRotated = preparedImage.physicallyRotated;
+          diagnostic.includedInRequest = true;
+          logAddPlantDebug("photo_orientation_stage", {
+            stage: "formdata_openai_upload",
+            debugId: photo.debugId,
+            source: photo.source,
+            fileName: preparedImage.file.name,
+            mimeType: preparedImage.file.type,
+            byteSize: preparedImage.file.size,
+            width: preparedImage.finalWidth,
+            height: preparedImage.finalHeight,
+            exifOrientation: preparedImage.exifOrientation,
+            orientationSource: preparedImage.orientationSource,
+            physicallyRotated: preparedImage.physicallyRotated,
+            displayedInUi: `${preparedImage.finalWidth}x${preparedImage.finalHeight}`
+          });
+          formData.append("photos", preparedImage.file, preparedImage.file.name);
+          formData.append("photoTypes", photo.type);
+          formData.append("photoSources", photo.source);
+          formData.append("clientFileNames", photo.originalName);
+          formData.append("clientMimeTypes", preparedImage.file.type);
+          formData.append("clientExtensions", "jpg");
+          formData.append("clientByteSizes", String(preparedImage.file.size));
+          formData.append("clientDecodeSucceeded", "true");
+          formData.append("clientWidths", String(preparedImage.finalWidth));
+          formData.append("clientHeights", String(preparedImage.finalHeight));
+          formData.append("clientExifOrientations", String(preparedImage.exifOrientation ?? ""));
+          formData.append("clientPhysicallyRotated", String(preparedImage.physicallyRotated));
+          formData.append("clientOrientationSources", preparedImage.orientationSource);
+          if (photo.debugId) {
+            formData.append("clientDebugIds", photo.debugId);
+          }
+        }
+
         nextPreparationDiagnostics.forEach((diagnostic) => {
           diagnostic.totalOutgoingRequestSize = totalOutgoingRequestSize;
         });
@@ -496,7 +573,8 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         requestStartedAt = Date.now();
         const response = await fetch("/api/analyze-plant", {
           method: "POST",
-          body: formData
+          body: formData,
+          signal: abortController.signal
         });
         httpStatus = response.status;
         const payload = await response.json();
@@ -544,6 +622,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         setScientificName(nextScientificName);
         setHomeName((current) => current || ensureSuggestedNickname());
       } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
         if (isMounted) {
           setAnalysisFailed(true);
           setAnalysisFailureKind("technical");
@@ -568,8 +650,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       } finally {
         if (isMounted) {
           setHomeName((current) => current || ensureSuggestedNickname());
+          if (!abortController.signal.aborted) {
+            await finishAnalysisSheet();
+          }
         }
-        await finishAnalysisSheet();
       }
     }
 
@@ -577,8 +661,12 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
 
     return () => {
       isMounted = false;
+      abortController.abort();
       stageTimers.forEach((timer) => window.clearTimeout(timer));
       window.clearTimeout(longAnalysisTimer);
+      if (analysisAbortRef.current === abortController) {
+        analysisAbortRef.current = null;
+      }
     };
   }, [analysisAttempt, ensureSuggestedNickname, locale, selectedPhotos, step]);
 
@@ -595,7 +683,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   ) : null;
 
   const analysisStages = [
-    t("addPlant.uploadingPhotos"),
+    t("addPlant.preparingPhotos"),
     t("addPlant.identifying"),
     t("addPlant.checking"),
     t("addPlant.preparing")
@@ -609,6 +697,8 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         onSelect={appendSelectedPhotos}
         debugEnabled={isPhotoPickerDebugEnabled}
         selectedPhotosCount={selectedPhotos.length}
+        maxPhotos={maxSelectedPhotos}
+        limitMessage={t("addPlant.initialPhotoLimitMessage")}
         wizardStep={step}
         onDiagnostic={setPhotoPickerDiagnostic}
       />
@@ -623,6 +713,8 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         onSelect={appendSelectedPhotos}
         debugEnabled={isPhotoPickerDebugEnabled}
         selectedPhotosCount={selectedPhotos.length}
+        maxPhotos={maxSelectedPhotos}
+        limitMessage={t("addPlant.initialPhotoLimitMessage")}
         wizardStep={step}
         onDiagnostic={setPhotoPickerDiagnostic}
       />
@@ -660,6 +752,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       <div className="fixed inset-0 z-40 flex items-end justify-center bg-[#1c1c1e]/20 px-4 pb-4 backdrop-blur-[2px] sm:items-center sm:pb-0">
         <div role="status" aria-live="polite" className="w-full max-w-[390px] rounded-[28px] bg-[#fffaf3] p-6 shadow-[0_20px_60px_rgba(0,0,0,0.16)]">
           <h2 className="font-rounded text-2xl font-extrabold text-ink">{t("addPlant.analysisTitle")}</h2>
+          <p className="mt-2 text-sm font-bold leading-5 text-[#7a6f61]">{t("addPlant.photoCounter", { count: selectedPhotos.length, max: maxSelectedPhotos })}</p>
           <div className="mt-5 h-1 overflow-hidden rounded-full bg-[#e8ddce]" aria-hidden="true">
             <div className="analysis-progress-bar h-full w-1/2 rounded-full bg-[#7cab73]" />
           </div>
@@ -693,6 +786,16 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             })}
           </div>
           {showLongAnalysisHint ? <p className="mt-5 text-sm font-bold leading-5 text-[#7a6f61]">{t("addPlant.analysisLong")}</p> : null}
+          <button
+            type="button"
+            onClick={() => {
+              analysisAbortRef.current?.abort();
+              setStep("review");
+            }}
+            className="mt-5 min-h-12 w-full rounded-[18px] bg-white px-4 text-sm font-extrabold text-[#5f594f]"
+          >
+            {t("addPlant.cancelAnalysis")}
+          </button>
         </div>
       </div>
     );
@@ -925,6 +1028,19 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           {coverPhoto ? (
             <div className={step === "confirm" ? "relative mt-1 h-64 overflow-hidden rounded-[24px] bg-[#dde8dc]" : "relative mt-1 h-48 overflow-hidden rounded-[24px] bg-[#dde8dc]"}>
               <PhotoImage src={coverPhoto.url} alt={t("photos.photoAlt")} className="h-full w-full object-cover" />
+            </div>
+          ) : null}
+          {step === "confirm" ? (
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <button type="button" onClick={() => setStep("review")} className="min-h-10 rounded-[16px] bg-white/75 px-2 text-xs font-extrabold text-[#5f594f]">
+                {t("addPlant.backToPhotos")}
+              </button>
+              <button type="button" onClick={retryAnalysis} className="min-h-10 rounded-[16px] bg-[#ddf2dc] px-2 text-xs font-extrabold text-[#2d7a4f]">
+                {t("addPlant.retryAnalysis")}
+              </button>
+              <button type="button" onClick={cancelAddPlant} className="min-h-10 rounded-[16px] bg-[#fdeaf0] px-2 text-xs font-extrabold text-[#9b2c3e]">
+                {t("addPlant.cancelAdding")}
+              </button>
             </div>
           ) : null}
           {analysisFailed ? (
@@ -1214,6 +1330,22 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </div>
+      {isCancelConfirmOpen ? (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-[#1c1c1e]/25 px-4 pb-4 backdrop-blur-[2px] sm:items-center sm:pb-0">
+          <div role="dialog" aria-modal="true" className="w-full max-w-[390px] rounded-[28px] bg-[#fffaf3] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]">
+            <h2 className="font-rounded text-2xl font-extrabold text-ink">{t("addPlant.cancelAddTitle")}</h2>
+            <p className="mt-2 text-sm font-bold leading-5 text-[#6f675d]">{t("addPlant.cancelAddBody")}</p>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setIsCancelConfirmOpen(false)} className="min-h-12 rounded-[18px] bg-white px-4 text-sm font-extrabold text-[#5f594f]">
+                {t("addPlant.continueAdding")}
+              </button>
+              <button type="button" onClick={discardAddPlant} className="min-h-12 rounded-[18px] bg-[#fdeaf0] px-4 text-sm font-extrabold text-[#9b2c3e]">
+                {t("addPlant.cancelAdding")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {activePicker === "room" ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#1c1c1e]/20 px-4 pb-4 backdrop-blur-[2px] sm:items-center sm:pb-0">
           <div role="dialog" aria-modal="true" className="w-full max-w-[390px] rounded-[28px] bg-[#fffaf3] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]">

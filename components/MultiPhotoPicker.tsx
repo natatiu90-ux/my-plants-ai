@@ -5,6 +5,7 @@ import type { ChangeEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { normalizeImageBlob, readJpegExifOrientation } from "@/lib/client-image-normalization";
+import { selectFilesWithinPhotoLimit } from "@/lib/photo-selection-limits";
 import { IndexedDbPhotoStorageError, PhotoStorageRepository, validateImageFile, type IndexedDbPhotoStorageDiagnostic } from "@/lib/photo-storage";
 import type { PendingPhotoUpload } from "./photo-upload-types";
 
@@ -209,6 +210,8 @@ export function MultiPhotoPicker({
   onSelect,
   debugEnabled = false,
   selectedPhotosCount = 0,
+  maxPhotos,
+  limitMessage,
   wizardStep,
   onDiagnostic
 }: {
@@ -217,6 +220,8 @@ export function MultiPhotoPicker({
   onSelect: (photos: PendingPhotoUpload[], rejectedCount: number) => void;
   debugEnabled?: boolean;
   selectedPhotosCount?: number;
+  maxPhotos?: number;
+  limitMessage?: string;
   wizardStep?: string;
   onDiagnostic?: (diagnostic: PhotoPickerDiagnostic) => void;
 }) {
@@ -226,6 +231,8 @@ export function MultiPhotoPicker({
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [diagnostic, setDiagnostic] = useState<PhotoPickerDiagnostic | null>(null);
+  const remainingSlots = selectFilesWithinPhotoLimit([], selectedPhotosCount, maxPhotos).remainingSlots;
+  const isAtLimit = remainingSlots <= 0;
 
   const publishDiagnostic = (nextDiagnostic: PhotoPickerDiagnostic) => {
     setDiagnostic(nextDiagnostic);
@@ -273,19 +280,32 @@ export function MultiPhotoPicker({
 
     setIsSaving(true);
     const validFiles = selectedFiles.filter(validateImageFile);
-    let rejectedCount = selectedFiles.length - validFiles.length;
+    const limitResult = selectFilesWithinPhotoLimit(validFiles, selectedPhotosCount, maxPhotos);
+    const filesToProcess = limitResult.acceptedFiles;
+    let rejectedCount = selectedFiles.length - filesToProcess.length;
     let currentDiagnostic: PhotoPickerDiagnostic = {
       ...baseDiagnostic,
       rejected: rejectedCount,
-      files: baseDiagnostic.files.map((fileDiagnostic, index) => (validateImageFile(selectedFiles[index]) ? fileDiagnostic : { ...fileDiagnostic, status: "invalid" }))
+      files: baseDiagnostic.files.map((fileDiagnostic, index) => {
+        const isValid = validateImageFile(selectedFiles[index]);
+        const isOverLimit = isValid && !filesToProcess.includes(selectedFiles[index]);
+        return isValid && !isOverLimit ? fileDiagnostic : { ...fileDiagnostic, status: "invalid", failureStage: isOverLimit ? "photo_limit" : "validation" };
+      })
     };
     publishDiagnostic(currentDiagnostic);
 
     try {
-      const savedPhotoResults: (PendingPhotoUpload | null)[] = await Promise.all(
-        validFiles.map(async (file, index) => {
+      const savedPhotoResults: (PendingPhotoUpload | null)[] = [];
+      for (let index = 0; index < filesToProcess.length; index += 1) {
+          const file = filesToProcess[index];
           const debugId = createPhotoDebugId();
-          const [originalDecode, originalExifOrientation] = await Promise.all([inspectImageFile(file), readJpegExifOrientation(file)]);
+          const fileStartedAt = performance.now();
+          const decodeStartedAt = performance.now();
+          const originalDecode = await inspectImageFile(file);
+          const decodeDurationMs = Math.round(performance.now() - decodeStartedAt);
+          const exifStartedAt = performance.now();
+          const originalExifOrientation = await readJpegExifOrientation(file);
+          const exifDurationMs = Math.round(performance.now() - exifStartedAt);
           logPhotoStage("photos_picker_selected", {
             debugId,
             source,
@@ -306,12 +326,22 @@ export function MultiPhotoPicker({
               files: currentDiagnostic.files.map((item) => (item.name === file.name && item.size === file.size ? { ...item, status: "normalizing" } : item))
             };
             publishDiagnostic(currentDiagnostic);
-            normalized = await normalizeImageBlob(file, { maxSide: 1600, qualities: [0.82, 0.78, 0.75, 0.7, 0.66, 0.62], targetBytes: 500 * 1024 });
+            const normalizeStartedAt = performance.now();
+            normalized = await normalizeImageBlob(file, { maxSide: 1600, qualities: [0.82] });
+            const normalizeDurationMs = Math.round(performance.now() - normalizeStartedAt);
             currentDiagnostic = {
               ...currentDiagnostic,
               files: currentDiagnostic.files.map((item) => (item.name === file.name && item.size === file.size ? { ...item, status: "normalized" } : item))
             };
             publishDiagnostic(currentDiagnostic);
+            logPhotoStage("photo_processing_timing", {
+              debugId,
+              source,
+              fileName: file.name,
+              decodeMs: decodeDurationMs,
+              exifMs: exifDurationMs,
+              normalizeMs: normalizeDurationMs
+            });
           } catch (error) {
             rejectedCount += 1;
             const message = error instanceof Error ? error.message : "image_preparation_failed";
@@ -331,11 +361,19 @@ export function MultiPhotoPicker({
               fileName: file.name,
               message
             });
-            return null;
+            savedPhotoResults.push(null);
+            continue;
           }
 
+          const blobStartedAt = performance.now();
           const fileToStore = new File([normalized.blob], `${file.name.replace(/\.[^.]+$/, "") || "plant-photo"}.jpg`, { type: "image/jpeg" });
-          const [storedDecodeBeforeSave, storedExifOrientation] = await Promise.all([inspectImageFile(fileToStore), readJpegExifOrientation(fileToStore)]);
+          const blobCreationDurationMs = Math.round(performance.now() - blobStartedAt);
+          const storedDecodeStartedAt = performance.now();
+          const storedDecodeBeforeSave = await inspectImageFile(fileToStore);
+          const storedDecodeDurationMs = Math.round(performance.now() - storedDecodeStartedAt);
+          const storedExifStartedAt = performance.now();
+          const storedExifOrientation = await readJpegExifOrientation(fileToStore);
+          const storedExifDurationMs = Math.round(performance.now() - storedExifStartedAt);
           logPhotoStage("jpeg_saved_for_storage", {
             debugId,
             source,
@@ -353,7 +391,18 @@ export function MultiPhotoPicker({
 
           let storedPhoto: Awaited<ReturnType<typeof PhotoStorageRepository.savePhoto>>;
           try {
+            const indexedDbStartedAt = performance.now();
             storedPhoto = await PhotoStorageRepository.savePhoto(fileToStore);
+            logPhotoStage("photo_processing_timing", {
+              debugId,
+              source,
+              fileName: file.name,
+              blobCreationMs: blobCreationDurationMs,
+              storedDecodeMs: storedDecodeDurationMs,
+              storedExifMs: storedExifDurationMs,
+              indexedDbWriteMs: Math.round(performance.now() - indexedDbStartedAt),
+              totalMs: Math.round(performance.now() - fileStartedAt)
+            });
           } catch (error) {
             rejectedCount += 1;
             const indexedDb = indexedDbDiagnosticFromError(error);
@@ -372,7 +421,8 @@ export function MultiPhotoPicker({
               )
             };
             publishDiagnostic(currentDiagnostic);
-            return null;
+            savedPhotoResults.push(null);
+            continue;
           }
           const decode = storedDecodeBeforeSave;
           currentDiagnostic = {
@@ -398,7 +448,7 @@ export function MultiPhotoPicker({
             displayedInUi: decode.succeeded ? `${decode.width}x${decode.height}` : "decode_failed"
           });
 
-          return {
+          savedPhotoResults.push({
             id: storedPhoto.id,
             debugId,
             storageId: storedPhoto.id,
@@ -420,9 +470,8 @@ export function MultiPhotoPicker({
             url: `photo://${storedPhoto.id}`,
             type: index === 0 ? "overview" : "other",
             isCover: false
-          } satisfies PendingPhotoUpload;
-        })
-      );
+          } satisfies PendingPhotoUpload);
+      }
       const savedPhotos = savedPhotoResults.filter((photo): photo is PendingPhotoUpload => photo !== null);
       publishDiagnostic({
         ...currentDiagnostic,
@@ -435,8 +484,13 @@ export function MultiPhotoPicker({
       });
 
       if (!savedPhotos.length) {
-        setError(currentDiagnostic.failureMessage ? `${t("photos.fileError")}\n${currentDiagnostic.failureMessage}` : t("photos.fileError"));
+        const limitError = isAtLimit || (validFiles.length > filesToProcess.length && remainingSlots <= 0) ? limitMessage : null;
+        setError(limitError ?? (currentDiagnostic.failureMessage ? `${t("photos.fileError")}\n${currentDiagnostic.failureMessage}` : t("photos.fileError")));
         return;
+      }
+
+      if (rejectedCount > 0 && validFiles.length > filesToProcess.length && limitMessage) {
+        setError(limitMessage);
       }
 
       onSelect(savedPhotos, rejectedCount);
@@ -501,7 +555,7 @@ export function MultiPhotoPicker({
           />
           <button
             type="button"
-            disabled={isSaving}
+            disabled={isSaving || isAtLimit}
             onClick={() => cameraInputRef.current?.click()}
             className="flex min-h-14 items-center gap-3 rounded-[20px] bg-white/75 px-4 text-left font-extrabold text-[#4f4940] disabled:opacity-60"
           >
@@ -510,13 +564,14 @@ export function MultiPhotoPicker({
           </button>
           <button
             type="button"
-            disabled={isSaving}
+            disabled={isSaving || isAtLimit}
             onClick={() => galleryInputRef.current?.click()}
             className="flex min-h-14 items-center gap-3 rounded-[20px] bg-white/75 px-4 text-left font-extrabold text-[#4f4940] disabled:opacity-60"
           >
             <ImageIcon aria-hidden="true" size={19} />
             {t("addPlant.chooseGallery")}
           </button>
+          {isAtLimit && limitMessage ? <p className="rounded-[18px] bg-[#fff1d8] p-3 text-sm font-bold leading-5 text-[#8a6230]">{limitMessage}</p> : null}
           {error ? <p className="whitespace-pre-line rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{error}</p> : null}
           {debugEnabled ? <PhotoPickerDebugPanel diagnostic={diagnostic} selectedPhotosCount={selectedPhotosCount} onCopy={copyDiagnostic} /> : null}
           <button type="button" onClick={onCancel} className="min-h-12 rounded-[18px] px-4 text-sm font-extrabold text-[#777167]">

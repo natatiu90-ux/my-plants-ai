@@ -338,8 +338,7 @@ export async function rotateImageBlob(blob: Blob, degrees: ImageRotationDegrees)
 }> {
   const normalized = await normalizeImageBlob(blob, {
     maxSide: 1600,
-    qualities: [0.82, 0.78, 0.75, 0.7, 0.66, 0.62],
-    targetBytes: 500 * 1024
+    qualities: [0.82]
   });
   const baseBitmap = await loadBitmap(normalized.blob);
   const bitmap = baseBitmap.image;
@@ -375,12 +374,9 @@ export async function rotateImageBlob(blob: Blob, degrees: ImageRotationDegrees)
     context.drawImage(bitmap, 0, 0);
 
     let bestBlob: Blob | null = null;
-    for (const quality of [0.82, 0.78, 0.75, 0.7, 0.66, 0.62]) {
+    for (const quality of [0.82]) {
       const candidate = await canvasToJpeg(canvas, quality);
       bestBlob = candidate;
-      if (candidate.size <= 500 * 1024) {
-        break;
-      }
     }
 
     if (!bestBlob) {

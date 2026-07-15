@@ -174,6 +174,11 @@ export function PhotoBatchReview({
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-[#1c1c1e]/20 px-4 pb-4 backdrop-blur-[2px] sm:items-center sm:pb-0">
       <div role="dialog" aria-modal="true" className="max-h-[92vh] w-full max-w-[390px] overflow-y-auto rounded-[28px] bg-[#fffaf3] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]">
         <h2 className="font-rounded text-2xl font-extrabold text-ink">{t("photos.review")}</h2>
+        {typeof maxPhotos === "number" ? (
+          <p className="mt-1 text-sm font-extrabold leading-5 text-[#7a7166]">
+            {t("addPlant.photoCounter", { count: photos.length, max: maxPhotos })}
+          </p>
+        ) : null}
         {rejectedCount > 0 ? (
           <p className="mt-3 rounded-[18px] bg-[#fff1d8] p-3 text-sm font-bold leading-5 text-[#8a6230]">
             {t("photos.partialAdded", { added: initialPhotos.length, rejected: rejectedCount })}
