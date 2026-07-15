@@ -115,6 +115,7 @@ export function PhotoPickerDebugPanel({
   }
 
   const indexedDb = diagnostic?.indexedDb;
+  const putValue = indexedDb?.putValue;
 
   return (
     <div className="rounded-[18px] bg-[#1f2937] p-3 text-left text-[11px] font-bold leading-5 text-white">
@@ -165,6 +166,30 @@ export function PhotoPickerDebugPanel({
               <p>request.error: {indexedDb?.requestError?.message ?? indexedDb?.requestError?.name ?? "none"}</p>
               <p>db.version: {indexedDb?.dbVersion ?? "unknown"}</p>
               <p>object store exists: {indexedDb?.objectStoreExists == null ? "unknown" : String(indexedDb.objectStoreExists)}</p>
+              <p>value.constructor.name: {putValue?.constructorName ?? "unknown"}</p>
+              <p>value instanceof Blob: {putValue ? String(putValue.instanceofBlob) : "unknown"}</p>
+              <p>value instanceof File: {putValue ? String(putValue.instanceofFile) : "unknown"}</p>
+              <p>Object.prototype.toString: {putValue?.objectToString ?? "unknown"}</p>
+              <p>typeof value: {putValue?.typeOfValue ?? "unknown"}</p>
+              <p>blob instanceof Blob: {putValue ? String(putValue.blobInstanceofBlob) : "unknown"}</p>
+              <p>blob instanceof File: {putValue ? String(putValue.blobInstanceofFile) : "unknown"}</p>
+              <p>blob.constructor.name: {putValue?.blobConstructorName ?? "unknown"}</p>
+              <p>blob.size: {putValue?.blobSize ?? "unknown"}</p>
+              <p>blob.type: {putValue?.blobType ?? "unknown"}</p>
+              <p>blob.arrayBuffer(): {putValue?.arrayBufferSucceeded == null ? "unknown" : String(putValue.arrayBufferSucceeded)}</p>
+              <p>blob.arrayBuffer error: {putValue?.arrayBufferError?.message ?? putValue?.arrayBufferError?.name ?? "none"}</p>
+              <p>new Blob([blob]): {putValue?.newBlobSucceeded == null ? "unknown" : String(putValue.newBlobSucceeded)}</p>
+              <p>new Blob error: {putValue?.newBlobError?.message ?? putValue?.newBlobError?.name ?? "none"}</p>
+              <p>structuredClone(blob): {putValue?.structuredCloneBlobSucceeded == null ? "unknown" : String(putValue.structuredCloneBlobSucceeded)}</p>
+              <p>structuredClone(blob) error: {putValue?.structuredCloneBlobError?.message ?? putValue?.structuredCloneBlobError?.name ?? "none"}</p>
+              <p>structuredClone(value): {putValue?.structuredCloneValueSucceeded == null ? "unknown" : String(putValue.structuredCloneValueSucceeded)}</p>
+              <p>structuredClone(value) error: {putValue?.structuredCloneValueError?.message ?? putValue?.structuredCloneValueError?.name ?? "none"}</p>
+              <p>value properties: {putValue?.properties?.length ?? "unknown"}</p>
+              {putValue?.properties?.map((property) => (
+                <p key={property.name} className="break-words">
+                  property {property.name}: {property.typeOfValue} · {property.constructorName ?? "no constructor"} · {property.objectToString} · Blob {String(property.isBlob)} · File {String(property.isFile)}
+                </p>
+              ))}
             </div>
           </details>
         </div>

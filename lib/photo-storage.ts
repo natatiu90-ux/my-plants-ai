@@ -35,6 +35,50 @@ export type IndexedDbPhotoStorageDiagnostic = {
   } | null;
   dbVersion?: number;
   objectStoreExists?: boolean;
+  putValue?: {
+    constructorName?: string;
+    instanceofBlob: boolean;
+    instanceofFile: boolean;
+    objectToString: string;
+    typeOfValue: string;
+    blobInstanceofBlob: boolean;
+    blobInstanceofFile: boolean;
+    blobConstructorName?: string;
+    blobSize?: number;
+    blobType?: string;
+    arrayBufferSucceeded?: boolean;
+    arrayBufferError?: {
+      name?: string;
+      message?: string;
+      code?: number;
+    };
+    newBlobSucceeded?: boolean;
+    newBlobError?: {
+      name?: string;
+      message?: string;
+      code?: number;
+    };
+    structuredCloneBlobSucceeded?: boolean;
+    structuredCloneBlobError?: {
+      name?: string;
+      message?: string;
+      code?: number;
+    };
+    structuredCloneValueSucceeded?: boolean;
+    structuredCloneValueError?: {
+      name?: string;
+      message?: string;
+      code?: number;
+    };
+    properties?: {
+      name: string;
+      typeOfValue: string;
+      constructorName?: string;
+      objectToString: string;
+      isBlob: boolean;
+      isFile: boolean;
+    }[];
+  };
 };
 
 function errorDetails(error: unknown): { name?: string; message?: string; stack?: string; code?: number } {
@@ -45,6 +89,72 @@ function errorDetails(error: unknown): { name?: string; message?: string; stack?
     stack: typeof value?.stack === "string" ? value.stack : error instanceof Error ? error.stack : undefined,
     code: typeof value?.code === "number" ? value.code : undefined
   };
+}
+
+async function inspectIndexedDbPutValue(value: unknown) {
+  const blob = value;
+  const putValue: NonNullable<IndexedDbPhotoStorageDiagnostic["putValue"]> = {
+    constructorName: value?.constructor?.name,
+    instanceofBlob: value instanceof Blob,
+    instanceofFile: value instanceof File,
+    objectToString: Object.prototype.toString.call(value),
+    typeOfValue: typeof value,
+    blobInstanceofBlob: blob instanceof Blob,
+    blobInstanceofFile: blob instanceof File,
+    blobConstructorName: blob?.constructor?.name,
+    blobSize: blob instanceof Blob ? blob.size : undefined,
+    blobType: blob instanceof Blob ? blob.type : undefined
+  };
+
+  if (blob instanceof Blob) {
+    try {
+      await blob.arrayBuffer();
+      putValue.arrayBufferSucceeded = true;
+    } catch (error) {
+      putValue.arrayBufferSucceeded = false;
+      putValue.arrayBufferError = errorDetails(error);
+    }
+
+    try {
+      new Blob([blob]);
+      putValue.newBlobSucceeded = true;
+    } catch (error) {
+      putValue.newBlobSucceeded = false;
+      putValue.newBlobError = errorDetails(error);
+    }
+
+    try {
+      structuredClone(blob);
+      putValue.structuredCloneBlobSucceeded = true;
+    } catch (error) {
+      putValue.structuredCloneBlobSucceeded = false;
+      putValue.structuredCloneBlobError = errorDetails(error);
+    }
+  }
+
+  try {
+    structuredClone(value);
+    putValue.structuredCloneValueSucceeded = true;
+  } catch (error) {
+    putValue.structuredCloneValueSucceeded = false;
+    putValue.structuredCloneValueError = errorDetails(error);
+  }
+
+  if (value && typeof value === "object") {
+    putValue.properties = Reflect.ownKeys(value).map((key) => {
+      const propertyValue = (value as Record<PropertyKey, unknown>)[key];
+      return {
+        name: typeof key === "symbol" ? key.toString() : key,
+        typeOfValue: typeof propertyValue,
+        constructorName: propertyValue?.constructor?.name,
+        objectToString: Object.prototype.toString.call(propertyValue),
+        isBlob: propertyValue instanceof Blob,
+        isFile: propertyValue instanceof File
+      };
+    });
+  }
+
+  return putValue;
 }
 
 export class IndexedDbPhotoStorageError extends Error {
@@ -120,6 +230,7 @@ export const PhotoStorageRepository = {
     } catch (error) {
       throw new IndexedDbPhotoStorageError(createIndexedDbDiagnostic(id, file, { stage: "open_db" }, error), error);
     }
+    const putValue = await inspectIndexedDbPutValue(file);
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -135,7 +246,8 @@ export const PhotoStorageRepository = {
       let diagnostic = createIndexedDbDiagnostic(id, file, {
         openDbSucceeded: true,
         dbVersion: db.version,
-        objectStoreExists: db.objectStoreNames.contains(storeName)
+        objectStoreExists: db.objectStoreNames.contains(storeName),
+        putValue
       });
       let transaction: IDBTransaction;
       let request: IDBRequest<IDBValidKey>;
