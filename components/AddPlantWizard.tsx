@@ -518,6 +518,13 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         }
 
         if (!response.ok || !payload.ok) {
+          console.warn("Plant analysis API failure", {
+            status: httpStatus,
+            stage: payload.stage ?? null,
+            error: payload.error ?? null,
+            originalError: payload.originalError ?? null,
+            trace: payload.trace ?? null
+          });
           throw new Error(typeof payload.error === "string" ? payload.error : "analysis_failed");
         }
 

@@ -49,6 +49,46 @@ type ImageDiagnostic = {
   };
 };
 
+type AnalyzeTraceEvent = {
+  stage: string;
+  at: string;
+  data?: Record<string, unknown>;
+};
+
+function traceEvent(trace: AnalyzeTraceEvent[], stage: string, data?: Record<string, unknown>) {
+  const event = { stage, at: new Date().toISOString(), ...(data ? { data } : {}) };
+  trace.push(event);
+  console.info("analyze_plant_trace", event);
+}
+
+function sanitizeError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return {
+      name: "UnknownError",
+      message: "Unknown error",
+      stack: null,
+      code: null,
+      status: null,
+      type: null
+    };
+  }
+
+  const errorLike = error as Error & { code?: unknown; status?: unknown; type?: unknown; response?: { status?: unknown } };
+  return {
+    name: error.name,
+    message: error.message,
+    stack: error.stack ?? null,
+    code: typeof errorLike.code === "string" || typeof errorLike.code === "number" ? errorLike.code : null,
+    status:
+      typeof errorLike.status === "string" || typeof errorLike.status === "number"
+        ? errorLike.status
+        : typeof errorLike.response?.status === "string" || typeof errorLike.response?.status === "number"
+          ? errorLike.response.status
+          : null,
+    type: typeof errorLike.type === "string" ? errorLike.type : null
+  };
+}
+
 const schema = {
   name: "plant_analysis",
   schema: {
@@ -282,12 +322,14 @@ function detectedFormat(file: File) {
   return extension ?? "unknown";
 }
 
-function diagnosticResponse(message: string, status = 400, diagnostics?: ImageDiagnostic[], stage?: string) {
+function diagnosticResponse(message: string, status = 400, diagnostics?: ImageDiagnostic[], stage?: string, trace?: AnalyzeTraceEvent[], originalError?: ReturnType<typeof sanitizeError>) {
   return NextResponse.json(
     {
       ok: false,
       error: message,
       ...(stage ? { stage } : {}),
+      ...(trace ? { trace } : {}),
+      ...(originalError ? { originalError } : {}),
       ...(process.env.NODE_ENV !== "production" && diagnostics ? { diagnostics } : {})
     },
     { status }
@@ -310,14 +352,22 @@ function parseBoolean(value: FormDataEntryValue | null) {
 }
 
 export async function POST(request: Request) {
+  const trace: AnalyzeTraceEvent[] = [];
+  traceEvent(trace, "request_received", {
+    method: request.method,
+    contentType: request.headers.get("content-type"),
+    contentLength: request.headers.get("content-length")
+  });
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     const message = process.env.NODE_ENV === "development" ? "OPENAI_API_KEY is not configured." : "Plant analysis is unavailable.";
-    return diagnosticResponse(message, 503);
+    traceEvent(trace, "missing_openai_api_key");
+    return diagnosticResponse(message, 503, undefined, "configure_openai", trace);
   }
 
   let failureStage = "read_form_data";
   const formData = await request.formData();
+  traceEvent(trace, "form_data_read");
   const files = formData.getAll("photos").filter((value): value is File => value instanceof File);
   const locale = String(formData.get("locale") ?? "en");
   const photoTypes = formData.getAll("photoTypes").map(String);
@@ -364,13 +414,33 @@ export async function POST(request: Request) {
       orientationSource: clientOrientationSources[index] || null
     }
   }));
+  traceEvent(trace, "request_payload_parsed", {
+    imageCount: files.length,
+    locale,
+    photoTypes,
+    photoSources,
+    files: diagnostics.map((diagnostic) => ({
+      index: diagnostics.indexOf(diagnostic),
+      fileName: diagnostic.fileName,
+      mimeType: diagnostic.mimeType,
+      extension: diagnostic.extension,
+      byteSize: diagnostic.byteSize,
+      clientByteSize: diagnostic.client?.byteSize,
+      clientWidth: diagnostic.client?.width,
+      clientHeight: diagnostic.client?.height,
+      clientExifOrientation: diagnostic.client?.exifOrientation,
+      clientPhysicallyRotated: diagnostic.client?.physicallyRotated
+    }))
+  });
 
   if (!files.length) {
-    return diagnosticResponse("At least one image is required.", 400, undefined, "validate_input");
+    traceEvent(trace, "validate_input_failed", { reason: "no_images" });
+    return diagnosticResponse("At least one image is required.", 400, undefined, "validate_input", trace);
   }
 
   if (files.length > maxPhotos) {
-    return diagnosticResponse(`Use ${maxPhotos} photos or fewer.`, 400, diagnostics, "validate_input");
+    traceEvent(trace, "validate_input_failed", { reason: "too_many_images", imageCount: files.length });
+    return diagnosticResponse(`Use ${maxPhotos} photos or fewer.`, 400, diagnostics, "validate_input", trace);
   }
 
   for (let index = 0; index < files.length; index += 1) {
@@ -383,7 +453,8 @@ export async function POST(request: Request) {
       diagnostics[index].errorCode = "unsupported_or_too_large";
       diagnostics[index].errorMessage = "Unsupported image type or image exceeds 10 MB.";
       console.warn("Plant analysis image rejected", diagnostics[index]);
-      return diagnosticResponse("One or more images are unsupported or too large.", 400, diagnostics, "validate_input");
+      traceEvent(trace, "validate_input_failed", { reason: "unsupported_or_too_large", index, mimeType: file.type, byteSize: file.size });
+      return diagnosticResponse("One or more images are unsupported or too large.", 400, diagnostics, "validate_input", trace);
     }
   }
 
@@ -397,6 +468,7 @@ export async function POST(request: Request) {
 
   try {
     failureStage = "server_image_optimization";
+    traceEvent(trace, "server_image_optimization_started", { imageCount: files.length });
     const client = new OpenAI({ apiKey });
     const optimizedImages = await Promise.all(
       files.map(async (file, index) => {
@@ -413,12 +485,23 @@ export async function POST(request: Request) {
           diagnostics[index].finalMimeType = optimizedImage.finalMimeType;
           diagnostics[index].finalByteSize = optimizedImage.optimizedBytes;
           diagnostics[index].includedInOpenAIRequest = true;
+          traceEvent(trace, "server_image_optimization_completed", {
+            index,
+            originalBytes: optimizedImage.originalBytes,
+            optimizedBytes: optimizedImage.optimizedBytes,
+            inputWidth: optimizedImage.inputWidth,
+            inputHeight: optimizedImage.inputHeight,
+            normalizedWidth: optimizedImage.normalizedWidth,
+            normalizedHeight: optimizedImage.normalizedHeight,
+            finalMimeType: optimizedImage.finalMimeType
+          });
           return optimizedImage;
         } catch (error) {
           diagnostics[index].conversionStatus = error instanceof Error && error.message === "invalid_output" ? "invalid_output" : "image_conversion_failed";
           diagnostics[index].errorCode = diagnostics[index].conversionStatus;
           diagnostics[index].errorMessage = error instanceof Error ? error.message : "Image conversion failed.";
           console.warn("Plant analysis image conversion failed", diagnostics[index]);
+          traceEvent(trace, "server_image_optimization_failed", { index, originalError: sanitizeError(error) });
           throw error;
         }
       })
@@ -449,6 +532,7 @@ export async function POST(request: Request) {
       }))
     });
     failureStage = "prepare_openai_payload";
+    traceEvent(trace, "prepare_openai_payload_started");
     const inputContent = [
       {
         type: "input_text",
@@ -472,9 +556,29 @@ export async function POST(request: Request) {
       },
       ...optimizedImages.map((image) => ({ type: "input_image", image_url: image.dataUrl }))
     ];
+    traceEvent(trace, "prepare_openai_payload_completed", {
+      imageCount: optimizedImages.length,
+      textBlocks: 1,
+      imageUrls: optimizedImages.map((image, index) => ({
+        index,
+        mimePrefix: image.dataUrl.slice(0, 23),
+        dataUrlLength: image.dataUrl.length,
+        optimizedBytes: image.optimizedBytes,
+        width: image.normalizedWidth,
+        height: image.normalizedHeight
+      })),
+      schemaName: schema.name,
+      schemaHasHypotheses: Boolean(schema.schema.properties.hypotheses),
+      schemaRequired: schema.schema.required
+    });
 
     openAIRequestStartedAt = Date.now();
     failureStage = "openai_request";
+    traceEvent(trace, "openai_request_started", {
+      model,
+      imageCount: optimizedImages.length,
+      timeoutMs: openAIRequestTimeoutMs
+    });
     console.info("openai_request_started", {
       model,
       imageCount: optimizedImages.length,
@@ -494,6 +598,11 @@ export async function POST(request: Request) {
       } as never,
       { signal: controller.signal }
     );
+    traceEvent(trace, "openai_response_received", {
+      model: response.model ?? model,
+      durationMs: Date.now() - openAIRequestStartedAt,
+      outputTextLength: response.output_text?.length ?? null
+    });
     console.info("openai_request_completed", {
       model: response.model ?? model,
       imageCount: optimizedImages.length,
@@ -501,16 +610,32 @@ export async function POST(request: Request) {
     });
 
     failureStage = "parse_openai_response";
+    traceEvent(trace, "json_parse_started");
     const text = response.output_text;
     const analysis = JSON.parse(text);
+    traceEvent(trace, "json_parse_completed", {
+      hasDetectedSpecies: Boolean(analysis?.detectedSpecies),
+      hasRecommendations: Array.isArray(analysis?.recommendations),
+      recommendationCount: Array.isArray(analysis?.recommendations) ? analysis.recommendations.length : null,
+      hasHypotheses: Array.isArray(analysis?.hypotheses),
+      hypothesisCount: Array.isArray(analysis?.hypotheses) ? analysis.hypotheses.length : null,
+      condition: analysis?.condition ?? null
+    });
+    traceEvent(trace, "schema_validation_completed", {
+      source: "openai_structured_outputs",
+      schemaName: schema.name,
+      strict: schema.strict
+    });
 
     return NextResponse.json({
       ok: true,
       analysis,
       model: response.model ?? model,
+      trace,
       ...(process.env.NODE_ENV !== "production" ? { diagnostics } : {})
     });
   } catch (error) {
+    const originalError = sanitizeError(error);
     const status = typeof error === "object" && error && "status" in error ? (error as { status?: unknown }).status : undefined;
     const code = typeof error === "object" && error && "code" in error ? (error as { code?: unknown }).code : undefined;
     const isOpenAITimeout =
@@ -528,19 +653,25 @@ export async function POST(request: Request) {
     }
     console.error("Plant analysis failed", {
       stage: failureStage,
-      name: error instanceof Error ? error.name : "UnknownError",
-      message: error instanceof Error ? error.message : "Unknown error",
+      ...originalError,
       openAIStatus: status,
       openAIErrorCode: code,
       durationMs,
+      trace,
       diagnostics
+    });
+    traceEvent(trace, "exception_thrown", {
+      stage: failureStage,
+      originalError
     });
     const hasConversionFailure = diagnostics.some((diagnostic) => diagnostic.errorCode === "image_conversion_failed" || diagnostic.errorCode === "invalid_output");
     return diagnosticResponse(
       hasConversionFailure ? "image_conversion_failed" : isOpenAITimeout ? "ai_analysis_timed_out" : "Plant analysis failed.",
       hasConversionFailure ? 422 : isOpenAITimeout ? 504 : 502,
       diagnostics,
-      failureStage
+      failureStage,
+      trace,
+      originalError
     );
   } finally {
     clearTimeout(timeout);
