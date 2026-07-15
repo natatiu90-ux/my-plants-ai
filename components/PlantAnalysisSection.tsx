@@ -28,6 +28,8 @@ type StructuredHypothesis = {
   canUserAnswerChangeRecommendation?: boolean;
 };
 
+type RecommendationDensity = "healthy" | "minor" | "serious";
+
 function localized(value: { en?: string | null; ru?: string | null } | undefined, locale: "en" | "ru") {
   return value?.[locale] || value?.en || value?.ru || "";
 }
@@ -92,14 +94,23 @@ function firstNonEmpty(items: string[]) {
   return items.find((item) => item.trim()) ?? "";
 }
 
+function cleanObservationText(item: string, t: (key: TranslationKey) => string) {
+  return item
+    .replace(`${t("plantAnalysis.observationNormalPrefix")} `, "")
+    .replace(`${t("plantAnalysis.observationNeutralPrefix")} `, "")
+    .replace(`${t("plantAnalysis.observationPossibleConcernPrefix")} `, "")
+    .replace(/\.$/, "")
+    .trim();
+}
+
 function classifyObservation(item: string, t: (key: TranslationKey) => string) {
   if (includesAny(item, ["healthy", "firm", "new leaf", "здоров", "упруг", "нов"])) {
-    return `${t("plantAnalysis.observationNormalPrefix")} ${item}`;
+    return cleanObservationText(item, t);
   }
   if (includesAny(item, ["dry", "brown", "yellow", "edge", "patch", "scorch", "bleach", "сух", "корич", "желт", "кра", "пятн", "ожог"])) {
-    return `${t("plantAnalysis.observationPossibleConcernPrefix")} ${item}`;
+    return cleanObservationText(item, t);
   }
-  return `${t("plantAnalysis.observationNeutralPrefix")} ${item}`;
+  return cleanObservationText(item, t);
 }
 
 function conclusionForSoilResult(result: string | undefined, t: (key: TranslationKey) => string) {
@@ -192,6 +203,18 @@ function structuredStatus(hypothesis: StructuredHypothesis | undefined, fallback
 
 function canAskStructuredQuestion(hypothesis: StructuredHypothesis | undefined, threshold: number) {
   return Boolean(hypothesis?.canUserAnswerChangeRecommendation && typeof hypothesis.confidence === "number" && hypothesis.confidence >= threshold);
+}
+
+function recommendationDensity(analysis: PlantAnalysisRecord, activeHypotheses: HypothesisView[], followUpNeeded: boolean): RecommendationDensity {
+  if (analysis.condition === "needs_attention" || activeHypotheses.some((hypothesis) => hypothesis.confidence >= 0.75) || followUpNeeded) {
+    return "serious";
+  }
+
+  if (analysis.condition === "check_soon" || activeHypotheses.length > 0) {
+    return "minor";
+  }
+
+  return "healthy";
 }
 
 export function PlantAnalysisSection({
@@ -319,16 +342,16 @@ export function PlantAnalysisSection({
     const activeHypotheses = hypotheses
       .filter((hypothesis) => hypothesis.status !== "ruled_out" && hypothesis.confidence >= 0.55)
       .sort((a, b) => b.confidence - a.confidence)
-      .slice(0, 2);
+      .slice(0, 1);
     const lowConfidenceHypotheses = hypotheses.filter((hypothesis) => hypothesis.status === "active" && hypothesis.confidence >= 0.35 && hypothesis.confidence < 0.55);
-    const meaningfulObservations = unique([
+    const allMeaningfulObservations = unique([
       normalPortulacariaLeaves ? t("plantAnalysis.observationPortulacariaNormal") : "",
       visibleSunDamage ? t("plantAnalysis.observationOldDryDamage") : "",
       ...observations
         .filter((item) => observationHasConditionValue(item) && !(normalPortulacariaLeaves && includesAny(item, ["small rounded", "rounded leaves", "paired", "мелк", "округл", "парами"])))
         .map((item) => classifyObservation(item, t))
-    ]).slice(0, 2);
-    const statusSummary =
+    ]).map((item) => cleanObservationText(item, t));
+    const keyTakeaway =
       analysis.condition === "healthy" && activeHypotheses.length === 0
         ? t("plantAnalysis.statusLooksOkay")
         : wasRepottedRecently
@@ -338,40 +361,6 @@ export function PlantAnalysisSection({
             : plant.nextAction
               ? t("plantAnalysis.statusWatch")
               : t("plantAnalysis.statusStableWatch");
-    const statusDetail = firstNonEmpty([
-      wasRepottedRecently ? t("plantAnalysis.statusDetailRepot") : "",
-      activeHypotheses.some((hypothesis) => hypothesis.id === "direct_sun") ? t("plantAnalysis.statusDetailSun") : "",
-      activeHypotheses.length === 0 ? t("plantAnalysis.statusDetailNoUrgent") : ""
-    ]);
-    const canonicalActions = unique([
-      activeHypotheses.some((hypothesis) => hypothesis.id === "direct_sun") && sunResolution?.status !== "ruled_out" ? t("plantAnalysis.actionBrightIndirect") : "",
-      wasRepottedRecently ? t("plantAnalysis.actionDoNotRepot") : "",
-      !soilCheckedToday && !wateringResolution && (activeHypotheses.some((hypothesis) => hypothesis.id === "soil_condition") || plant.nextAction === "check_soil") ? t("plantAnalysis.actionCheckSoil") : "",
-      activeHypotheses.some((hypothesis) => hypothesis.id === "pests") ? t("plantAnalysis.actionPests") : "",
-      activeHypotheses.some((hypothesis) => hypothesis.id === "root_condition") ? t("plantAnalysis.actionRoots") : "",
-      activeHypotheses.length || wasRepottedRecently ? t("plantAnalysis.actionWatchNewGrowth") : ""
-    ]);
-    const actions = validateCurrentActions(canonicalActions, {
-      sunStressActive: activeHypotheses.some((hypothesis) => hypothesis.id === "direct_sun"),
-      sunRuledOut: sunResolution?.status === "ruled_out"
-    }).slice(0, 3);
-    const activeActions = actions.length ? actions : [t("plantAnalysis.actionNothingNow")];
-    const answerConclusions = unique([
-      conclusionForResolution(pestsResolution, t),
-      conclusionForResolution(rootResolution, t),
-      wasRepottedRecently && repotDate ? t("plantAnalysis.conclusionRepottedDate").replace("{date}", formatRelativeDate(repotDate, locale, "")) : "",
-      conclusionForSoilResult(plant.lastSoilResult, t),
-      conclusionForResolution(sunResolution, t),
-      conclusionForResolution(oldSoilResolution, t),
-      conclusionForResolution(wateringResolution, t),
-      conclusionForResolution(drainageResolution, t)
-    ]);
-    const meaning = unique([
-      ...activeHypotheses.map((hypothesis) => hypothesis.text),
-      noPests ? t("plantAnalysis.meaningPestsRuledOut") : "",
-      rootsReportedNormal ? t("plantAnalysis.meaningRootsNormal") : "",
-      sunResolution?.status === "ruled_out" ? t("plantAnalysis.meaningSunRuledOut") : ""
-    ]).slice(0, 2);
     const needsSoilQuestion = !wateringResolution && !soilCheckedToday && (structuredQuestionsEnabled ? canAskStructuredQuestion(structuredSoil, 0.45) : plant.nextAction === "check_soil" || plant.nextAction === "water" || wateringMentioned);
     const needsDrainageQuestion = !drainageResolution && (structuredQuestionsEnabled ? canAskStructuredQuestion(structuredDrainage, 0.45) : drainageMentioned && (wateringMentioned || plant.nextAction === "check_soil" || plant.nextAction === "water"));
     const followUp: FollowUpView | null = !pestsResolution && (structuredQuestionsEnabled ? canAskStructuredQuestion(structuredPests, 0.55) : pestMentioned)
@@ -414,8 +403,41 @@ export function PlantAnalysisSection({
                     { label: t("plantAnalysis.answerUnsure"), status: "unknown" as const, result: "unsure" }
                   ] }
                 : null;
-
-    return { meaningfulObservations, statusSummary, statusDetail, meaning, lowConfidenceHypotheses, activeActions, answerConclusions, followUp };
+    const density = recommendationDensity(analysis, activeHypotheses, Boolean(followUp));
+    const meaningfulObservations = density === "healthy" ? [] : allMeaningfulObservations.slice(0, density === "minor" ? 1 : 3);
+    const canonicalActions = unique([
+      activeHypotheses.some((hypothesis) => hypothesis.id === "direct_sun") && sunResolution?.status !== "ruled_out" ? t("plantAnalysis.actionBrightIndirect") : "",
+      wasRepottedRecently ? t("plantAnalysis.actionDoNotRepot") : "",
+      !soilCheckedToday && !wateringResolution && (activeHypotheses.some((hypothesis) => hypothesis.id === "soil_condition") || plant.nextAction === "check_soil") ? t("plantAnalysis.actionCheckSoil") : "",
+      activeHypotheses.some((hypothesis) => hypothesis.id === "pests") ? t("plantAnalysis.actionPests") : "",
+      activeHypotheses.some((hypothesis) => hypothesis.id === "root_condition") ? t("plantAnalysis.actionRoots") : "",
+      activeHypotheses.length || wasRepottedRecently ? t("plantAnalysis.actionWatchNewGrowth") : ""
+    ]);
+    const actions = validateCurrentActions(canonicalActions, {
+      sunStressActive: activeHypotheses.some((hypothesis) => hypothesis.id === "direct_sun"),
+      sunRuledOut: sunResolution?.status === "ruled_out"
+    }).slice(0, density === "serious" ? 4 : 3);
+    const activeActions = actions.length ? actions : [t("plantAnalysis.actionNothingNow")];
+    const answerConclusions = unique([
+      conclusionForResolution(pestsResolution, t),
+      conclusionForResolution(rootResolution, t),
+      wasRepottedRecently && repotDate ? t("plantAnalysis.conclusionRepottedDate").replace("{date}", formatRelativeDate(repotDate, locale, "")) : "",
+      conclusionForSoilResult(plant.lastSoilResult, t),
+      conclusionForResolution(sunResolution, t),
+      conclusionForResolution(oldSoilResolution, t),
+      conclusionForResolution(wateringResolution, t),
+      conclusionForResolution(drainageResolution, t)
+    ]);
+    const likelyExplanation =
+      density !== "healthy" && activeHypotheses.length > 0
+        ? firstNonEmpty([
+            activeHypotheses[0]?.text ?? "",
+            noPests ? t("plantAnalysis.meaningPestsRuledOut") : "",
+            rootsReportedNormal ? t("plantAnalysis.meaningRootsNormal") : "",
+            sunResolution?.status === "ruled_out" ? t("plantAnalysis.meaningSunRuledOut") : ""
+          ])
+        : "";
+    return { meaningfulObservations, keyTakeaway, likelyExplanation, lowConfidenceHypotheses, activeActions, answerConclusions, followUp, density };
   }, [analysis, hypothesisResolutions, locale, milestones, plant, t]);
 
   if (!analysis || !view) {
@@ -446,8 +468,7 @@ export function PlantAnalysisSection({
       <h2 className="px-1 font-rounded text-xl font-extrabold text-ink">{t("plantAnalysis.title")}</h2>
       <div className="mt-3 grid gap-2">
         <div className="rounded-[22px] bg-[#eef5e8] p-3">
-          <p className="text-sm font-extrabold leading-5 text-[#355f3d]">{view.statusSummary}</p>
-          {view.statusDetail ? <p className="mt-1 text-sm font-bold leading-5 text-[#4f6946]">{view.statusDetail}</p> : null}
+          <p className="text-sm font-extrabold leading-5 text-[#355f3d]">{view.keyTakeaway}</p>
         </div>
 
         {view.meaningfulObservations.length ? (
@@ -461,14 +482,10 @@ export function PlantAnalysisSection({
           </div>
         ) : null}
 
-        {view.meaning.length ? (
+        {view.likelyExplanation ? (
           <div className="rounded-[20px] bg-white/65 p-3">
             <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.mostLikelyCause")}</p>
-            <ul className="mt-2 grid gap-2 text-sm font-bold leading-5 text-[#4f4940]">
-              {view.meaning.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
+            <p className="mt-2 text-sm font-bold leading-5 text-[#4f4940]">{view.likelyExplanation}</p>
           </div>
         ) : null}
 
@@ -522,7 +539,7 @@ export function PlantAnalysisSection({
           </details>
         ) : null}
 
-        {view.lowConfidenceHypotheses.length ? (
+        {view.density === "serious" && view.lowConfidenceHypotheses.length ? (
           <div className="rounded-[20px] bg-white/45 p-3">
             <button
               type="button"
