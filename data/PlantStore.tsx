@@ -9,6 +9,7 @@ import { commonNameFromScientificName } from "@/lib/plant-display";
 import { PlantCreationError, plantCreationDiagnosticFromError, plantCreationError, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { calculateSoilCheckCareResolution } from "@/lib/soil-care";
 import type { HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
+import type { LegacyRoomImportGroup } from "@/lib/home-room-context";
 
 type PlantState = {
   plants: Plant[];
@@ -67,6 +68,8 @@ type PlantStoreValue = PlantState & {
   addPlant: (input: AddPlantInput) => Promise<string>;
   updatePlant: (plantId: string, input: { homeId?: string; homeName?: string; speciesName?: string; scientificName?: string; roomKey?: Plant["roomKey"]; roomId?: Plant["roomId"]; positionInRoom?: Plant["positionInRoom"]; notes?: string }) => Promise<void>;
   addHome: (input: Omit<HomeContext, "id" | "createdAt">) => Promise<HomeContext>;
+  createFirstHomeWithLegacyImport: (input: Omit<HomeContext, "id" | "createdAt">, roomImports: LegacyRoomImportGroup[]) => Promise<string>;
+  importLegacyPlantsToHome: (homeId: string, roomImports: LegacyRoomImportGroup[]) => Promise<string>;
   updateHome: (homeId: string, input: Partial<Omit<HomeContext, "id" | "createdAt">>) => Promise<HomeContext>;
   deleteHome: (homeId: string) => Promise<void>;
   addRoom: (name: string, input?: Partial<Omit<Room, "id" | "name" | "isCustom" | "createdAt">>) => Promise<Room>;
@@ -361,6 +364,48 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       const home = await repositories.homes.createHome(input);
       setState((current) => ({ ...current, homes: [...current.homes, home] }));
       return home;
+    },
+    [repositories]
+  );
+
+  const createFirstHomeWithLegacyImport = useCallback(
+    async (input: Omit<HomeContext, "id" | "createdAt">, roomImports: LegacyRoomImportGroup[]) => {
+      if (!repositories) {
+        throw new Error("Plant collection is not ready.");
+      }
+
+      const homeId = await repositories.homes.createFirstHomeWithLegacyImport(
+        input,
+        roomImports.map((room) => ({ legacyKey: room.legacyKey, name: room.name, include: room.include }))
+      );
+      const [plants, homes, rooms] = await Promise.all([
+        repositories.plants.listPlants(),
+        repositories.homes.listHomes(),
+        repositories.rooms.listRooms()
+      ]);
+      setState((current) => ({ ...current, plants, homes, rooms }));
+      return homeId;
+    },
+    [repositories]
+  );
+
+  const importLegacyPlantsToHome = useCallback(
+    async (homeId: string, roomImports: LegacyRoomImportGroup[]) => {
+      if (!repositories) {
+        throw new Error("Plant collection is not ready.");
+      }
+
+      const importedHomeId = await repositories.homes.importLegacyPlantsToHome(
+        homeId,
+        roomImports.map((room) => ({ legacyKey: room.legacyKey, name: room.name, include: room.include }))
+      );
+      const [plants, homes, rooms] = await Promise.all([
+        repositories.plants.listPlants(),
+        repositories.homes.listHomes(),
+        repositories.rooms.listRooms()
+      ]);
+      setState((current) => ({ ...current, plants, homes, rooms }));
+      return importedHomeId;
     },
     [repositories]
   );
@@ -1141,6 +1186,8 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       addPlant,
       updatePlant,
       addHome,
+      createFirstHomeWithLegacyImport,
+      importLegacyPlantsToHome,
       updateHome,
       deleteHome,
       addRoom,
@@ -1172,6 +1219,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       addHome,
       addRoom,
       bootstrap,
+      createFirstHomeWithLegacyImport,
       deleteHome,
       deleteMilestone,
       deleteRoom,
@@ -1187,6 +1235,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       getPlantMilestones,
       getPlantPhotos,
       recordSoilChecked,
+      importLegacyPlantsToHome,
       saveBaselineHistory,
       savePlantAnalysis,
       resolvePlantHypothesis,

@@ -2,9 +2,14 @@ import assert from "node:assert/strict";
 import {
   applyDeletedHomeToPlant,
   applyDeletedRoomToPlant,
+  buildLegacyRoomImportGroups,
   buildPlantEnvironmentContext,
+  dedupeImportGroups,
   normalizePlantLocationForHome,
-  roomBelongsToHome
+  plantsForHomeScope,
+  resolveSelectedHomeId,
+  roomBelongsToHome,
+  shouldOfferExistingHomeImport
 } from "./home-room-context";
 import type { HomeContext, Plant, Room } from "@/types/plant";
 
@@ -73,5 +78,34 @@ const legacyContext = buildPlantEnvironmentContext({
   legacyRoomName: "Kitchen"
 });
 assert.equal(legacyContext?.legacyLocation, "Kitchen");
+
+const legacyPlants: Plant[] = [
+  { ...plant, id: "legacy-1", homeId: undefined, roomId: undefined, roomKey: "rooms.kitchen" },
+  { ...plant, id: "legacy-2", homeId: undefined, roomId: undefined, roomKey: "rooms.kitchen" },
+  { ...plant, id: "legacy-3", homeId: undefined, roomId: undefined, roomKey: undefined }
+];
+const importPlan = buildLegacyRoomImportGroups({
+  plants: legacyPlants,
+  rooms: [],
+  translateRoomKey: () => "Kitchen"
+});
+assert.equal(importPlan.rooms.length, 1);
+assert.equal(importPlan.rooms[0].plantIds.length, 2);
+assert.equal(importPlan.plantsWithoutRoom.length, 1);
+
+const deduped = dedupeImportGroups([
+  { id: "a", legacyKey: "a", name: "Kitchen", plantIds: ["1"], include: true },
+  { id: "b", legacyKey: "b", name: " kitchen ", plantIds: ["2"], include: true }
+]);
+assert.equal(deduped.length, 1);
+assert.deepEqual(deduped[0].plantIds.sort(), ["1", "2"]);
+
+assert.deepEqual(plantsForHomeScope([plant, { ...plant, id: "free", homeId: undefined }], home.id).map((item) => item.id), ["plant-1"]);
+assert.deepEqual(plantsForHomeScope([plant, { ...plant, id: "free", homeId: undefined }], "__no_home__").map((item) => item.id), ["free"]);
+assert.equal(resolveSelectedHomeId({ storedHomeId: "missing", homes: [home], hasUnassignedPlants: false }), home.id);
+assert.equal(resolveSelectedHomeId({ storedHomeId: "__no_home__", homes: [home], hasUnassignedPlants: true }), "__no_home__");
+assert.equal(shouldOfferExistingHomeImport({ homes: [home], plants: legacyPlants, homeId: home.id }), true);
+assert.equal(shouldOfferExistingHomeImport({ homes: [home, otherHome], plants: legacyPlants, homeId: home.id }), false);
+assert.equal(shouldOfferExistingHomeImport({ homes: [home], plants: [{ ...plant, homeId: home.id }], homeId: home.id }), false);
 
 console.log("home-room-context tests passed");

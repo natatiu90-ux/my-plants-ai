@@ -11,10 +11,12 @@ import { AddPlantWizard } from "./AddPlantWizard";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
 import { hasUnfinishedAddPlantDraft } from "@/lib/add-plant-draft";
+import { noHomeSelectionId, plantsForHomeScope, resolveSelectedHomeId } from "@/lib/home-room-context";
 import { deriveCareActionState, isDueCareActionState, type DerivedCareActionState } from "@/lib/plant-action-eligibility";
 import type { Plant } from "@/types/plant";
 
 const homeSetupDismissedKey = "my_plants_home_setup_dismissed_until";
+const selectedHomeStoragePrefix = "my_plants_selected_home_";
 
 function sortPlantsByPriority(plants: Plant[]) {
   const priority = { needs_attention: 0, check_soon: 1, unknown: 2, healthy: 3 };
@@ -100,13 +102,23 @@ function HomeSetupCard({ onDismiss }: { onDismiss: () => void }) {
 }
 
 export function HomeScreen() {
+  const { t } = useI18n();
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isHomeSetupDismissed, setIsHomeSetupDismissed] = useState(false);
-  const { getPlantHypothesisResolutions, homes, plants: storedPlants, retry, secondaryDataReady, status } = usePlantStore();
-  const plants = useMemo(() => sortPlantsByPriority(storedPlants), [storedPlants]);
+  const [selectedHomeId, setSelectedHomeId] = useState<string | null>(null);
+  const { getPlantHypothesisResolutions, homes, plants: storedPlants, retry, secondaryDataReady, status, userId } = usePlantStore();
+  const unassignedPlants = useMemo(() => storedPlants.filter((plant) => !plant.homeId), [storedPlants]);
+  const selectedScope = useMemo(() => {
+    if (!homes.length) return null;
+    return resolveSelectedHomeId({ storedHomeId: selectedHomeId, homes, hasUnassignedPlants: Boolean(unassignedPlants.length) });
+  }, [homes, selectedHomeId, unassignedPlants.length]);
+  const scopedPlants = useMemo(() => {
+    return plantsForHomeScope(storedPlants, selectedScope);
+  }, [selectedScope, storedPlants]);
+  const plants = useMemo(() => sortPlantsByPriority(scopedPlants), [scopedPlants]);
   const careActionByPlantId = useMemo(() => {
     const states = new Map<string, DerivedCareActionState>();
-    storedPlants.forEach((plant) => {
+    scopedPlants.forEach((plant) => {
       states.set(
         plant.id,
         deriveCareActionState(plant, getPlantHypothesisResolutions(plant.id), new Date(), {
@@ -115,16 +127,16 @@ export function HomeScreen() {
       );
     });
     return states;
-  }, [getPlantHypothesisResolutions, secondaryDataReady, storedPlants]);
+  }, [getPlantHypothesisResolutions, scopedPlants, secondaryDataReady]);
   const duePlantIds = useMemo(
     () =>
-      storedPlants
+      scopedPlants
         .filter((plant) => {
           const careAction = careActionByPlantId.get(plant.id);
           return careAction ? isDueCareActionState(careAction) : false;
         })
         .map((plant) => plant.id),
-    [careActionByPlantId, storedPlants]
+    [careActionByPlantId, scopedPlants]
   );
   const attentionCount = duePlantIds.length;
   const isReady = status === "ready";
@@ -135,6 +147,18 @@ export function HomeScreen() {
     const dismissedUntil = Number(window.localStorage.getItem(homeSetupDismissedKey) ?? "0");
     setIsHomeSetupDismissed(dismissedUntil > Date.now());
   }, []);
+  useEffect(() => {
+    if (!userId || !homes.length) return;
+    const key = `${selectedHomeStoragePrefix}${userId}`;
+    const stored = window.localStorage.getItem(key);
+    setSelectedHomeId(resolveSelectedHomeId({ storedHomeId: stored, homes, hasUnassignedPlants: Boolean(unassignedPlants.length) }));
+  }, [homes, unassignedPlants.length, userId]);
+  const chooseHome = (homeId: string) => {
+    setSelectedHomeId(homeId);
+    if (userId) {
+      window.localStorage.setItem(`${selectedHomeStoragePrefix}${userId}`, homeId);
+    }
+  };
   const dismissHomeSetup = () => {
     window.localStorage.setItem(homeSetupDismissedKey, String(Date.now() + 7 * 24 * 60 * 60 * 1000));
     setIsHomeSetupDismissed(true);
@@ -151,6 +175,26 @@ export function HomeScreen() {
   return (
     <main className="mx-auto min-h-screen w-full max-w-[430px] bg-cream">
       <HomeHeader />
+      {isReady && homes.length > 1 ? (
+        <section className="px-5 pt-4">
+          <label className="block rounded-[22px] bg-[#fffaf3] p-3 shadow-soft">
+            <span className="text-xs font-extrabold uppercase tracking-[0.08em] text-[#9a9286]">{t("homeContext.home")}</span>
+            <select value={selectedScope ?? ""} onChange={(event) => chooseHome(event.target.value)} className="mt-1 min-h-10 w-full rounded-[15px] bg-white/75 px-3 text-base font-extrabold text-[#565149] outline-none">
+              {homes.map((home) => (
+                <option key={home.id} value={home.id}>{home.name}</option>
+              ))}
+              {unassignedPlants.length ? <option value={noHomeSelectionId}>{t("homeContext.noHomeGroup")}</option> : null}
+            </select>
+          </label>
+        </section>
+      ) : null}
+      {isReady && homes.length === 1 && selectedScope === noHomeSelectionId && unassignedPlants.length ? (
+        <section className="px-5 pt-4">
+          <button type="button" onClick={() => chooseHome(homes[0].id)} className="min-h-11 w-full rounded-[18px] bg-[#fffaf3] px-4 text-sm font-extrabold text-[#2d7a4f] shadow-soft">
+            {t("homeContext.showHome").replace("{home}", homes[0].name)}
+          </button>
+        </section>
+      ) : null}
       {isReady && plants.length > 0 ? <AttentionBanner count={attentionCount} onActivate={focusAttentionPlant} /> : null}
       <div className="pb-[144px]">
         {status === "loading" ? <HomeSkeleton /> : null}

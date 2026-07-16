@@ -734,6 +734,35 @@ export class HomeRepository {
     return mapHome(data);
   }
 
+  async createFirstHomeWithLegacyImport(input: Omit<HomeContext, "id" | "createdAt">, roomImports: { legacyKey: string | null; name: string; include: boolean }[]) {
+    const { data, error } = await this.supabase.rpc("create_first_home_with_legacy_import", {
+      home_input: {
+        name: input.name,
+        city: input.city ?? null,
+        country: input.country ?? null,
+        type: input.type ?? null,
+        humidityLevel: input.humidityLevel ?? null,
+        hasAirConditioning: input.hasAirConditioning ?? null,
+        notes: input.notes ?? null
+      },
+      room_imports: roomImports
+    });
+
+    assertNoError(error);
+    return String(data);
+  }
+
+  async importLegacyPlantsToHome(homeId: string, roomImports: { legacyKey: string | null; name: string; include: boolean }[]) {
+    const { data, error } = await this.supabase.rpc("import_legacy_plants_to_home", {
+      target_home_id: homeId,
+      home_input: {},
+      room_imports: roomImports
+    });
+
+    assertNoError(error);
+    return String(data);
+  }
+
   async updateHome(homeId: string, input: Partial<Omit<HomeContext, "id" | "createdAt">>) {
     const { data, error } = await this.supabase
       .from("homes")
