@@ -1,7 +1,7 @@
 import { deriveCareActionState, isDueCareActionState } from "@/lib/plant-action-eligibility";
 import type { Plant, PlantHypothesisResolution } from "@/types/plant";
 
-const today = new Date("2026-07-15T12:00:00.000Z");
+const today = new Date("2026-07-16T12:00:00.000Z");
 
 function plant(overrides: Partial<Plant>): Plant {
   return {
@@ -69,6 +69,45 @@ export const careActionFixtures: CareActionFixture[] = [
       isActionable: false,
       cardBadgeKey: "status.observing",
       includedInAttentionCount: false
+    }
+  },
+  {
+    name: "scheduled soil check future without explicit next action",
+    plant: plant({ nextAction: null, nextCheckAt: "2026-07-18", lastSoilCheckedAt: "2026-07-13", lastSoilResult: "slightly_damp" }),
+    resolutions: [soilResolution({ resolvedAt: "2026-07-13T08:00:00.000Z", createdAt: "2026-07-13T08:00:00.000Z" })],
+    expected: {
+      actionType: "check_soil",
+      status: "upcoming",
+      cardVisualState: "observe",
+      isActionable: false,
+      cardBadgeKey: "status.observing",
+      includedInAttentionCount: false
+    }
+  },
+  {
+    name: "scheduled soil check due today without explicit next action",
+    plant: plant({ nextAction: null, nextCheckAt: "2026-07-16", lastSoilCheckedAt: "2026-07-14", lastSoilResult: "slightly_damp" }),
+    resolutions: [soilResolution({ resolvedAt: "2026-07-14T08:00:00.000Z", createdAt: "2026-07-14T08:00:00.000Z" })],
+    expected: {
+      actionType: "check_soil",
+      status: "due",
+      cardVisualState: "action_required",
+      isActionable: true,
+      cardBadgeKey: "status.checkSoilToday",
+      includedInAttentionCount: true
+    }
+  },
+  {
+    name: "scheduled soil check past without explicit next action",
+    plant: plant({ nextAction: null, nextCheckAt: "2026-07-15", lastSoilCheckedAt: "2026-07-13", lastSoilResult: "slightly_damp" }),
+    resolutions: [soilResolution({ resolvedAt: "2026-07-13T08:00:00.000Z", createdAt: "2026-07-13T08:00:00.000Z" })],
+    expected: {
+      actionType: "check_soil",
+      status: "due",
+      cardVisualState: "action_required",
+      isActionable: true,
+      cardBadgeKey: "status.checkSoilToday",
+      includedInAttentionCount: true
     }
   },
   {
@@ -200,6 +239,6 @@ const homeAttentionCount = careActionFixtures.filter((fixture) => {
   return isDueCareActionState(actual);
 }).length;
 
-if (homeAttentionCount !== 4) {
-  throw new Error(`Expected 4 due attention fixtures, got ${homeAttentionCount}`);
+if (homeAttentionCount !== 6) {
+  throw new Error(`Expected 6 due attention fixtures, got ${homeAttentionCount}`);
 }

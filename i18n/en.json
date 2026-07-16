@@ -336,7 +336,7 @@
   "plantAnalysis.conclusionDrainageNo": "Poor drainage can keep roots too wet, so watering should stay conservative.",
   "plantAnalysis.conclusionDrainageUnsure": "Drainage is still worth checking before heavy watering.",
   "plantAnalysis.actionBrightIndirect": "Keep it in bright indirect light.",
-  "plantAnalysis.actionDoNotRepot": "Do not repot again right now.",
+  "plantAnalysis.actionDoNotRepot": "Do not repot again right now: after a recent repot, the plant needs time to adapt.",
   "plantAnalysis.actionCheckSoil": "Check the soil before watering.",
   "plantAnalysis.actionPests": "Isolate the plant and inspect leaf undersides.",
   "plantAnalysis.actionRoots": "If roots were dark or soft, water carefully and watch new leaves.",

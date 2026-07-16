@@ -594,6 +594,7 @@ export async function POST(request: Request) {
   const currentCommonName = String(formData.get("currentCommonName") ?? "");
   const currentScientificName = String(formData.get("currentScientificName") ?? "");
   const currentDetectedSpecies = String(formData.get("currentDetectedSpecies") ?? "");
+  const currentLightCondition = String(formData.get("currentLightCondition") ?? "");
   const photoTypes = formData.getAll("photoTypes").map(String);
   const photoSources = formData.getAll("photoSources").map(String);
   const clientFileNames = formData.getAll("clientFileNames").map(String);
@@ -786,6 +787,8 @@ export async function POST(request: Request) {
           "When old damaged leaves, dry edges, scorch, or cosmetic marks are visible, clearly distinguish old irreversible tissue from new active symptoms. Explain that old damaged tissue will not recover when relevant.",
           "When recommending observation, be concrete: say what improvement looks like, what deterioration looks like, and how new growth should be used to judge progress.",
           "The most likely explanation must connect visible observations to species biology, recent plant history, and current context. Do not jump from observation directly to action.",
+          "The most likely explanation must also say why it is more likely than the main plausible alternatives when confidence is limited. Use cautious wording instead of certainty if drought stress, mechanical damage, repotting stress, and light stress are all possible.",
+          "Light recommendations must be operational. Compare advice to the current light context when provided: if the current place is acceptable, say to keep it unless new symptoms appear; if a change is needed, say exactly what to change, such as moving farther from direct rays without putting the plant in shade.",
           "For Haworthia and similar succulents, wet soil and abrupt direct sun are usually more important risks than short-term dry soil; old damaged leaves may remain marked while new growth shows recovery.",
           "Do not repeat species descriptions unless the trait directly supports the current recommendation for this plant.",
           "If a species trait does not change what the owner should do, watch, avoid, or ask next for this plant, omit it.",
@@ -802,7 +805,7 @@ export async function POST(request: Request) {
           "Do not claim measured soil moisture, root health when roots are not visible, pests that are not clearly visible, or exact disease diagnoses without sufficient visual evidence.",
           "For watering, prefer nextAction check_soil over water unless dry soil is directly visible or user-provided context confirms dryness.",
           `User locale: ${locale}. Photo types in order: ${photoTypes.join(", ") || "unknown"}.`,
-          `Current plant context, if this is a follow-up photo analysis: commonName="${currentCommonName || "unknown"}", scientificName="${currentScientificName || "unknown"}", detectedSpecies="${currentDetectedSpecies || "unknown"}".`,
+          `Current plant context, if this is a follow-up photo analysis: commonName="${currentCommonName || "unknown"}", scientificName="${currentScientificName || "unknown"}", detectedSpecies="${currentDetectedSpecies || "unknown"}", light="${currentLightCondition || "unknown"}".`,
           `Species care profiles: ${speciesProfilesPromptContext()}`
         ].join("\n")
       },

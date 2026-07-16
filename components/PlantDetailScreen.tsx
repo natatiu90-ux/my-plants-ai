@@ -252,6 +252,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       formData.append("currentCommonName", plant.speciesName ?? "");
       formData.append("currentScientificName", plant.scientificName ?? "");
       formData.append("currentDetectedSpecies", [plant.speciesName, plant.scientificName].filter(Boolean).join(" "));
+      formData.append("currentLightCondition", plant.lightConditionKey ? t(plant.lightConditionKey) : "");
 
       const response = await fetch("/api/analyze-plant", { method: "POST", body: formData });
       const payload = await response.json().catch(() => null);
@@ -332,7 +333,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           logNavigationEvent("detail", plant.id, fullCoverUrl ? "cover_full_image_ready" : "cover_thumbnail_ready");
         }}
       />
-      <PlantStatusSection plant={plant} careActionState={careActionState} />
+      <PlantStatusSection plant={plant} careActionState={careActionState} analysis={analysis} />
       {baselineQuestion ? (
         <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
           <p className="text-xs font-bold uppercase text-[#a09a90]">{baselineQuestion === "watering" ? t("baseline.welcome") : t("baseline.thanks")}</p>

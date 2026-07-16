@@ -5,7 +5,7 @@ import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
 import type { DerivedCareActionState } from "@/lib/plant-action-eligibility";
 import { plantCommonName } from "@/lib/plant-display";
-import type { Plant, PlantStatus } from "@/types/plant";
+import type { Plant, PlantAnalysisRecord, PlantStatus } from "@/types/plant";
 
 const badgeStatusByVisualState: Record<DerivedCareActionState["cardVisualState"], PlantStatus> = {
   healthy: "healthy",
@@ -29,17 +29,69 @@ function observeMessageKey(plant: Plant): TranslationKey {
   return "careAction.observeNewGrowth";
 }
 
-export function PlantStatusSection({ plant, careActionState }: { plant: Plant; careActionState: DerivedCareActionState | null }) {
+function localized(value: { en?: string | null; ru?: string | null } | undefined) {
+  return [value?.en, value?.ru].filter(Boolean).join(" ");
+}
+
+function analysisSuggestsObservation(analysis?: PlantAnalysisRecord) {
+  if (!analysis) {
+    return false;
+  }
+
+  if (analysis.condition && analysis.condition !== "healthy") {
+    return true;
+  }
+
+  const raw = analysis.rawResult;
+  const text = [
+    localized(analysis.summary),
+    ...analysis.recommendations.map((item) => [item.en, item.ru].filter(Boolean).join(" ")),
+    ...(raw?.visibleObservations ?? []).map(localized),
+    ...(raw?.careRightNow ?? []).map((item) => [localized(item.action), localized(item.reason)].join(" ")),
+    localized(raw?.reasoning?.currentSituation),
+    localized(raw?.reasoning?.diagnosisLogic),
+    localized(raw?.reasoning?.whyThisMatters)
+  ]
+    .join(" ")
+    .toLocaleLowerCase();
+
+  return [
+    "watch",
+    "observe",
+    "monitor",
+    "adapt",
+    "stress",
+    "damage",
+    "dry edge",
+    "brown edge",
+    "sun",
+    "наблю",
+    "адапт",
+    "стресс",
+    "повреж",
+    "сух",
+    "корич",
+    "солн"
+  ].some((keyword) => text.includes(keyword));
+}
+
+export function PlantStatusSection({ plant, careActionState, analysis }: { plant: Plant; careActionState: DerivedCareActionState | null; analysis?: PlantAnalysisRecord }) {
   const { t } = useI18n();
   const commonName = plantCommonName(plant);
-  const badgeKey = careActionState?.cardBadgeKey ?? plant.statusLabelKey;
+  const shouldObserveFromAnalysis =
+    careActionState?.cardVisualState !== "action_required" &&
+    (careActionState?.cardVisualState === "healthy" || (!careActionState && plant.status === "healthy")) &&
+    analysisSuggestsObservation(analysis);
+  const badgeKey = shouldObserveFromAnalysis ? "status.observing" : careActionState?.cardBadgeKey ?? plant.statusLabelKey;
   const message =
     careActionState?.actionType === "check_soil" && careActionState.status === "upcoming"
       ? t(observeMessageKey(plant))
       : careActionState
-        ? t(careActionState.detailMessageKey, careActionState.detailMessageParams)
+        ? shouldObserveFromAnalysis
+          ? t("careAction.observeNewGrowth")
+          : t(careActionState.detailMessageKey, careActionState.detailMessageParams)
         : t(plant.messageKey);
-  const badgeStatus = careActionState ? badgeStatusByVisualState[careActionState.cardVisualState] : plant.status;
+  const badgeStatus = shouldObserveFromAnalysis ? badgeStatusByVisualState.observe : careActionState ? badgeStatusByVisualState[careActionState.cardVisualState] : plant.status;
 
   return (
     <section className="mt-4 min-w-0 rounded-[28px] bg-[#fffaf3] p-5 shadow-soft">

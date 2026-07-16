@@ -336,7 +336,7 @@
   "plantAnalysis.conclusionDrainageNo": "Без дренажа корни могут дольше оставаться мокрыми, поэтому с поливом лучше осторожнее.",
   "plantAnalysis.conclusionDrainageUnsure": "Дренаж стоит проверить перед обильным поливом.",
   "plantAnalysis.actionBrightIndirect": "Оставь растение в ярком рассеянном свете.",
-  "plantAnalysis.actionDoNotRepot": "Не пересаживай повторно.",
+  "plantAnalysis.actionDoNotRepot": "Не пересаживай повторно: после недавней пересадки растению нужно время на адаптацию.",
   "plantAnalysis.actionCheckSoil": "Проверяй почву перед поливом.",
   "plantAnalysis.actionPests": "Изолируй растение и осмотри нижнюю сторону листьев.",
   "plantAnalysis.actionRoots": "Если были тёмные или мягкие корни, поливай осторожно и наблюдай за новыми листьями.",

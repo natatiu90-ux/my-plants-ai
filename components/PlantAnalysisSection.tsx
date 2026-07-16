@@ -438,7 +438,11 @@ export function PlantAnalysisSection({
                 : null;
     const density = recommendationDensity(analysis, activeHypotheses, Boolean(followUp));
     const meaningfulObservations = density === "healthy" ? [] : allMeaningfulObservations.slice(0, density === "minor" ? 1 : 3);
-    const whatNotToDo = unique([wasRepottedRecently ? t("plantAnalysis.actionDoNotRepot") : ""]);
+    const repeatRepottingRelevant =
+      wasRepottedRecently &&
+      (activeHypotheses.some((hypothesis) => hypothesis.id === "recent_repotting_context" || hypothesis.id === "repotting" || hypothesis.id === "root_condition") ||
+        includesAny(combinedText, ["repot", "transplant", "пересад", "адапт"]));
+    const whatNotToDo = unique([repeatRepottingRelevant ? t("plantAnalysis.actionDoNotRepot") : ""]);
     const canonicalActions = unique([
       activeHypotheses.some((hypothesis) => hypothesis.id === "direct_sun") && sunResolution?.status !== "ruled_out" ? t("plantAnalysis.actionBrightIndirect") : "",
       !soilCheckedToday && !wateringResolution && (activeHypotheses.some((hypothesis) => hypothesis.id === "soil_condition") || plant.nextAction === "check_soil") ? t("plantAnalysis.actionCheckSoil") : "",

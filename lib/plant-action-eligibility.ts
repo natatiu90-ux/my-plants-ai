@@ -1,4 +1,3 @@
-import { toDateKey } from "@/lib/date-format";
 import type { TranslationKey } from "@/i18n/dictionaries";
 import type { Plant, PlantAction, PlantHypothesisResolution } from "@/types/plant";
 
@@ -34,6 +33,29 @@ function daysUntil(dateKey: string, today = new Date()) {
   return Math.ceil((target.getTime() - current.getTime()) / (24 * 60 * 60 * 1000));
 }
 
+function localDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dateKeyOnOrBefore(dateKey: string, today = new Date()) {
+  return dateKey.slice(0, 10) <= localDateKey(today);
+}
+
+function hasScheduledSoilCheckDue(plant: Plant, today = new Date()) {
+  if (!plant.nextCheckAt || plant.careScheduleStatus !== "active") {
+    return false;
+  }
+
+  if (plant.nextAction === "water" || plant.nextAction === "take_photo") {
+    return false;
+  }
+
+  return dateKeyOnOrBefore(plant.nextCheckAt, today);
+}
+
 function timingMessage(dateKey: string, today = new Date()) {
   const days = daysUntil(dateKey, today);
   if (days <= 1) {
@@ -52,7 +74,11 @@ function timingMessage(dateKey: string, today = new Date()) {
 }
 
 export function shouldShowSoilCheckAction(plant: Plant, hypothesisResolutions: PlantHypothesisResolution[], today = new Date()) {
-  if (plant.nextAction !== "check_soil") {
+  if (plant.nextAction !== "check_soil" && !hasScheduledSoilCheckDue(plant, today)) {
+    return false;
+  }
+
+  if (plant.nextCheckAt && !dateKeyOnOrBefore(plant.nextCheckAt, today)) {
     return false;
   }
 
@@ -65,12 +91,12 @@ export function shouldShowSoilCheckAction(plant: Plant, hypothesisResolutions: P
     return false;
   }
 
-  return plant.nextCheckAt <= toDateKey(today);
+  return dateKeyOnOrBefore(plant.nextCheckAt, today);
 }
 
-export function eligiblePrimaryCareAction(plant: Plant, hypothesisResolutions: PlantHypothesisResolution[]): PlantAction {
-  if (plant.nextAction === "check_soil") {
-    return shouldShowSoilCheckAction(plant, hypothesisResolutions) ? "check_soil" : null;
+export function eligiblePrimaryCareAction(plant: Plant, hypothesisResolutions: PlantHypothesisResolution[], today = new Date()): PlantAction {
+  if (plant.nextAction === "check_soil" || hasScheduledSoilCheckDue(plant, today)) {
+    return shouldShowSoilCheckAction(plant, hypothesisResolutions, today) ? "check_soil" : null;
   }
 
   return plant.nextAction ?? null;
@@ -97,7 +123,7 @@ export function deriveCareActionState(
     };
   }
 
-  const eligibleAction = eligiblePrimaryCareAction(plant, hypothesisResolutions);
+  const eligibleAction = eligiblePrimaryCareAction(plant, hypothesisResolutions, today);
   const soilResolution = latestSoilResolution(hypothesisResolutions);
   const nextCheckAt = plant.nextCheckAt ?? null;
 
@@ -147,7 +173,7 @@ export function deriveCareActionState(
     };
   }
 
-  if (plant.nextAction === "check_soil" && nextCheckAt && nextCheckAt > toDateKey(today)) {
+  if ((plant.nextAction === "check_soil" || (!plant.nextAction && plant.careScheduleStatus === "active")) && nextCheckAt && nextCheckAt > localDateKey(today)) {
     const message = timingMessage(nextCheckAt, today);
     return {
       actionType: "check_soil",
