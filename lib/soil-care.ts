@@ -166,7 +166,9 @@ export function calculateSoilCheckCareResolution(
     status = drainageConcern || profile === "drought_tolerant" ? "check_soon" : "healthy";
     replacementRecommendationId = drainageConcern ? "check_drainage_after_wet_soil" : "next_check_scheduled";
   } else {
-    days = profile === "moisture_loving" ? 1 : profile === "drought_tolerant" ? 2 : 2;
+    days = null;
+    nextAction = "check_soil";
+    status = "check_soon";
     replacementRecommendationId = "soil_check_guidance";
   }
 

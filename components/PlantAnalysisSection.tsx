@@ -438,9 +438,9 @@ export function PlantAnalysisSection({
                 : null;
     const density = recommendationDensity(analysis, activeHypotheses, Boolean(followUp));
     const meaningfulObservations = density === "healthy" ? [] : allMeaningfulObservations.slice(0, density === "minor" ? 1 : 3);
+    const whatNotToDo = unique([wasRepottedRecently ? t("plantAnalysis.actionDoNotRepot") : ""]);
     const canonicalActions = unique([
       activeHypotheses.some((hypothesis) => hypothesis.id === "direct_sun") && sunResolution?.status !== "ruled_out" ? t("plantAnalysis.actionBrightIndirect") : "",
-      wasRepottedRecently ? t("plantAnalysis.actionDoNotRepot") : "",
       !soilCheckedToday && !wateringResolution && (activeHypotheses.some((hypothesis) => hypothesis.id === "soil_condition") || plant.nextAction === "check_soil") ? t("plantAnalysis.actionCheckSoil") : "",
       activeHypotheses.some((hypothesis) => hypothesis.id === "pests") ? t("plantAnalysis.actionPests") : "",
       activeHypotheses.some((hypothesis) => hypothesis.id === "root_condition") ? t("plantAnalysis.actionRoots") : "",
@@ -470,7 +470,7 @@ export function PlantAnalysisSection({
             sunResolution?.status === "ruled_out" ? t("plantAnalysis.meaningSunRuledOut") : ""
           ])
         : "";
-    return { meaningfulObservations, keyTakeaway, likelyExplanation, lowConfidenceHypotheses, activeActions, answerConclusions, followUp, density };
+    return { meaningfulObservations, keyTakeaway, likelyExplanation, lowConfidenceHypotheses, activeActions, whatNotToDo, answerConclusions, followUp, density };
   }, [analysis, hypothesisResolutions, locale, milestones, plant, t]);
 
   if (!analysis || !view) {
@@ -531,6 +531,17 @@ export function PlantAnalysisSection({
           </ul>
         </div>
 
+        {view.whatNotToDo.length ? (
+          <div className="rounded-[20px] bg-white/65 p-3">
+            <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.whatNotToDo")}</p>
+            <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f]">
+              {view.whatNotToDo.map((action) => (
+                <li key={action}>{action}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         {view.followUp ? (
           <div className="rounded-[20px] bg-white/65 p-3">
             <p className="text-sm font-extrabold leading-5 text-[#4f4940]">{view.followUp.question}</p>
@@ -554,6 +565,7 @@ export function PlantAnalysisSection({
                 );
               })}
             </div>
+            {savingAnswerKey ? <p className="mt-3 text-xs font-bold text-[#8a8378]">{t("plantAnalysis.updatingRecommendations")}</p> : null}
             {answerError ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{answerError}</p> : null}
           </div>
         ) : null}

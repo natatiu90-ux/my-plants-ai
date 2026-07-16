@@ -78,10 +78,11 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const [isCompletingAction, setIsCompletingAction] = useState(false);
   const [fullCoverUrl, setFullCoverUrl] = useState<string | undefined>();
   const [baselineSaving, setBaselineSaving] = useState(false);
-  const [baselineDate, setBaselineDate] = useState(toDateKey(new Date()));
+  const [baselineDate, setBaselineDate] = useState("");
   const [photoAssessment, setPhotoAssessment] = useState<PhotoAssessmentState>({ status: "idle" });
   const loggedEvents = useRef(new Set<string>());
   const openedActionRef = useRef<string | null>(null);
+  const baselineDateInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!toast) {
@@ -167,6 +168,13 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const hasWateringBaseline = milestones.some((milestone) => milestone.type === "watered" || milestone.type === "watering_unknown") || Boolean(plant.lastWateredAt);
   const hasRepottingBaseline = milestones.some((milestone) => milestone.type === "repotted" || milestone.type === "repotting_unknown");
   const baselineQuestion = !hasWateringBaseline ? "watering" : !hasRepottingBaseline ? "repotting" : null;
+  const formattedBaselineDate = baselineDate
+    ? new Intl.DateTimeFormat(locale === "ru" ? "ru-RU" : "en-US", {
+        day: "numeric",
+        month: "long",
+        year: "numeric"
+      }).format(new Date(`${baselineDate}T12:00:00`))
+    : t("baseline.chooseDate");
 
   const completeWatering = async () => {
     if (isCompletingAction) {
@@ -210,10 +218,26 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     setBaselineSaving(true);
     try {
       await saveBaselineHistory(plant.id, { kind, eventDate, unknown });
+      setBaselineDate("");
       setToast(t("edit.saved"));
     } finally {
       setBaselineSaving(false);
     }
+  };
+
+  const openBaselineDatePicker = () => {
+    const input = baselineDateInputRef.current;
+    if (!input) {
+      return;
+    }
+
+    const picker = input as HTMLInputElement & { showPicker?: () => void };
+    if (picker.showPicker) {
+      picker.showPicker();
+      return;
+    }
+
+    input.click();
   };
 
   const analyzeNewPhotos = async (selectedPhotos: PendingPhotoUpload[], savedPhotos: PlantPhoto[]) => {
@@ -340,7 +364,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
             {baselineQuestion === "watering" ? t("baseline.wateringHelper") : t("baseline.repottingHelper")}
           </p>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <button type="button" disabled={baselineSaving} onClick={() => void saveBaselineAnswer(baselineQuestion, toDateKey(new Date()))} className="min-h-11 rounded-[16px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f] disabled:opacity-60">
+            <button type="button" disabled={baselineSaving} onClick={() => void saveBaselineAnswer(baselineQuestion, toDateKey(new Date()))} className="min-h-11 rounded-[16px] bg-white px-3 text-sm font-extrabold text-[#5f594f] disabled:opacity-60">
               {t("addPlant.waterToday")}
             </button>
             <button type="button" disabled={baselineSaving} onClick={() => void saveBaselineAnswer(baselineQuestion, toDateKey(addDays(new Date(), -1)))} className="min-h-11 rounded-[16px] bg-white px-3 text-sm font-extrabold text-[#5f594f] disabled:opacity-60">
@@ -353,24 +377,33 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
               {t("addPlant.waterUnknown")}
             </button>
           </div>
-          <div className="mt-3 rounded-[18px] bg-white/70 p-3">
-            <label className="text-xs font-bold uppercase text-[#a09a90]" htmlFor="baseline-date">
-              {t("addPlant.waterChooseDate")}
-            </label>
-            <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-              <input
-                id="baseline-date"
-                type="date"
-                max={toDateKey(new Date())}
-                value={baselineDate}
-                onChange={(event) => setBaselineDate(event.target.value)}
-                className="block min-h-11 w-full min-w-0 max-w-full overflow-hidden rounded-[16px] bg-[#fffaf3] px-3 text-base font-bold text-[#3f3b35] outline-none"
-              />
-              <button type="button" disabled={baselineSaving} onClick={() => void saveBaselineAnswer(baselineQuestion, baselineDate)} className="min-h-11 rounded-[16px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f] disabled:opacity-60">
-                {t("addPlant.add")}
-              </button>
-            </div>
-          </div>
+          <button
+            type="button"
+            disabled={baselineSaving}
+            onClick={openBaselineDatePicker}
+            className="mt-3 flex min-h-14 w-full min-w-0 items-center justify-between gap-3 rounded-[18px] bg-white/70 p-3 text-left disabled:opacity-60"
+          >
+            <span className="min-w-0">
+              <span className="block text-xs font-bold uppercase text-[#a09a90]">{t("baseline.dateLabel")}</span>
+              <span className="mt-1 block truncate text-sm font-extrabold text-ink">{formattedBaselineDate}</span>
+            </span>
+            <span className="shrink-0 text-sm font-extrabold text-[#2d7a4f]">{t("baseline.changeDate")}</span>
+          </button>
+          <input
+            ref={baselineDateInputRef}
+            type="date"
+            max={toDateKey(new Date())}
+            value={baselineDate}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              setBaselineDate(value);
+              if (value) {
+                void saveBaselineAnswer(baselineQuestion, value);
+              }
+            }}
+            className="sr-only"
+            aria-label={t("baseline.dateLabel")}
+          />
         </section>
       ) : null}
       {photoAssessment.status !== "idle" ? (

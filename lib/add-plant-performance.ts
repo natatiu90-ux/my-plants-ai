@@ -15,6 +15,31 @@ type AddPlantPerformanceState = {
   entries: AddPlantPerformanceEntry[];
 };
 
+export type AddPlantPerformanceSummary = {
+  photos: number;
+  stages: Partial<Record<
+    | "image_loading"
+    | "exif_reading"
+    | "rotation_correction"
+    | "image_normalization"
+    | "canvas_resize"
+    | "jpeg_encoding"
+    | "indexeddb_write"
+    | "request_payload_creation"
+    | "network_upload"
+    | "ai_response_latency"
+    | "response_parsing"
+    | "ui_render_after_response",
+    number
+  >>;
+  totalMs: number;
+  bottleneckStage: string;
+  bottleneckMs: number;
+  bottleneckPercent: number;
+  data?: Record<string, unknown>;
+  entries: AddPlantPerformanceEntry[];
+};
+
 type StageToken = {
   active: boolean;
   stage: string;
@@ -24,6 +49,8 @@ type StageToken = {
 };
 
 const globalKey = "__myPlantsAddPlantPerformance";
+const summaryGlobalKey = "__myPlantsAddPlantPerformanceSummary";
+export const addPlantPerformanceSummaryEvent = "my-plants:add-plant-performance-summary";
 
 function isEnabled() {
   return typeof window !== "undefined" && process.env.NODE_ENV !== "production";
@@ -50,6 +77,7 @@ export function resetAddPlantPerformance(photos: number) {
     photos,
     entries: []
   };
+  delete (target as typeof target & { [summaryGlobalKey]?: AddPlantPerformanceSummary })[summaryGlobalKey];
   console.info("Add Plant Performance stage start", {
     stage: "pipeline",
     photos
@@ -123,7 +151,7 @@ export function recordAddPlantPerformanceStage(stage: string, elapsedMs: number,
 
 export function logAddPlantPerformanceSummary(data: Record<string, unknown> = {}) {
   const current = state();
-  if (!current) return;
+  if (!current) return null;
 
   const totalMs = Math.round(performance.now() - current.startedAt);
   const totals = current.entries.reduce<Record<string, number>>((result, entry) => {
@@ -132,6 +160,19 @@ export function logAddPlantPerformanceSummary(data: Record<string, unknown> = {}
   }, {});
   const bottleneck = Object.entries(totals).sort((a, b) => b[1] - a[1])[0] ?? ["none", 0];
   const bottleneckPercent = totalMs > 0 ? Math.round((bottleneck[1] / totalMs) * 100) : 0;
+  const summary: AddPlantPerformanceSummary = {
+    photos: current.photos,
+    stages: totals,
+    totalMs,
+    bottleneckStage: bottleneck[0],
+    bottleneckMs: bottleneck[1],
+    bottleneckPercent,
+    data,
+    entries: current.entries
+  };
+  const target = window as typeof window & { [summaryGlobalKey]?: AddPlantPerformanceSummary };
+  target[summaryGlobalKey] = summary;
+  window.dispatchEvent(new CustomEvent(addPlantPerformanceSummaryEvent, { detail: summary }));
 
   console.info("Add Plant Performance", {
     Photos: current.photos,
@@ -154,4 +195,10 @@ export function logAddPlantPerformanceSummary(data: Record<string, unknown> = {}
     ...data,
     entries: current.entries
   });
+  return summary;
+}
+
+export function getLastAddPlantPerformanceSummary() {
+  if (typeof window === "undefined") return null;
+  return ((window as typeof window & { [summaryGlobalKey]?: AddPlantPerformanceSummary })[summaryGlobalKey] ?? null);
 }

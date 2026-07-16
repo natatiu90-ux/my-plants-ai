@@ -749,6 +749,15 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       const plantMilestones = state.milestones.filter((milestone) => milestone.plantId === plantId);
       const plantHypothesisResolutions = state.hypothesisResolutions.filter((resolution) => resolution.plantId === plantId);
       const resolution = calculateSoilCheckCareResolution(currentPlant, result, plantMilestones, plantHypothesisResolutions);
+      const savedSoilResolution =
+        result === "not_sure"
+          ? null
+          : await repositories.hypothesisResolutions.saveResolution(plantId, {
+              hypothesis: "soil_condition",
+              status: result === "slightly_damp" ? "ruled_out" : "confirmed",
+              userResult: result,
+              evidenceSource: "soil_check"
+            });
       await repositories.analyses.resolveLatestActiveRecommendation(plantId, {
         action: "soil_checked",
         result,
@@ -800,7 +809,13 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           { id: `${plantId}-soil-${Date.now()}`, plantId, type: "soil_checked", createdAt: toDateKey(new Date()), metadata: { result } },
           ...current.careEvents
         ],
-        milestones: [milestone, ...current.milestones]
+        milestones: [milestone, ...current.milestones],
+        hypothesisResolutions: savedSoilResolution
+          ? [
+              savedSoilResolution,
+              ...current.hypothesisResolutions.filter((item) => item.plantId !== plantId || item.hypothesis !== "soil_condition")
+            ]
+          : current.hypothesisResolutions
       }));
     },
     [repositories, state.hypothesisResolutions, state.milestones, state.plants]

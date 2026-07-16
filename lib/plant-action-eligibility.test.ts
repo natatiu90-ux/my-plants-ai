@@ -111,6 +111,58 @@ export const careActionFixtures: CareActionFixture[] = [
     }
   },
   {
+    name: "dry soil answer can switch to watering action",
+    plant: plant({ nextAction: "water", nextCheckAt: undefined, lastSoilCheckedAt: "2026-07-15", lastSoilResult: "dry" }),
+    resolutions: [soilResolution({ status: "confirmed", userResult: "dry" })],
+    expected: {
+      actionType: "water",
+      status: "due",
+      cardVisualState: "action_required",
+      isActionable: true,
+      cardBadgeKey: "status.looksThirsty",
+      includedInAttentionCount: true
+    }
+  },
+  {
+    name: "slightly damp soil answer schedules future check",
+    plant: plant({ nextAction: "check_soil", nextCheckAt: "2026-07-18", lastSoilCheckedAt: "2026-07-15", lastSoilResult: "slightly_damp" }),
+    resolutions: [soilResolution({ status: "ruled_out", userResult: "slightly_damp" })],
+    expected: {
+      actionType: "check_soil",
+      status: "upcoming",
+      cardVisualState: "observe",
+      isActionable: false,
+      cardBadgeKey: "status.observing",
+      includedInAttentionCount: false
+    }
+  },
+  {
+    name: "very wet soil answer schedules future check",
+    plant: plant({ status: "check_soon", nextAction: "check_soil", nextCheckAt: "2026-07-18", lastSoilCheckedAt: "2026-07-15", lastSoilResult: "very_wet" }),
+    resolutions: [soilResolution({ status: "confirmed", userResult: "very_wet" })],
+    expected: {
+      actionType: "check_soil",
+      status: "upcoming",
+      cardVisualState: "observe",
+      isActionable: false,
+      cardBadgeKey: "status.observing",
+      includedInAttentionCount: false
+    }
+  },
+  {
+    name: "not sure soil answer keeps check guidance actionable",
+    plant: plant({ status: "check_soon", nextAction: "check_soil", lastSoilCheckedAt: "2026-07-15", lastSoilResult: "not_sure" }),
+    resolutions: [],
+    expected: {
+      actionType: "check_soil",
+      status: "due",
+      cardVisualState: "action_required",
+      isActionable: true,
+      cardBadgeKey: "status.checkSoilToday",
+      includedInAttentionCount: true
+    }
+  },
+  {
     name: "soil check waits for care context before showing due state",
     plant: plant({ status: "check_soon", nextAction: "check_soil", nextCheckAt: "2026-07-15" }),
     resolutions: [],
@@ -148,6 +200,6 @@ const homeAttentionCount = careActionFixtures.filter((fixture) => {
   return isDueCareActionState(actual);
 }).length;
 
-if (homeAttentionCount !== 2) {
-  throw new Error(`Expected 2 due attention fixtures, got ${homeAttentionCount}`);
+if (homeAttentionCount !== 4) {
+  throw new Error(`Expected 4 due attention fixtures, got ${homeAttentionCount}`);
 }

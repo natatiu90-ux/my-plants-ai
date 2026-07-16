@@ -6,7 +6,15 @@ import { Loader2, X } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
 import { clearAddPlantDraft, createAddPlantDraftId, createAnalysisRequestId, loadAddPlantDraft, saveAddPlantDraft, type AddPlantDraft } from "@/lib/add-plant-draft";
-import { endAddPlantPerformanceStage, logAddPlantPerformanceSummary, recordAddPlantPerformanceStage, startAddPlantPerformanceStage } from "@/lib/add-plant-performance";
+import {
+  addPlantPerformanceSummaryEvent,
+  endAddPlantPerformanceStage,
+  getLastAddPlantPerformanceSummary,
+  logAddPlantPerformanceSummary,
+  recordAddPlantPerformanceStage,
+  startAddPlantPerformanceStage,
+  type AddPlantPerformanceSummary
+} from "@/lib/add-plant-performance";
 import { appBuildStorageKey, appBuildVersion, isStandalonePwa } from "@/lib/app-version";
 import { inspectImageDisplay, normalizeImageBlob, readJpegExifOrientation } from "@/lib/client-image-normalization";
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
@@ -89,6 +97,22 @@ type RestoredDraftResult =
   | { status: "none" }
   | { status: "restored"; draft: AddPlantDraft; photos: PendingPhotoUpload[] }
   | { status: "failed"; message: string; photos: PendingPhotoUpload[] };
+
+const isAnalysisPerformancePanelEnabled = process.env.NEXT_PUBLIC_DEBUG_ANALYSIS === "true";
+const performanceRows: { label: string; reportLabel: string; key: keyof AddPlantPerformanceSummary["stages"] }[] = [
+  { label: "Image loading", reportLabel: "Decode", key: "image_loading" },
+  { label: "EXIF", reportLabel: "EXIF", key: "exif_reading" },
+  { label: "Rotation", reportLabel: "Rotation", key: "rotation_correction" },
+  { label: "Normalization", reportLabel: "Normalize", key: "image_normalization" },
+  { label: "Canvas resize", reportLabel: "Canvas", key: "canvas_resize" },
+  { label: "JPEG compression", reportLabel: "Compress", key: "jpeg_encoding" },
+  { label: "IndexedDB", reportLabel: "IndexedDB", key: "indexeddb_write" },
+  { label: "Payload creation", reportLabel: "Payload", key: "request_payload_creation" },
+  { label: "Network upload", reportLabel: "Upload", key: "network_upload" },
+  { label: "AI response", reportLabel: "AI", key: "ai_response_latency" },
+  { label: "Response parsing", reportLabel: "Parse", key: "response_parsing" },
+  { label: "UI render", reportLabel: "Render", key: "ui_render_after_response" }
+];
 
 const analysisStageCount = 4;
 const analysisRequestTargetBytes = 3 * 1024 * 1024;
@@ -188,6 +212,72 @@ function durationFromTrace(trace: unknown, startStage: string, endStage: string)
   return Number.isFinite(startedAt) && Number.isFinite(endedAt) && endedAt >= startedAt ? endedAt - startedAt : null;
 }
 
+function stageValue(summary: AddPlantPerformanceSummary, key: keyof AddPlantPerformanceSummary["stages"]) {
+  return typeof summary.stages[key] === "number" ? `${summary.stages[key]} ms` : "—";
+}
+
+function readableStageName(stage: string) {
+  return performanceRows.find((row) => row.key === stage)?.label ?? stage;
+}
+
+function buildPerformanceReport(summary: AddPlantPerformanceSummary) {
+  return [
+    "Add Plant Performance",
+    "",
+    `Photos: ${summary.photos}`,
+    "",
+    ...performanceRows.map((row) => `${row.reportLabel}: ${summary.stages[row.key] ?? "—"}`),
+    "",
+    `TOTAL: ${summary.totalMs}`,
+    "",
+    "Bottleneck:",
+    `${readableStageName(summary.bottleneckStage)} (${summary.bottleneckPercent}%)`
+  ].join("\n");
+}
+
+function AnalysisPerformancePanel({ summary }: { summary: AddPlantPerformanceSummary | null }) {
+  if (!isAnalysisPerformancePanelEnabled || !summary) {
+    return null;
+  }
+
+  const copyReport = () => {
+    void navigator.clipboard?.writeText(buildPerformanceReport(summary));
+  };
+
+  return (
+    <details className="mt-5 rounded-[20px] bg-white/80 p-3 text-left shadow-soft">
+      <summary className="cursor-pointer select-none font-rounded text-base font-extrabold text-[#3f3b35]">⚙️ Analysis Performance</summary>
+      <div className="mt-3 grid gap-2 text-sm font-bold leading-5 text-[#5f594f]">
+        <div className="flex items-center justify-between gap-3">
+          <span>Photos</span>
+          <span className="text-[#3f3b35]">{summary.photos}</span>
+        </div>
+        {performanceRows.map((row) => (
+          <div key={row.key} className="flex items-center justify-between gap-3 border-t border-[#eee7dc] pt-2">
+            <span>{row.label}</span>
+            <span className="text-[#3f3b35]">{stageValue(summary, row.key)}</span>
+          </div>
+        ))}
+        <div className="mt-2 border-t border-[#d8cfc1] pt-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="font-extrabold text-[#3f3b35]">TOTAL</span>
+            <span className="font-extrabold text-[#3f3b35]">{summary.totalMs} ms</span>
+          </div>
+          <div className="mt-3 grid gap-1 rounded-[16px] bg-[#fff8e8] p-3">
+            <p className="text-xs font-black uppercase tracking-[0.08em] text-[#a0783e]">Slowest stage</p>
+            <p className="font-extrabold text-[#3f3b35]">{readableStageName(summary.bottleneckStage)}</p>
+            <p>Time: {summary.bottleneckMs} ms</p>
+            <p>Share: {summary.bottleneckPercent}%</p>
+          </div>
+        </div>
+        <button type="button" onClick={copyReport} className="mt-2 min-h-10 rounded-[16px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
+          Copy report
+        </button>
+      </div>
+    </details>
+  );
+}
+
 async function prepareImageForAnalysis(blob: Blob, fileName: string) {
   const [display, exifOrientation] = await Promise.all([inspectImageDisplay(blob), readJpegExifOrientation(blob)]);
   if (!display.succeeded || !display.width || !display.height) {
@@ -247,6 +337,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [saveDiagnostic, setSaveDiagnostic] = useState<PlantCreationDiagnostic | null>(null);
   const [analysisStageIndex, setAnalysisStageIndex] = useState(0);
   const [showLongAnalysisHint, setShowLongAnalysisHint] = useState(false);
+  const [performanceSummary, setPerformanceSummary] = useState<AddPlantPerformanceSummary | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [analysisAttempt, setAnalysisAttempt] = useState(0);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
@@ -291,6 +382,22 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
 
     setIsPhotoPickerDebugEnabled(window.localStorage.getItem(photoPickerDebugStorageKey) === "1");
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!isAnalysisPerformancePanelEnabled) {
+      return;
+    }
+
+    setPerformanceSummary(getLastAddPlantPerformanceSummary());
+    const handleSummary = (event: Event) => {
+      setPerformanceSummary((event as CustomEvent<AddPlantPerformanceSummary>).detail ?? getLastAddPlantPerformanceSummary());
+    };
+    window.addEventListener(addPlantPerformanceSummaryEvent, handleSummary);
+
+    return () => {
+      window.removeEventListener(addPlantPerformanceSummaryEvent, handleSummary);
+    };
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -594,11 +701,8 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       let httpStatus: number | null = null;
       let finalRequestPayloadSize = 0;
       const preparationStartedAt = Date.now();
+      let uploadToken: ReturnType<typeof startAddPlantPerformanceStage> | null = null;
       try {
-        const payloadToken = startAddPlantPerformanceStage("request_payload_creation", {
-          selectedPhotos: selectedPhotos.length,
-          maxSelectedPhotos
-        });
         const formData = new FormData();
         const nextPreparationDiagnostics: ClientImagePreparationDiagnostic[] = [];
         const preparedItems: {
@@ -729,6 +833,11 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           throw new Error("image_preparation_failed");
         }
 
+        const payloadToken = startAddPlantPerformanceStage("request_payload_creation", {
+          selectedPhotos: selectedPhotos.length,
+          maxSelectedPhotos,
+          finalRequestPayloadSize: totalOutgoingRequestSize
+        });
         for (const item of preparedItems) {
           const { photo, diagnostic, preparedImage } = item;
           diagnostic.compressedSize = preparedImage.file.size;
@@ -790,7 +899,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
 
         formData.append("locale", locale);
         requestStartedAt = Date.now();
-        const uploadToken = startAddPlantPerformanceStage("network_upload", {
+        uploadToken = startAddPlantPerformanceStage("network_upload", {
           finalRequestPayloadSize: totalOutgoingRequestSize,
           selectedPhotos: selectedPhotos.length,
           note: "fetch duration includes upload, server analysis wait, and response headers"
@@ -803,6 +912,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         endAddPlantPerformanceStage(uploadToken, {
           httpStatus: response.status
         });
+        uploadToken = null;
         httpStatus = response.status;
         const parseToken = startAddPlantPerformanceStage("response_parsing", {
           httpStatus
@@ -883,6 +993,13 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         setScientificName(nextScientificName);
         setHomeName((current) => current || ensureSuggestedNickname());
       } catch (error) {
+        if (uploadToken) {
+          endAddPlantPerformanceStage(uploadToken, {
+            ok: false,
+            error: error instanceof Error ? error.message : "network_or_analysis_failed"
+          });
+          uploadToken = null;
+        }
         if (activeAnalysisRequestIdRef.current !== requestId || discardedDraftRef.current) {
           return;
         }
@@ -1616,6 +1733,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
               </div>
             </>
           )}
+          {(step === "confirm" || analysisFailed) ? <AnalysisPerformancePanel summary={performanceSummary} /> : null}
         </div>
         <div className="shrink-0 border-t border-[#efe6d8] bg-[#fffaf3] px-5 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-3">
           <button

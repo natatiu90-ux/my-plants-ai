@@ -117,17 +117,18 @@ export function deriveCareActionState(
   }
 
   if (eligibleAction === "check_soil") {
+    const needsSoilGuidance = plant.lastSoilResult === "not_sure" && !soilResolution;
     return {
       actionType: "check_soil",
       status: "due",
       cardVisualState: "action_required",
       isActionable: true,
       dueAt: nextCheckAt,
-      labelKey: "actions.check_soil",
+      labelKey: needsSoilGuidance ? "actions.how_check_soil" : "actions.check_soil",
       cardBadgeKey: "status.checkSoilToday",
-      cardMessageKey: "careAction.checkSoilDue",
-      detailMessageKey: "careAction.checkSoilDue",
-      reason: soilResolution ? "soil_check_due_after_previous_answer" : "soil_check_due"
+      cardMessageKey: needsSoilGuidance ? "careAction.soilCheckGuidance" : "careAction.checkSoilDue",
+      detailMessageKey: needsSoilGuidance ? "careAction.soilCheckGuidance" : "careAction.checkSoilDue",
+      reason: needsSoilGuidance ? "soil_check_guidance_needed" : soilResolution ? "soil_check_due_after_previous_answer" : "soil_check_due"
     };
   }
 
