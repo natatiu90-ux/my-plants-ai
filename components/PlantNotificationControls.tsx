@@ -21,7 +21,7 @@ export function PlantNotificationControls({ plant }: { plant: Plant }) {
     }
   };
   const nextCheckCopy = plant.nextCheckAt
-    ? t("careAction.nextCheckOnDate", { date: formatLongDate(plant.nextCheckAt, locale) })
+    ? formatLongDate(plant.nextCheckAt, locale)
     : t("plantDetail.notYet");
 
   return (
@@ -29,9 +29,6 @@ export function PlantNotificationControls({ plant }: { plant: Plant }) {
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h2 className="font-rounded text-xl font-extrabold text-ink">{t("notifications.plantTitle")}</h2>
-          <p className="mt-1 max-w-full text-sm font-bold leading-5 text-[#8b8173] [overflow-wrap:anywhere]">
-            {nextCheckCopy}
-          </p>
         </div>
         <button
           type="button"
@@ -42,6 +39,10 @@ export function PlantNotificationControls({ plant }: { plant: Plant }) {
           {plant.notificationEnabled ? <Bell aria-hidden="true" size={17} /> : <BellOff aria-hidden="true" size={17} />}
           {plant.notificationEnabled ? t("notifications.plantOn") : t("notifications.plantOff")}
         </button>
+      </div>
+      <div className="mt-4 rounded-[20px] bg-white/65 p-3">
+        <p className="text-xs font-bold uppercase text-[#a09a90]">{t("notifications.nextSoilCheck")}</p>
+        <p className="mt-1 text-base font-extrabold leading-6 text-[#3f3b35] [overflow-wrap:anywhere]">{nextCheckCopy}</p>
       </div>
     </section>
   );

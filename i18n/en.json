@@ -92,6 +92,7 @@
   "notifications.plantOn": "On",
   "notifications.plantOff": "Off",
   "notifications.nextCheckDate": "Next check",
+  "notifications.nextSoilCheck": "Next soil check",
   "notifications.setDueNow": "Make due today",
   "addPlant.title": "Add a plant",
   "addPlant.message": "The full add-plant flow will live here soon.",

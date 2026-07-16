@@ -92,6 +92,7 @@
   "notifications.plantOn": "Вкл",
   "notifications.plantOff": "Выкл",
   "notifications.nextCheckDate": "Следующая проверка",
+  "notifications.nextSoilCheck": "Следующая проверка почвы",
   "notifications.setDueNow": "Сделать проверку сегодняшней",
   "addPlant.title": "Добавить растение",
   "addPlant.message": "Полный сценарий добавления растения появится здесь позже.",
