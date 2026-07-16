@@ -1,16 +1,15 @@
 "use client";
 
-import { CalendarCheck, Droplets, MapPin, SunMedium } from "lucide-react";
+import { Droplets, MapPin, SunMedium } from "lucide-react";
 import { formatRelativeDate } from "@/lib/date-format";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
-import type { DerivedCareActionState } from "@/lib/plant-action-eligibility";
 import type { TranslationKey } from "@/i18n/dictionaries";
 import type { Plant } from "@/types/plant";
 import { CareInfoRow } from "./CareInfoRow";
 import { roomOptions } from "./RoomPicker";
 
-export function CareSummary({ plant, careActionState }: { plant: Plant; careActionState: DerivedCareActionState | null }) {
+export function CareSummary({ plant }: { plant: Plant }) {
   const { locale, t } = useI18n();
   const { rooms } = usePlantStore();
   const builtInRoomKeys = roomOptions as readonly string[];
@@ -25,14 +24,6 @@ export function CareSummary({ plant, careActionState }: { plant: Plant; careActi
       label: t("plantDetail.lastWatered"),
       value: formatRelativeDate(plant.lastWateredAt, locale, t("plantDetail.notYet")),
       icon: <Droplets aria-hidden="true" size={18} />
-    },
-    {
-      label: t("plantDetail.nextCheck"),
-      value:
-        careActionState?.actionType === "check_soil" && careActionState.status === "upcoming"
-          ? t(careActionState.detailMessageKey, careActionState.detailMessageParams)
-          : formatRelativeDate(plant.nextCheckAt, locale, t("plantDetail.notYet")),
-      icon: <CalendarCheck aria-hidden="true" size={18} />
     },
     ...(plant.roomKey
       ? [
@@ -52,7 +43,7 @@ export function CareSummary({ plant, careActionState }: { plant: Plant; careActi
 
   return (
     <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
-      <h2 className="mb-3 px-1 font-rounded text-xl font-extrabold text-ink">{t("plantDetail.careNow")}</h2>
+      <h2 className="mb-3 px-1 font-rounded text-xl font-extrabold text-ink">{t("plantDetail.careAndConditions")}</h2>
       <div className="grid gap-2">
         {rows.map((row) => (
           <CareInfoRow key={row.label} {...row} />

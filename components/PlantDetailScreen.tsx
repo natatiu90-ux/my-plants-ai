@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
-import { addDays, toDateKey } from "@/lib/date-format";
+import { addDays, formatLongDate, toDateKey } from "@/lib/date-format";
 import { plantDisplayName } from "@/lib/plant-display";
 import { deriveCareActionState } from "@/lib/plant-action-eligibility";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
@@ -168,13 +168,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const hasWateringBaseline = milestones.some((milestone) => milestone.type === "watered" || milestone.type === "watering_unknown") || Boolean(plant.lastWateredAt);
   const hasRepottingBaseline = milestones.some((milestone) => milestone.type === "repotted" || milestone.type === "repotting_unknown");
   const baselineQuestion = !hasWateringBaseline ? "watering" : !hasRepottingBaseline ? "repotting" : null;
-  const formattedBaselineDate = baselineDate
-    ? new Intl.DateTimeFormat(locale === "ru" ? "ru-RU" : "en-US", {
-        day: "numeric",
-        month: "long",
-        year: "numeric"
-      }).format(new Date(`${baselineDate}T12:00:00`))
-    : t("baseline.chooseDate");
+  const formattedBaselineDate = baselineDate ? formatLongDate(baselineDate, locale) : t("baseline.chooseDate");
 
   const completeWatering = async () => {
     if (isCompletingAction) {
@@ -424,8 +418,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       >
         {t("photos.addNewPhotos")}
       </button>
-      <CareSummary plant={plant} careActionState={careActionState} />
-      <PlantNotificationControls plant={plant} careActionState={careActionState} />
+      <CareSummary plant={plant} />
+      <PlantNotificationControls plant={plant} />
       <PhotoGallery photos={photos} onAddPhoto={() => setSheet("add_photo")} />
       <CareHistory milestones={milestones} onAddEvent={() => setSheet("add_event")} />
 

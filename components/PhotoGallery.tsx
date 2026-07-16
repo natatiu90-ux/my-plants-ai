@@ -23,16 +23,16 @@ export function PhotoGallery({
 
   return (
     <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
-      <div className="mb-3 flex items-center justify-between gap-3 px-1">
-        <h2 className="font-rounded text-xl font-extrabold text-ink">{t("photos.title")}</h2>
+      <div className="mb-3 flex min-w-0 items-center justify-between gap-2 px-1">
+        <h2 className="min-w-0 flex-1 truncate font-rounded text-xl font-extrabold text-ink">{t("photos.title")}</h2>
         {onAddPhoto ? (
-          <button type="button" onClick={onAddPhoto} className="flex min-h-10 items-center gap-1 rounded-full bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
+          <button type="button" onClick={onAddPhoto} className="flex min-h-10 shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
             <Plus aria-hidden="true" size={16} />
             {t("photos.addPhotos")}
           </button>
         ) : null}
       </div>
-      <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
+      <div className="flex max-w-full gap-3 overflow-x-auto pb-1">
         {photos.map((photo) => (
           <PhotoCard
             key={photo.id}

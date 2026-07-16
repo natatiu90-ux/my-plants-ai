@@ -40,3 +40,11 @@ export function formatShortDate(dateKey: string, locale: Locale) {
     month: "long"
   }).format(new Date(`${dateKey}T12:00:00`));
 }
+
+export function formatLongDate(dateKey: string, locale: Locale) {
+  return new Intl.DateTimeFormat(locale, {
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  }).format(new Date(`${dateKey}T12:00:00`));
+}

@@ -497,17 +497,17 @@ export function PlantAnalysisSection({
   };
 
   return (
-    <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
-      <h2 className="px-1 font-rounded text-xl font-extrabold text-ink">{t("plantAnalysis.title")}</h2>
+    <section className="mt-4 min-w-0 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
+      <h2 className="px-1 font-rounded text-xl font-extrabold text-ink [overflow-wrap:anywhere]">{t("plantAnalysis.title")}</h2>
       <div className="mt-3 grid gap-2">
-        <div className="rounded-[22px] bg-[#eef5e8] p-3">
-          <p className="text-sm font-extrabold leading-5 text-[#355f3d]">{view.keyTakeaway}</p>
+        <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
+          <p className="text-sm font-extrabold leading-5 text-[#355f3d] [overflow-wrap:anywhere]">{view.keyTakeaway}</p>
         </div>
 
         {view.meaningfulObservations.length ? (
-          <div className="rounded-[20px] bg-white/65 p-3">
+          <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
             <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.observations")}</p>
-            <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f]">
+            <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f] [overflow-wrap:anywhere]">
               {view.meaningfulObservations.map((item) => (
                 <li key={item}>{item}</li>
               ))}
@@ -516,15 +516,15 @@ export function PlantAnalysisSection({
         ) : null}
 
         {view.likelyExplanation ? (
-          <div className="rounded-[20px] bg-white/65 p-3">
+          <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
             <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.mostLikelyCause")}</p>
-            <p className="mt-2 text-sm font-bold leading-5 text-[#4f4940]">{view.likelyExplanation}</p>
+            <p className="mt-2 text-sm font-bold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{view.likelyExplanation}</p>
           </div>
         ) : null}
 
-        <div className="rounded-[20px] bg-white/65 p-3">
+        <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
           <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.currentAction")}</p>
-          <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f]">
+          <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f] [overflow-wrap:anywhere]">
             {view.activeActions.map((action) => (
               <li key={action}>{action}</li>
             ))}
@@ -532,9 +532,9 @@ export function PlantAnalysisSection({
         </div>
 
         {view.whatNotToDo.length ? (
-          <div className="rounded-[20px] bg-white/65 p-3">
+          <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
             <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.whatNotToDo")}</p>
-            <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f]">
+            <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f] [overflow-wrap:anywhere]">
               {view.whatNotToDo.map((action) => (
                 <li key={action}>{action}</li>
               ))}
@@ -543,9 +543,9 @@ export function PlantAnalysisSection({
         ) : null}
 
         {view.followUp ? (
-          <div className="rounded-[20px] bg-white/65 p-3">
-            <p className="text-sm font-extrabold leading-5 text-[#4f4940]">{view.followUp.question}</p>
-            <p className="mt-1 text-xs font-bold leading-4 text-[#8a8378]">{view.followUp.reason}</p>
+          <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
+            <p className="text-sm font-extrabold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{view.followUp.question}</p>
+            <p className="mt-1 text-xs font-bold leading-4 text-[#8a8378] [overflow-wrap:anywhere]">{view.followUp.reason}</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {view.followUp.options.map((option) => {
                 const answerKey = `${view.followUp!.hypothesis}:${option.result}`;
@@ -571,9 +571,9 @@ export function PlantAnalysisSection({
         ) : null}
 
         {view.answerConclusions.length ? (
-          <details className="rounded-[20px] bg-[#eef5e8] p-3">
+          <details className="min-w-0 rounded-[20px] bg-[#eef5e8] p-3">
             <summary className="cursor-pointer text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.checkedFacts")}</summary>
-            <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#4f6946]">
+            <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#4f6946] [overflow-wrap:anywhere]">
               {view.answerConclusions.map((fact) => (
                 <li key={fact} className="flex gap-2">
                   <Check aria-hidden="true" size={16} className="mt-0.5 shrink-0" />
@@ -585,7 +585,7 @@ export function PlantAnalysisSection({
         ) : null}
 
         {view.density === "serious" && view.lowConfidenceHypotheses.length ? (
-          <div className="rounded-[20px] bg-white/45 p-3">
+          <div className="min-w-0 rounded-[20px] bg-white/45 p-3">
             <button
               type="button"
               onClick={() => setShowOtherCauses((value) => !value)}
@@ -595,7 +595,7 @@ export function PlantAnalysisSection({
               <ChevronDown aria-hidden="true" size={16} className={showOtherCauses ? "rotate-180 transition-transform" : "transition-transform"} />
             </button>
             {showOtherCauses ? (
-              <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#7a7166]">
+              <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#7a7166] [overflow-wrap:anywhere]">
                 {view.lowConfidenceHypotheses.map((hypothesis) => (
                   <li key={hypothesis.id}>{hypothesis.text}</li>
                 ))}

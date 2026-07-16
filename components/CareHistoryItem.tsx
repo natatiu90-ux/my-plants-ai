@@ -69,13 +69,13 @@ export function CareHistoryItem({ milestone }: { milestone: PlantMilestone }) {
   const eventDate = milestone.eventDate ?? milestone.createdAt;
 
   return (
-    <li className="flex gap-3 rounded-[22px] bg-white/55 px-3.5 py-4 shadow-[0_1px_7px_rgba(0,0,0,0.025)]">
+    <li className="flex min-w-0 gap-3 rounded-[22px] bg-white/55 px-3.5 py-4 shadow-[0_1px_7px_rgba(0,0,0,0.025)]">
       <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-[#f1eadf] text-xl">
         {milestoneIcons[milestone.type]}
       </span>
-      <div className="min-w-0">
-        <h3 className="font-rounded text-[16px] font-extrabold leading-5 text-[#332f2a]">{title}</h3>
-        {description ? <p className="mt-1 text-sm leading-5 text-[#676157]">{description}</p> : null}
+      <div className="min-w-0 flex-1">
+        <h3 className="font-rounded text-[16px] font-extrabold leading-5 text-[#332f2a] [overflow-wrap:anywhere]">{title}</h3>
+        {description ? <p className="mt-1 text-sm leading-5 text-[#676157] [overflow-wrap:anywhere]">{description}</p> : null}
         <p className="mt-2 text-xs font-bold text-[#a29a8f]">{formatRelativeDate(eventDate, locale, "")}</p>
       </div>
     </li>
