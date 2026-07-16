@@ -1,5 +1,6 @@
 "use client";
 
+import { Plus } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { PlantMilestone } from "@/types/plant";
 import { CareHistoryItem } from "./CareHistoryItem";
@@ -10,14 +11,16 @@ export function CareHistory({ milestones, onAddEvent }: { milestones: PlantMiles
   return (
     <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
       <div className="mb-3 flex min-w-0 items-center justify-between gap-2 px-1">
-        <h2 className="min-w-0 flex-1 truncate font-rounded text-xl font-extrabold text-ink">{t("plantDetail.story")}</h2>
+        <h2 className="min-w-0 flex-1 font-rounded text-xl font-extrabold leading-6 text-ink">{t("plantDetail.story")}</h2>
         {onAddEvent ? (
           <button
             type="button"
             onClick={onAddEvent}
-            className="flex min-h-10 shrink-0 items-center gap-1 whitespace-nowrap rounded-[16px] bg-[#ddf2dc] px-3 text-xs font-extrabold text-[#2d7a4f]"
+            aria-label={t("story.addEventLabel")}
+            title={t("story.addEventLabel")}
+            className="flex size-10 shrink-0 items-center justify-center rounded-[16px] bg-[#ddf2dc] text-[#2d7a4f]"
           >
-            {t("story.addEvent")}
+            <Plus aria-hidden="true" size={18} />
           </button>
         ) : null}
       </div>
