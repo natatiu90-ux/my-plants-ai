@@ -1,5 +1,7 @@
 "use client";
 
+import { endAddPlantPerformanceStage, startAddPlantPerformanceStage } from "@/lib/add-plant-performance";
+
 export type NormalizedImageResult = {
   blob: Blob;
   originalWidth: number;
@@ -83,6 +85,21 @@ export async function readJpegExifOrientation(blob: Blob): Promise<number | null
   }
 
   return null;
+}
+
+async function withPerformanceStage<T>(stage: string, data: Record<string, unknown>, action: () => Promise<T>, label?: string) {
+  const token = startAddPlantPerformanceStage(stage, data, label);
+  try {
+    const result = await action();
+    endAddPlantPerformanceStage(token, { ok: true });
+    return result;
+  } catch (error) {
+    endAddPlantPerformanceStage(token, {
+      ok: false,
+      error: error instanceof Error ? error.message : "unknown_error"
+    });
+    throw error;
+  }
 }
 
 export async function inspectImageDisplay(blob: Blob): Promise<{ succeeded: boolean; width: number | null; height: number | null }> {
@@ -234,9 +251,19 @@ export async function normalizeImageBlob(
   blob: Blob,
   options: { maxSide: number; qualities: number[]; targetBytes?: number }
 ): Promise<NormalizedImageResult> {
-  const [exifOrientation, displayedImage] = await Promise.all([readJpegExifOrientation(blob), inspectImageDisplay(blob)]);
+  const normalizationToken = startAddPlantPerformanceStage("image_normalization", {
+    originalSize: blob.size,
+    originalType: blob.type,
+    maxSide: options.maxSide,
+    qualities: options.qualities
+  });
+  try {
+  const [exifOrientation, displayedImage] = await Promise.all([
+    withPerformanceStage("exif_reading", { blobSize: blob.size, blobType: blob.type }, () => readJpegExifOrientation(blob), "normalize"),
+    withPerformanceStage("image_loading", { blobSize: blob.size, blobType: blob.type }, () => inspectImageDisplay(blob), "display")
+  ]);
   const orientation = exifOrientation ?? 1;
-  const loaded = await loadBitmap(blob);
+  const loaded = await withPerformanceStage("image_loading", { blobSize: blob.size, blobType: blob.type }, () => loadBitmap(blob), "bitmap");
   const bitmap = loaded.image;
 
   try {
@@ -264,16 +291,38 @@ export async function normalizeImageBlob(
       const scale = Math.min(1, maxSide / Math.max(visualWidth, visualHeight));
       const normalizedWidth = Math.max(1, Math.round(visualWidth * scale));
       const normalizedHeight = Math.max(1, Math.round(visualHeight * scale));
+      const canvasToken = startAddPlantPerformanceStage("canvas_resize", {
+        sourceWidth,
+        sourceHeight,
+        visualWidth,
+        visualHeight,
+        normalizedWidth,
+        normalizedHeight,
+        scale,
+        maxSide
+      });
       const canvas = document.createElement("canvas");
       canvas.width = normalizedWidth;
       canvas.height = normalizedHeight;
       const context = canvas.getContext("2d");
       if (!context) {
+        endAddPlantPerformanceStage(canvasToken, { ok: false, error: "missing_canvas_context" });
         throw new Error("image_preparation_failed");
       }
 
       context.fillStyle = "#ffffff";
       context.fillRect(0, 0, normalizedWidth, normalizedHeight);
+      endAddPlantPerformanceStage(canvasToken, { ok: true });
+      const rotationToken = startAddPlantPerformanceStage("rotation_correction", {
+        orientation,
+        shouldApplyExifOrientation,
+        sourceWidth,
+        sourceHeight,
+        visualWidth,
+        visualHeight,
+        normalizedWidth,
+        normalizedHeight
+      });
       context.save();
       context.scale(scale, scale);
       if (shouldApplyExifOrientation) {
@@ -282,15 +331,31 @@ export async function normalizeImageBlob(
         context.drawImage(bitmap, 0, 0);
       }
       context.restore();
+      endAddPlantPerformanceStage(rotationToken, { ok: true });
 
       for (const quality of options.qualities) {
-        const candidate = await canvasToJpeg(canvas, quality);
+        const candidate = await withPerformanceStage(
+          "jpeg_encoding",
+          { quality, normalizedWidth, normalizedHeight },
+          () => canvasToJpeg(canvas, quality),
+          "normalize"
+        );
         if (!bestBlob || candidate.size < bestBlob.size) {
           bestBlob = candidate;
           bestWidth = normalizedWidth;
           bestHeight = normalizedHeight;
         }
         if (!options.targetBytes || candidate.size <= options.targetBytes) {
+          endAddPlantPerformanceStage(normalizationToken, {
+            ok: true,
+            originalWidth: sourceWidth,
+            originalHeight: sourceHeight,
+            normalizedWidth,
+            normalizedHeight,
+            normalizedSize: candidate.size,
+            exifOrientation,
+            orientationSource: loaded.orientationSource
+          });
           return {
             blob: candidate,
             originalWidth: sourceWidth,
@@ -306,9 +371,20 @@ export async function normalizeImageBlob(
     }
 
     if (!bestBlob) {
+      endAddPlantPerformanceStage(normalizationToken, { ok: false, error: "missing_best_blob" });
       throw new Error("image_preparation_failed");
     }
 
+    endAddPlantPerformanceStage(normalizationToken, {
+      ok: true,
+      originalWidth: sourceWidth,
+      originalHeight: sourceHeight,
+      normalizedWidth: bestWidth,
+      normalizedHeight: bestHeight,
+      normalizedSize: bestBlob.size,
+      exifOrientation,
+      orientationSource: loaded.orientationSource
+    });
     return {
       blob: bestBlob,
       originalWidth: sourceWidth,
@@ -321,6 +397,13 @@ export async function normalizeImageBlob(
     };
   } finally {
     closeBitmap(bitmap);
+  }
+  } catch (error) {
+    endAddPlantPerformanceStage(normalizationToken, {
+      ok: false,
+      error: error instanceof Error ? error.message : "image_preparation_failed"
+    });
+    throw error;
   }
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Leaf, Sprout } from "lucide-react";
 import { AttentionBanner } from "./AttentionBanner";
 import { FloatingAddButton } from "./FloatingAddButton";
@@ -9,6 +9,7 @@ import { PlantList } from "./PlantList";
 import { AddPlantWizard } from "./AddPlantWizard";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
+import { hasUnfinishedAddPlantDraft } from "@/lib/add-plant-draft";
 import { deriveCareActionState, isDueCareActionState, type DerivedCareActionState } from "@/lib/plant-action-eligibility";
 import type { Plant } from "@/types/plant";
 
@@ -103,6 +104,11 @@ export function HomeScreen() {
   );
   const attentionCount = duePlantIds.length;
   const isReady = status === "ready";
+  useEffect(() => {
+    if (hasUnfinishedAddPlantDraft()) {
+      setIsAddOpen(true);
+    }
+  }, []);
   const focusAttentionPlant = () => {
     const firstDuePlantId = duePlantIds[0];
     if (!firstDuePlantId) {

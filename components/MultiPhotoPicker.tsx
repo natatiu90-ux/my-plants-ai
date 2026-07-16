@@ -4,6 +4,7 @@ import { Camera, ImageIcon, X } from "lucide-react";
 import type { ChangeEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/i18n/I18nProvider";
+import { endAddPlantPerformanceStage, logAddPlantPerformanceSummary, resetAddPlantPerformance, startAddPlantPerformanceStage } from "@/lib/add-plant-performance";
 import { normalizeImageBlob, readJpegExifOrientation } from "@/lib/client-image-normalization";
 import { selectFilesWithinPhotoLimit } from "@/lib/photo-selection-limits";
 import { IndexedDbPhotoStorageError, PhotoStorageRepository, validateImageFile, type IndexedDbPhotoStorageDiagnostic } from "@/lib/photo-storage";
@@ -212,6 +213,7 @@ export function MultiPhotoPicker({
   selectedPhotosCount = 0,
   maxPhotos,
   limitMessage,
+  helperMessage,
   wizardStep,
   onDiagnostic
 }: {
@@ -222,6 +224,7 @@ export function MultiPhotoPicker({
   selectedPhotosCount?: number;
   maxPhotos?: number;
   limitMessage?: string;
+  helperMessage?: string | null;
   wizardStep?: string;
   onDiagnostic?: (diagnostic: PhotoPickerDiagnostic) => void;
 }) {
@@ -250,6 +253,7 @@ export function MultiPhotoPicker({
 
   const handleFiles = async (selectedFiles: File[], source: PendingPhotoUpload["source"]) => {
     setError(null);
+    resetAddPlantPerformance(selectedFiles.length);
 
     const baseDiagnostic: PhotoPickerDiagnostic = {
       eventFired: true,
@@ -300,12 +304,30 @@ export function MultiPhotoPicker({
           const file = filesToProcess[index];
           const debugId = createPhotoDebugId();
           const fileStartedAt = performance.now();
-          const decodeStartedAt = performance.now();
+          const decodeToken = startAddPlantPerformanceStage("image_loading", {
+            source,
+            debugId,
+            fileName: file.name,
+            originalSize: file.size,
+            mimeType: file.type
+          }, "picker_decode");
           const originalDecode = await inspectImageFile(file);
-          const decodeDurationMs = Math.round(performance.now() - decodeStartedAt);
-          const exifStartedAt = performance.now();
+          const decodeDurationMs = endAddPlantPerformanceStage(decodeToken, {
+            width: originalDecode.width,
+            height: originalDecode.height,
+            succeeded: originalDecode.succeeded
+          });
+          const exifToken = startAddPlantPerformanceStage("exif_reading", {
+            source,
+            debugId,
+            fileName: file.name,
+            originalSize: file.size,
+            mimeType: file.type
+          }, "picker_original");
           const originalExifOrientation = await readJpegExifOrientation(file);
-          const exifDurationMs = Math.round(performance.now() - exifStartedAt);
+          const exifDurationMs = endAddPlantPerformanceStage(exifToken, {
+            exifOrientation: originalExifOrientation
+          });
           logPhotoStage("photos_picker_selected", {
             debugId,
             source,
@@ -368,12 +390,30 @@ export function MultiPhotoPicker({
           const blobStartedAt = performance.now();
           const fileToStore = new File([normalized.blob], `${file.name.replace(/\.[^.]+$/, "") || "plant-photo"}.jpg`, { type: "image/jpeg" });
           const blobCreationDurationMs = Math.round(performance.now() - blobStartedAt);
-          const storedDecodeStartedAt = performance.now();
+          const storedDecodeToken = startAddPlantPerformanceStage("image_loading", {
+            source,
+            debugId,
+            fileName: fileToStore.name,
+            normalizedSize: fileToStore.size,
+            mimeType: fileToStore.type
+          }, "stored_jpeg_decode");
           const storedDecodeBeforeSave = await inspectImageFile(fileToStore);
-          const storedDecodeDurationMs = Math.round(performance.now() - storedDecodeStartedAt);
-          const storedExifStartedAt = performance.now();
+          const storedDecodeDurationMs = endAddPlantPerformanceStage(storedDecodeToken, {
+            width: storedDecodeBeforeSave.width,
+            height: storedDecodeBeforeSave.height,
+            succeeded: storedDecodeBeforeSave.succeeded
+          });
+          const storedExifToken = startAddPlantPerformanceStage("exif_reading", {
+            source,
+            debugId,
+            fileName: fileToStore.name,
+            normalizedSize: fileToStore.size,
+            mimeType: fileToStore.type
+          }, "stored_jpeg");
           const storedExifOrientation = await readJpegExifOrientation(fileToStore);
-          const storedExifDurationMs = Math.round(performance.now() - storedExifStartedAt);
+          const storedExifDurationMs = endAddPlantPerformanceStage(storedExifToken, {
+            exifOrientation: storedExifOrientation
+          });
           logPhotoStage("jpeg_saved_for_storage", {
             debugId,
             source,
@@ -390,9 +430,20 @@ export function MultiPhotoPicker({
           });
 
           let storedPhoto: Awaited<ReturnType<typeof PhotoStorageRepository.savePhoto>>;
+          const indexedDbToken = startAddPlantPerformanceStage("indexeddb_write", {
+            source,
+            debugId,
+            fileName: fileToStore.name,
+            normalizedSize: fileToStore.size,
+            mimeType: fileToStore.type
+          });
           try {
-            const indexedDbStartedAt = performance.now();
             storedPhoto = await PhotoStorageRepository.savePhoto(fileToStore);
+            const indexedDbWriteMs = endAddPlantPerformanceStage(indexedDbToken, {
+              storageId: storedPhoto.id,
+              storedRepresentation: storedPhoto.diagnostic?.storedRepresentation,
+              fallbackUsed: storedPhoto.diagnostic?.fallbackUsed
+            });
             logPhotoStage("photo_processing_timing", {
               debugId,
               source,
@@ -400,12 +451,16 @@ export function MultiPhotoPicker({
               blobCreationMs: blobCreationDurationMs,
               storedDecodeMs: storedDecodeDurationMs,
               storedExifMs: storedExifDurationMs,
-              indexedDbWriteMs: Math.round(performance.now() - indexedDbStartedAt),
+              indexedDbWriteMs,
               totalMs: Math.round(performance.now() - fileStartedAt)
             });
           } catch (error) {
             rejectedCount += 1;
             const indexedDb = indexedDbDiagnosticFromError(error);
+            endAddPlantPerformanceStage(indexedDbToken, {
+              ok: false,
+              error: indexedDb?.exceptionMessage ?? (error instanceof Error ? error.message : "indexeddb_write_failed")
+            });
             const message = indexedDb?.exceptionMessage ?? (error instanceof Error ? error.message : "indexeddb_write_failed");
             currentDiagnostic = {
               ...currentDiagnostic,
@@ -493,6 +548,11 @@ export function MultiPhotoPicker({
         setError(limitMessage);
       }
 
+      logAddPlantPerformanceSummary({
+        selectedPhotos: savedPhotos.length,
+        rejectedPhotos: rejectedCount,
+        stage: "photo_picker_complete"
+      });
       onSelect(savedPhotos, rejectedCount);
     } finally {
       setIsSaving(false);
@@ -571,6 +631,7 @@ export function MultiPhotoPicker({
             <ImageIcon aria-hidden="true" size={19} />
             {t("addPlant.chooseGallery")}
           </button>
+          {helperMessage ? <p className="rounded-[18px] bg-[#fff1d8] p-3 text-sm font-bold leading-5 text-[#8a6230]">{helperMessage}</p> : null}
           {isAtLimit && limitMessage ? <p className="rounded-[18px] bg-[#fff1d8] p-3 text-sm font-bold leading-5 text-[#8a6230]">{limitMessage}</p> : null}
           {error ? <p className="whitespace-pre-line rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{error}</p> : null}
           {debugEnabled ? <PhotoPickerDebugPanel diagnostic={diagnostic} selectedPhotosCount={selectedPhotosCount} onCopy={copyDiagnostic} /> : null}

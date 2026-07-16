@@ -5,11 +5,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, X } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
+import { clearAddPlantDraft, createAddPlantDraftId, createAnalysisRequestId, loadAddPlantDraft, saveAddPlantDraft, type AddPlantDraft } from "@/lib/add-plant-draft";
+import { endAddPlantPerformanceStage, logAddPlantPerformanceSummary, recordAddPlantPerformanceStage, startAddPlantPerformanceStage } from "@/lib/add-plant-performance";
 import { appBuildStorageKey, appBuildVersion, isStandalonePwa } from "@/lib/app-version";
 import { inspectImageDisplay, normalizeImageBlob, readJpegExifOrientation } from "@/lib/client-image-normalization";
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
 import { plantCreationDiagnosticFromError, type PlantCreationDiagnostic, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
+import { useScreenWakeLock } from "@/lib/use-screen-wake-lock";
 import { MultiPhotoPicker, PhotoPickerDebugPanel, type PhotoPickerDiagnostic } from "./MultiPhotoPicker";
 import { PhotoBatchReview } from "./PhotoBatchReview";
 import { PhotoImage } from "./PhotoImage";
@@ -82,6 +85,11 @@ type ClientImagePreparationDiagnostic = {
   errorMessage?: string;
 };
 
+type RestoredDraftResult =
+  | { status: "none" }
+  | { status: "restored"; draft: AddPlantDraft; photos: PendingPhotoUpload[] }
+  | { status: "failed"; message: string; photos: PendingPhotoUpload[] };
+
 const analysisStageCount = 4;
 const analysisRequestTargetBytes = 3 * 1024 * 1024;
 const analysisCompressionQualities = [0.82, 0.78, 0.75, 0.7, 0.66, 0.62];
@@ -128,6 +136,58 @@ function logAddPlantDebug(message: string, payload: Record<string, unknown>) {
   }
 }
 
+async function restoreAddPlantDraft(): Promise<RestoredDraftResult> {
+  const draft = loadAddPlantDraft();
+  if (!draft) {
+    return { status: "none" };
+  }
+
+  const restoredPhotos: PendingPhotoUpload[] = [];
+  for (const photo of draft.selectedPhotos) {
+    const blob = await PhotoStorageRepository.getPhoto(photo.storageId).catch(() => null);
+    if (!blob) {
+      continue;
+    }
+
+    restoredPhotos.push({
+      ...photo,
+      url: URL.createObjectURL(blob)
+    });
+  }
+
+  if (!restoredPhotos.length) {
+    return {
+      status: "failed",
+      message: "temporary_photos_missing",
+      photos: []
+    };
+  }
+
+  return {
+    status: "restored",
+    draft,
+    photos: restoredPhotos
+  };
+}
+
+function revokePhotoObjectUrls(photos: PendingPhotoUpload[]) {
+  photos.forEach((photo) => {
+    if (photo.url.startsWith("blob:")) {
+      URL.revokeObjectURL(photo.url);
+    }
+  });
+}
+
+function durationFromTrace(trace: unknown, startStage: string, endStage: string) {
+  if (!Array.isArray(trace)) return null;
+  const start = trace.find((event) => event && typeof event === "object" && (event as { stage?: unknown }).stage === startStage) as { at?: unknown } | undefined;
+  const end = trace.find((event) => event && typeof event === "object" && (event as { stage?: unknown }).stage === endStage) as { at?: unknown } | undefined;
+  if (typeof start?.at !== "string" || typeof end?.at !== "string") return null;
+  const startedAt = new Date(start.at).getTime();
+  const endedAt = new Date(end.at).getTime();
+  return Number.isFinite(startedAt) && Number.isFinite(endedAt) && endedAt >= startedAt ? endedAt - startedAt : null;
+}
+
 async function prepareImageForAnalysis(blob: Blob, fileName: string) {
   const [display, exifOrientation] = await Promise.all([inspectImageDisplay(blob), readJpegExifOrientation(blob)]);
   if (!display.succeeded || !display.width || !display.height) {
@@ -159,6 +219,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const searchParams = useSearchParams();
   const { locale, t } = useI18n();
   const { addPlant, plants, rooms, status, userId } = usePlantStore();
+  const [draftId, setDraftId] = useState(() => createAddPlantDraftId());
+  const [analysisRequestId, setAnalysisRequestId] = useState<string | null>(null);
+  const [isDraftRestored, setIsDraftRestored] = useState(false);
+  const [restoreMessage, setRestoreMessage] = useState<string | null>(null);
   const [isPlantSaveDebugEnabled, setIsPlantSaveDebugEnabled] = useState(false);
   const [isPhotoPickerDebugEnabled, setIsPhotoPickerDebugEnabled] = useState(false);
   const [photoPickerDiagnostic, setPhotoPickerDiagnostic] = useState<PhotoPickerDiagnostic | null>(null);
@@ -189,6 +253,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const nicknameInputRef = useRef<HTMLInputElement>(null);
   const generatedNicknameRef = useRef<string | null>(null);
   const analysisAbortRef = useRef<AbortController | null>(null);
+  const latestDraftRef = useRef<AddPlantDraft | null>(null);
+  const activeAnalysisRequestIdRef = useRef<string | null>(null);
+  const discardedDraftRef = useRef(false);
+  const wakeLockDiagnostic = useScreenWakeLock(step === "analysis");
 
   useEffect(() => {
     const debugParam = searchParams.get("debugPlantSave");
@@ -224,6 +292,137 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     setIsPhotoPickerDebugEnabled(window.localStorage.getItem(photoPickerDebugStorageKey) === "1");
   }, [searchParams]);
 
+  useEffect(() => {
+    let disposed = false;
+
+    async function restoreDraft() {
+      const result = await restoreAddPlantDraft();
+      if (disposed) {
+        return;
+      }
+
+      if (result.status === "none") {
+        setIsDraftRestored(true);
+        return;
+      }
+
+      if (result.status === "failed") {
+        setRestoreMessage(result.message);
+        setStep("pick");
+        clearAddPlantDraft();
+        setIsDraftRestored(true);
+        return;
+      }
+
+      const { draft, photos } = result;
+      setDraftId(draft.draftId);
+      setSelectedPhotos(photos);
+      setHomeName(draft.identifiedPlantDraft.homeName);
+      generatedNicknameRef.current = draft.identifiedPlantDraft.homeName || generatedNicknameRef.current;
+      setSpeciesName(draft.identifiedPlantDraft.speciesName);
+      setScientificName(draft.identifiedPlantDraft.scientificName);
+      setRoomKey(draft.identifiedPlantDraft.roomKey);
+
+      if (draft.analysisResult) {
+        const restoredAnalysis = {
+          ...(draft.analysisResult as PlantAnalysis),
+          rawResult: (draft.analysisResult as PlantAnalysis).rawResult ?? draft.analysisResult
+        };
+        setAnalysis(restoredAnalysis);
+        setAnalysisFailed(false);
+        setAnalysisFailureKind(null);
+        setStep("confirm");
+      } else if (draft.step === "analysis" || draft.analysisStatus === "preparing" || draft.analysisStatus === "requesting") {
+        setAnalysisFailed(true);
+        setAnalysisFailureKind("technical");
+        setAnalysisErrorCode("analysis_interrupted");
+        setRestoreMessage("analysis_interrupted");
+        setStep("confirm");
+      } else {
+        setStep(draft.step === "pick" || draft.step === "pick_more" ? "review" : draft.step);
+      }
+
+      setAnalysisRequestId(null);
+      activeAnalysisRequestIdRef.current = null;
+      setIsDraftRestored(true);
+      logAddPlantDebug("add_plant_draft_restored", {
+        draftId: draft.draftId,
+        restoredPhotoCount: photos.length,
+        restoredStep: draft.step,
+        analysisStatus: draft.analysisStatus,
+        hasAnalysisResult: Boolean(draft.analysisResult)
+      });
+    }
+
+    void restoreDraft();
+
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isDraftRestored || discardedDraftRef.current) {
+      return;
+    }
+
+    if (!selectedPhotos.length && step === "pick") {
+      return;
+    }
+
+    const analysisStatus =
+      step === "analysis"
+        ? analysisRequestId
+          ? "requesting"
+          : "preparing"
+        : analysis
+          ? "completed"
+          : analysisFailed
+            ? "failed"
+            : "idle";
+    const draft: AddPlantDraft = {
+      draftId,
+      step,
+      selectedPhotos,
+      analysisStatus,
+      analysisRequestId,
+      analysisStartedAt: step === "analysis" ? new Date().toISOString() : null,
+      analysisResult: analysis,
+      analysisError: analysisErrorCode,
+      identifiedPlantDraft: {
+        homeName,
+        speciesName,
+        scientificName,
+        roomKey
+      },
+      updatedAt: new Date().toISOString()
+    };
+
+    latestDraftRef.current = draft;
+    saveAddPlantDraft(draft);
+  }, [analysis, analysisErrorCode, analysisFailed, analysisRequestId, draftId, homeName, isDraftRestored, roomKey, scientificName, selectedPhotos, speciesName, step]);
+
+  useEffect(() => {
+    const persistLatestDraft = () => {
+      if (latestDraftRef.current && !discardedDraftRef.current) {
+        saveAddPlantDraft(latestDraftRef.current);
+      }
+    };
+    window.addEventListener("pagehide", persistLatestDraft);
+    window.addEventListener("pageshow", persistLatestDraft);
+    window.addEventListener("freeze", persistLatestDraft);
+    window.addEventListener("resume", persistLatestDraft);
+    document.addEventListener("visibilitychange", persistLatestDraft);
+
+    return () => {
+      window.removeEventListener("pagehide", persistLatestDraft);
+      window.removeEventListener("pageshow", persistLatestDraft);
+      window.removeEventListener("freeze", persistLatestDraft);
+      window.removeEventListener("resume", persistLatestDraft);
+      document.removeEventListener("visibilitychange", persistLatestDraft);
+    };
+  }, []);
+
   const generateNicknameOnce = useCallback((extraExistingNames: string[] = []) => {
     const existingNames = [...plants.map((plant) => plant.homeName ?? ""), ...extraExistingNames];
     const nickname = suggestedNickname(locale, existingNames);
@@ -238,7 +437,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   }, []);
 
   const discardAddPlant = useCallback(() => {
+    discardedDraftRef.current = true;
     analysisAbortRef.current?.abort();
+    clearAddPlantDraft();
+    revokePhotoObjectUrls(selectedPhotos);
     void cleanupTemporaryPhotos(selectedPhotos);
     setSelectedPhotos([]);
     setIsCancelConfirmOpen(false);
@@ -348,6 +550,9 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
 
     let isMounted = true;
     const abortController = new AbortController();
+    const requestId = createAnalysisRequestId();
+    activeAnalysisRequestIdRef.current = requestId;
+    setAnalysisRequestId(requestId);
     analysisAbortRef.current = abortController;
     setAnalysisStageIndex(0);
     setShowLongAnalysisHint(false);
@@ -387,7 +592,13 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     async function analyzePhotos() {
       let requestStartedAt: number | null = null;
       let httpStatus: number | null = null;
+      let finalRequestPayloadSize = 0;
+      const preparationStartedAt = Date.now();
       try {
+        const payloadToken = startAddPlantPerformanceStage("request_payload_creation", {
+          selectedPhotos: selectedPhotos.length,
+          maxSelectedPhotos
+        });
         const formData = new FormData();
         const nextPreparationDiagnostics: ClientImagePreparationDiagnostic[] = [];
         const preparedItems: {
@@ -505,6 +716,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           preparedItems.splice(0, preparedItems.length, ...adaptiveItems);
           totalOutgoingRequestSize = adaptiveTotalSize;
         }
+        finalRequestPayloadSize = totalOutgoingRequestSize;
 
         if (totalOutgoingRequestSize > analysisRequestTargetBytes) {
           nextPreparationDiagnostics.forEach((diagnostic) => {
@@ -559,34 +771,73 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             formData.append("clientDebugIds", photo.debugId);
           }
         }
+        endAddPlantPerformanceStage(payloadToken, {
+          finalRequestPayloadSize: totalOutgoingRequestSize,
+          selectedPhotos: selectedPhotos.length,
+          includedPhotos: preparedItems.length
+        });
 
         nextPreparationDiagnostics.forEach((diagnostic) => {
           diagnostic.totalOutgoingRequestSize = totalOutgoingRequestSize;
         });
         setClientPreparationDiagnostics(nextPreparationDiagnostics);
         logAddPlantDebug("Plant analysis client images prepared", {
+          requestId,
+          preparationDurationMs: Date.now() - preparationStartedAt,
           totalOutgoingRequestSize,
           images: nextPreparationDiagnostics
         });
 
         formData.append("locale", locale);
         requestStartedAt = Date.now();
+        const uploadToken = startAddPlantPerformanceStage("network_upload", {
+          finalRequestPayloadSize: totalOutgoingRequestSize,
+          selectedPhotos: selectedPhotos.length,
+          note: "fetch duration includes upload, server analysis wait, and response headers"
+        });
         const response = await fetch("/api/analyze-plant", {
           method: "POST",
           body: formData,
           signal: abortController.signal
         });
+        endAddPlantPerformanceStage(uploadToken, {
+          httpStatus: response.status
+        });
         httpStatus = response.status;
+        const parseToken = startAddPlantPerformanceStage("response_parsing", {
+          httpStatus
+        });
         const payload = await response.json();
+        endAddPlantPerformanceStage(parseToken, {
+          ok: Boolean(payload?.ok),
+          hasAnalysis: Boolean(payload?.analysis)
+        });
+        const aiDurationMs = durationFromTrace(payload?.trace, "openai_request_started", "openai_response_received");
+        if (aiDurationMs != null) {
+          recordAddPlantPerformanceStage("ai_response_latency", aiDurationMs, {
+            model: payload?.model ?? "unknown",
+            imageCount: preparedItems.length
+          });
+        }
         const requestDurationMs = Date.now() - requestStartedAt;
+        if (activeAnalysisRequestIdRef.current !== requestId || discardedDraftRef.current) {
+          logAddPlantDebug("Plant analysis stale response ignored", {
+            requestId,
+            activeRequestId: activeAnalysisRequestIdRef.current,
+            discarded: discardedDraftRef.current
+          });
+          return;
+        }
         nextPreparationDiagnostics.forEach((diagnostic) => {
           diagnostic.requestDurationMs = requestDurationMs;
           diagnostic.httpStatus = httpStatus;
         });
         setClientPreparationDiagnostics(nextPreparationDiagnostics);
         logAddPlantDebug("Plant analysis request completed", {
+          requestId,
           status: httpStatus,
           durationMs: requestDurationMs,
+          totalDurationMs: Date.now() - preparationStartedAt,
           totalOutgoingRequestSize,
           images: nextPreparationDiagnostics
         });
@@ -616,12 +867,26 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           rawResult: payload.analysis
         } as PlantAnalysis;
         setAnalysis(nextAnalysis);
+        const renderToken = startAddPlantPerformanceStage("ui_render_after_response", {
+          condition: nextAnalysis.condition,
+          confidence: nextAnalysis.confidence
+        });
+        window.requestAnimationFrame(() => {
+          endAddPlantPerformanceStage(renderToken, {
+            step: "analysis",
+            nextStep: "confirm"
+          });
+        });
         const nextScientificName = cleanScientificName(nextAnalysis.scientificName);
         const nextSpeciesName = localizedCommonName(nextAnalysis, locale) || commonNameFromScientificName(nextScientificName);
         setSpeciesName(nextSpeciesName);
         setScientificName(nextScientificName);
         setHomeName((current) => current || ensureSuggestedNickname());
       } catch (error) {
+        if (activeAnalysisRequestIdRef.current !== requestId || discardedDraftRef.current) {
+          return;
+        }
+
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
         }
@@ -648,11 +913,21 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           });
         }
       } finally {
-        if (isMounted) {
+        const isCurrentRequest = activeAnalysisRequestIdRef.current === requestId && !discardedDraftRef.current;
+        if (isMounted && isCurrentRequest) {
           setHomeName((current) => current || ensureSuggestedNickname());
           if (!abortController.signal.aborted) {
             await finishAnalysisSheet();
           }
+          logAddPlantPerformanceSummary({
+            selectedPhotos: selectedPhotos.length,
+            finalRequestPayloadSize,
+            stage: "analysis_complete"
+          });
+        }
+        if (activeAnalysisRequestIdRef.current === requestId) {
+          activeAnalysisRequestIdRef.current = null;
+          setAnalysisRequestId(null);
         }
       }
     }
@@ -666,6 +941,9 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       window.clearTimeout(longAnalysisTimer);
       if (analysisAbortRef.current === abortController) {
         analysisAbortRef.current = null;
+      }
+      if (activeAnalysisRequestIdRef.current === requestId) {
+        activeAnalysisRequestIdRef.current = null;
       }
     };
   }, [analysisAttempt, ensureSuggestedNickname, locale, selectedPhotos, step]);
@@ -689,6 +967,17 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     t("addPlant.preparing")
   ];
 
+  if (!isDraftRestored) {
+    return (
+      <div className="fixed inset-0 z-40 flex items-end justify-center bg-[#1c1c1e]/20 px-4 pb-4 backdrop-blur-[2px] sm:items-center sm:pb-0">
+        <div role="status" aria-live="polite" className="w-full max-w-[390px] rounded-[28px] bg-[#fffaf3] p-6 text-center shadow-[0_20px_60px_rgba(0,0,0,0.16)]">
+          <Loader2 aria-hidden="true" size={22} className="mx-auto animate-spin text-[#6ba369]" />
+          <p className="mt-3 font-rounded text-xl font-extrabold text-ink">{t("addPlant.restoring")}</p>
+        </div>
+      </div>
+    );
+  }
+
   if (step === "pick") {
     return (
       <MultiPhotoPicker
@@ -699,6 +988,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         selectedPhotosCount={selectedPhotos.length}
         maxPhotos={maxSelectedPhotos}
         limitMessage={t("addPlant.initialPhotoLimitMessage")}
+        helperMessage={restoreMessage === "temporary_photos_missing" ? t("addPlant.restorePhotosMissing") : null}
         wizardStep={step}
         onDiagnostic={setPhotoPickerDiagnostic}
       />
@@ -715,6 +1005,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         selectedPhotosCount={selectedPhotos.length}
         maxPhotos={maxSelectedPhotos}
         limitMessage={t("addPlant.initialPhotoLimitMessage")}
+        helperMessage={null}
         wizardStep={step}
         onDiagnostic={setPhotoPickerDiagnostic}
       />
@@ -785,7 +1076,13 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
               );
             })}
           </div>
-          {showLongAnalysisHint ? <p className="mt-5 text-sm font-bold leading-5 text-[#7a6f61]">{t("addPlant.analysisLong")}</p> : null}
+          {showLongAnalysisHint ? <p className="mt-5 text-sm font-bold leading-5 text-[#7a6f61]">{t("addPlant.analysisLongCalm")}</p> : null}
+          {process.env.NODE_ENV !== "production" ? (
+            <p className="mt-3 rounded-[14px] bg-white/70 p-3 text-left text-[11px] font-bold leading-5 text-[#5f594f]">
+              wakeLock: supported {String(wakeLockDiagnostic.wakeLockSupported)}, requested {String(wakeLockDiagnostic.wakeLockRequested)}, acquired {String(wakeLockDiagnostic.wakeLockAcquired)}, released {String(wakeLockDiagnostic.wakeLockReleased)}, reason {wakeLockDiagnostic.wakeLockReleaseReason ?? "none"}, reacquire {String(wakeLockDiagnostic.wakeLockReacquireAttempted)}, visibility {wakeLockDiagnostic.visibilityState}, mode {wakeLockDiagnostic.mode}
+              {wakeLockDiagnostic.wakeLockError ? `, error ${wakeLockDiagnostic.wakeLockError.name}: ${wakeLockDiagnostic.wakeLockError.message}` : ""}
+            </p>
+          ) : null}
           <button
             type="button"
             onClick={() => {
@@ -987,6 +1284,9 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         plantId,
         photoCount: selectedPhotos.length
       });
+      clearAddPlantDraft();
+      discardedDraftRef.current = true;
+      revokePhotoObjectUrls(selectedPhotos);
       router.push(`/plants/${plantId}`);
       router.refresh();
       logAddPlantDebug("modal_close_started", { plantId });
@@ -1046,7 +1346,9 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             </div>
           ) : null}
           {analysisFailed ? (
-            <p className="mt-4 rounded-[18px] bg-[#fff1d8] p-3 text-sm font-bold leading-5 text-[#8a6230]">{t("addPlant.analysisFailed")}</p>
+            <p className="mt-4 rounded-[18px] bg-[#fff1d8] p-3 text-sm font-bold leading-5 text-[#8a6230]">
+              {restoreMessage === "analysis_interrupted" ? t("addPlant.analysisInterrupted") : t("addPlant.analysisFailed")}
+            </p>
           ) : null}
           {submitError ? (
             <div className="mt-4 rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">
