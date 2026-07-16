@@ -2,10 +2,11 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Eye, EyeOff, Leaf, Loader2 } from "lucide-react";
+import { Leaf, Loader2 } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { appBuildVersion, isStandalonePwa } from "@/lib/app-version";
 import { isSupabaseConfigured, supabase, supabaseAnonKeySuffix, supabaseProjectUrl } from "@/lib/supabase/client";
+import { AuthInput } from "./AuthInput";
 
 function authRedirectUrl() {
   return `${window.location.origin}/auth/callback`;
@@ -218,40 +219,28 @@ export function AuthScreen() {
           </button>
         </div>
         <form onSubmit={submit} className="mt-6 grid gap-3">
-          <label className="block text-sm font-extrabold text-[#4f4940]">
-            {t("auth.emailLabel")}
-            <input
-              type="email"
-              inputMode="email"
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              disabled={isSending || !isSupabaseConfigured}
-              className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none focus:ring-2 focus:ring-[#b7d8a8] disabled:opacity-60"
-            />
-          </label>
+          <AuthInput
+            label={t("auth.emailLabel")}
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            value={email}
+            onChange={setEmail}
+            disabled={isSending || !isSupabaseConfigured}
+          />
           {authMethod === "password" ? (
-            <label className="block text-sm font-extrabold text-[#4f4940]">
-              {t("auth.passwordLabel")}
-              <span className="mt-2 flex min-h-12 items-center rounded-[18px] bg-white/80 pr-2 focus-within:ring-2 focus-within:ring-[#b7d8a8]">
-                <input
-                  type={isPasswordVisible ? "text" : "password"}
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  disabled={isSending || !isSupabaseConfigured}
-                  className="min-h-12 min-w-0 flex-1 rounded-[18px] bg-transparent px-4 text-base outline-none disabled:opacity-60"
-                />
-                <button
-                  type="button"
-                  onClick={() => setIsPasswordVisible((current) => !current)}
-                  aria-label={isPasswordVisible ? t("auth.hidePassword") : t("auth.showPassword")}
-                  className="flex size-10 shrink-0 items-center justify-center rounded-[14px] text-[#7a7166]"
-                >
-                  {isPasswordVisible ? <EyeOff aria-hidden="true" size={18} /> : <Eye aria-hidden="true" size={18} />}
-                </button>
-              </span>
-            </label>
+            <AuthInput
+              label={t("auth.passwordLabel")}
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={setPassword}
+              disabled={isSending || !isSupabaseConfigured}
+              isPasswordVisible={isPasswordVisible}
+              onTogglePassword={() => setIsPasswordVisible((current) => !current)}
+              showPasswordLabel={t("auth.showPassword")}
+              hidePasswordLabel={t("auth.hidePassword")}
+            />
           ) : null}
           <button
             type="submit"

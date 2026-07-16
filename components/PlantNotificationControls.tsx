@@ -1,30 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Bell, BellOff, CalendarDays } from "lucide-react";
+import { useState } from "react";
+import { Bell, BellOff } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
-import { formatLongDate, toDateKey } from "@/lib/date-format";
+import { formatLongDate } from "@/lib/date-format";
 import type { Plant } from "@/types/plant";
 
 export function PlantNotificationControls({ plant }: { plant: Plant }) {
   const { locale, t } = useI18n();
-  const { updatePlantNextCheck, updatePlantNotification } = usePlantStore();
-  const [nextCheckAt, setNextCheckAt] = useState(plant.nextCheckAt ?? "");
+  const { updatePlantNotification } = usePlantStore();
   const [isSaving, setIsSaving] = useState(false);
-
-  useEffect(() => {
-    setNextCheckAt(plant.nextCheckAt ?? "");
-  }, [plant.id, plant.nextCheckAt]);
-
-  const saveNextCheck = async (dateKey: string) => {
-    setIsSaving(true);
-    try {
-      await updatePlantNextCheck(plant.id, dateKey || undefined);
-    } finally {
-      setIsSaving(false);
-    }
-  };
 
   const toggleNotifications = async () => {
     setIsSaving(true);
@@ -57,38 +43,6 @@ export function PlantNotificationControls({ plant }: { plant: Plant }) {
           {plant.notificationEnabled ? t("notifications.plantOn") : t("notifications.plantOff")}
         </button>
       </div>
-
-      <label className="mt-4 block min-w-0 text-sm font-extrabold text-[#4f4940]">
-        <span className="flex items-center gap-2">
-          <CalendarDays aria-hidden="true" size={16} />
-          {t("notifications.nextCheckDate")}
-        </span>
-        <span className="app-native-input-shell mt-2">
-          <input
-            type="date"
-            value={nextCheckAt}
-            onChange={(event) => {
-              setNextCheckAt(event.target.value);
-              void saveNextCheck(event.target.value);
-            }}
-            className="app-date-input outline-none focus:ring-2 focus:ring-[#b7d8a8]"
-          />
-        </span>
-      </label>
-      {process.env.NODE_ENV !== "production" ? (
-        <button
-          type="button"
-          onClick={() => {
-            const today = toDateKey(new Date());
-            setNextCheckAt(today);
-            void saveNextCheck(today);
-          }}
-          disabled={isSaving}
-          className="mt-3 min-h-11 w-full rounded-[18px] bg-white/75 px-4 text-sm font-extrabold text-[#7d776b] disabled:opacity-60"
-        >
-          {t("notifications.setDueNow")}
-        </button>
-      ) : null}
     </section>
   );
 }

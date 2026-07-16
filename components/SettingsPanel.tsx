@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Bell, Eye, EyeOff, Home, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, Bell, Home, Trash2, UserRound } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
 import { supabase } from "@/lib/supabase/client";
@@ -16,6 +16,7 @@ import {
   unsubscribeFromCarePush,
   type PushDiagnostics
 } from "@/lib/push-client";
+import { AuthInput } from "./AuthInput";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { roomOptions } from "./RoomPicker";
 
@@ -262,46 +263,32 @@ export function SettingsPanel() {
         </button>
         {isPasswordFormOpen ? (
           <div className="mt-3 rounded-[22px] bg-white/70 p-3">
-            <label className="block text-sm font-extrabold text-[#4f4940]">
-              {t("auth.newPassword")}
-              <span className="mt-2 flex min-h-12 items-center rounded-[18px] bg-[#fffaf3] pr-2 focus-within:ring-2 focus-within:ring-[#b7d8a8]">
-                <input
-                  type={showNewPassword ? "text" : "password"}
-                  autoComplete="new-password"
-                  value={newPassword}
-                  onChange={(event) => setNewPassword(event.target.value)}
-                  className="min-h-12 min-w-0 flex-1 rounded-[18px] bg-transparent px-4 text-base outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowNewPassword((current) => !current)}
-                  aria-label={showNewPassword ? t("auth.hidePassword") : t("auth.showPassword")}
-                  className="flex size-10 shrink-0 items-center justify-center rounded-[14px] text-[#7a7166]"
-                >
-                  {showNewPassword ? <EyeOff aria-hidden="true" size={18} /> : <Eye aria-hidden="true" size={18} />}
-                </button>
-              </span>
-            </label>
-            <label className="mt-3 block text-sm font-extrabold text-[#4f4940]">
-              {t("auth.confirmPassword")}
-              <span className="mt-2 flex min-h-12 items-center rounded-[18px] bg-[#fffaf3] pr-2 focus-within:ring-2 focus-within:ring-[#b7d8a8]">
-                <input
-                  type={showConfirmPassword ? "text" : "password"}
-                  autoComplete="new-password"
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  className="min-h-12 min-w-0 flex-1 rounded-[18px] bg-transparent px-4 text-base outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword((current) => !current)}
-                  aria-label={showConfirmPassword ? t("auth.hidePassword") : t("auth.showPassword")}
-                  className="flex size-10 shrink-0 items-center justify-center rounded-[14px] text-[#7a7166]"
-                >
-                  {showConfirmPassword ? <EyeOff aria-hidden="true" size={18} /> : <Eye aria-hidden="true" size={18} />}
-                </button>
-              </span>
-            </label>
+            <AuthInput
+              label={t("auth.newPassword")}
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={setNewPassword}
+              disabled={isPasswordSaving}
+              isPasswordVisible={showNewPassword}
+              onTogglePassword={() => setShowNewPassword((current) => !current)}
+              showPasswordLabel={t("auth.showPassword")}
+              hidePasswordLabel={t("auth.hidePassword")}
+            />
+            <div className="mt-3">
+              <AuthInput
+                label={t("auth.confirmPassword")}
+                type="password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={setConfirmPassword}
+                disabled={isPasswordSaving}
+                isPasswordVisible={showConfirmPassword}
+                onTogglePassword={() => setShowConfirmPassword((current) => !current)}
+                showPasswordLabel={t("auth.showPassword")}
+                hidePasswordLabel={t("auth.hidePassword")}
+              />
+            </div>
             <button
               type="button"
               onClick={() => void savePassword()}
