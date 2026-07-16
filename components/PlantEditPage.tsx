@@ -83,19 +83,19 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
   };
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-[430px] bg-cream px-5 pb-10 pt-12">
-      <header className="mb-5 flex items-center justify-between">
-        <Link href={`/plants/${plant.id}`} aria-label={t("settings.back")} className="flex size-11 items-center justify-center rounded-[15px] bg-white/85 text-[#7d776b] shadow-[0_1px_8px_rgba(0,0,0,0.07)]">
+    <main className="mx-auto min-h-screen w-full max-w-[430px] overflow-x-hidden bg-cream px-5 pb-10 pt-12">
+      <header className="mb-5 flex min-w-0 items-center justify-between gap-2">
+        <Link href={`/plants/${plant.id}`} aria-label={t("settings.back")} className="flex size-11 shrink-0 items-center justify-center rounded-[15px] bg-white/85 text-[#7d776b] shadow-[0_1px_8px_rgba(0,0,0,0.07)]">
           <ArrowLeft aria-hidden="true" size={20} />
         </Link>
-        <h1 className="font-rounded text-[28px] font-black leading-none text-ink">{t("edit.title")}</h1>
-        <div aria-hidden="true" className="size-11" />
+        <h1 className="min-w-0 flex-1 truncate px-1 text-center font-rounded text-[28px] font-black leading-none text-ink">{t("edit.title")}</h1>
+        <div aria-hidden="true" className="size-11 shrink-0" />
       </header>
 
       <section className="rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
-        <div className="mb-3 flex items-center justify-between gap-3 px-1">
-          <h2 className="font-rounded text-xl font-extrabold text-ink">{t("photos.plantPhotos")}</h2>
-          <button type="button" onClick={() => setIsAddingPhoto(true)} className="flex min-h-10 items-center gap-1 rounded-full bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
+        <div className="mb-3 flex min-w-0 items-center justify-between gap-2 px-1">
+          <h2 className="min-w-0 flex-1 truncate font-rounded text-xl font-extrabold text-ink">{t("photos.plantPhotos")}</h2>
+          <button type="button" onClick={() => setIsAddingPhoto(true)} className="flex min-h-10 shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
             <Plus aria-hidden="true" size={16} />
             {t("photos.addPhotos")}
           </button>
@@ -110,17 +110,17 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
 
       <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
         <h2 className="mb-3 px-1 font-rounded text-xl font-extrabold text-ink">{t("edit.general")}</h2>
-        <label className="block text-sm font-extrabold text-[#4f4940]">
+        <label className="block min-w-0 text-sm font-extrabold text-[#4f4940]">
           {t("addPlant.nickname")}
-          <input value={homeName} onChange={(event) => setHomeName(event.target.value)} className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none" />
+          <input value={homeName} onChange={(event) => setHomeName(event.target.value)} className="mt-2 block min-h-12 w-full min-w-0 max-w-full rounded-[18px] bg-white/80 px-4 text-base outline-none" />
         </label>
-        <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
+        <label className="mt-4 block min-w-0 text-sm font-extrabold text-[#4f4940]">
           {t("addPlant.commonName")}
-          <input value={speciesName} onChange={(event) => setSpeciesName(event.target.value)} className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none" />
+          <input value={speciesName} onChange={(event) => setSpeciesName(event.target.value)} className="mt-2 block min-h-12 w-full min-w-0 max-w-full rounded-[18px] bg-white/80 px-4 text-base outline-none" />
         </label>
-        <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
+        <label className="mt-4 block min-w-0 text-sm font-extrabold text-[#4f4940]">
           {t("addPlant.scientificName")}
-          <input value={scientificName} onChange={(event) => setScientificName(event.target.value)} className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none" />
+          <input value={scientificName} onChange={(event) => setScientificName(event.target.value)} className="mt-2 block min-h-12 w-full min-w-0 max-w-full rounded-[18px] bg-white/80 px-4 text-base outline-none" />
         </label>
         <div className="mt-4">
           <p className="mb-2 text-sm font-extrabold text-[#4f4940]">{t("plantDetail.location")}</p>

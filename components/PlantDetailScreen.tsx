@@ -225,21 +225,6 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     }
   };
 
-  const openBaselineDatePicker = () => {
-    const input = baselineDateInputRef.current;
-    if (!input) {
-      return;
-    }
-
-    const picker = input as HTMLInputElement & { showPicker?: () => void };
-    if (picker.showPicker) {
-      picker.showPicker();
-      return;
-    }
-
-    input.click();
-  };
-
   const analyzeNewPhotos = async (selectedPhotos: PendingPhotoUpload[], savedPhotos: PlantPhoto[]) => {
     if (!selectedPhotos.length || !savedPhotos.length) {
       return;
@@ -377,33 +362,29 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
               {t("addPlant.waterUnknown")}
             </button>
           </div>
-          <button
-            type="button"
-            disabled={baselineSaving}
-            onClick={openBaselineDatePicker}
-            className="mt-3 flex min-h-14 w-full min-w-0 items-center justify-between gap-3 rounded-[18px] bg-white/70 p-3 text-left disabled:opacity-60"
-          >
+          <label className="relative mt-3 flex min-h-14 w-full min-w-0 cursor-pointer items-center justify-between gap-3 overflow-hidden rounded-[18px] bg-white/70 p-3 text-left">
             <span className="min-w-0">
               <span className="block text-xs font-bold uppercase text-[#a09a90]">{t("baseline.dateLabel")}</span>
               <span className="mt-1 block truncate text-sm font-extrabold text-ink">{formattedBaselineDate}</span>
             </span>
             <span className="shrink-0 text-sm font-extrabold text-[#2d7a4f]">{t("baseline.changeDate")}</span>
-          </button>
-          <input
-            ref={baselineDateInputRef}
-            type="date"
-            max={toDateKey(new Date())}
-            value={baselineDate}
-            onChange={(event) => {
-              const value = event.currentTarget.value;
-              setBaselineDate(value);
-              if (value) {
-                void saveBaselineAnswer(baselineQuestion, value);
-              }
-            }}
-            className="sr-only"
-            aria-label={t("baseline.dateLabel")}
-          />
+            <input
+              ref={baselineDateInputRef}
+              type="date"
+              max={toDateKey(new Date())}
+              value={baselineDate}
+              disabled={baselineSaving}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setBaselineDate(value);
+                if (value) {
+                  void saveBaselineAnswer(baselineQuestion, value);
+                }
+              }}
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+              aria-label={t("baseline.dateLabel")}
+            />
+          </label>
         </section>
       ) : null}
       {photoAssessment.status !== "idle" ? (
