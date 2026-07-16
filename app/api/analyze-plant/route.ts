@@ -595,6 +595,7 @@ export async function POST(request: Request) {
   const currentScientificName = String(formData.get("currentScientificName") ?? "");
   const currentDetectedSpecies = String(formData.get("currentDetectedSpecies") ?? "");
   const currentLightCondition = String(formData.get("currentLightCondition") ?? "");
+  const environmentContext = String(formData.get("environmentContext") ?? "");
   const photoTypes = formData.getAll("photoTypes").map(String);
   const photoSources = formData.getAll("photoSources").map(String);
   const clientFileNames = formData.getAll("clientFileNames").map(String);
@@ -643,6 +644,7 @@ export async function POST(request: Request) {
     imageCount: files.length,
     locale,
     hasCurrentPlantContext: Boolean(currentCommonName || currentScientificName || currentDetectedSpecies),
+    hasEnvironmentContext: Boolean(environmentContext),
     photoTypes,
     photoSources,
     files: diagnostics.map((diagnostic) => ({
@@ -789,6 +791,10 @@ export async function POST(request: Request) {
           "The most likely explanation must connect visible observations to species biology, recent plant history, and current context. Do not jump from observation directly to action.",
           "The most likely explanation must also say why it is more likely than the main plausible alternatives when confidence is limited. Use cautious wording instead of certainty if drought stress, mechanical damage, repotting stress, and light stress are all possible.",
           "Light recommendations must be operational. Compare advice to the current light context when provided: if the current place is acceptable, say to keep it unless new symptoms appear; if a change is needed, say exactly what to change, such as moving farther from direct rays without putting the plant in shade.",
+          "Use structured home and room context when provided. Treat user-entered home/room data as stronger evidence than photo guesses about permanent light, humidity, air conditioning, and location.",
+          "Priority of context: user-entered home/room environment first, then plant history and answers, then photo evidence, then AI inference.",
+          "Do not invent rooms, cities, humidity, air conditioning, direct sun, or plant position. If environment data conflicts with photo evidence, mention the uncertainty and ask at most one high-impact clarification.",
+          "Compare the detected species needs to the stored room conditions. If the room conditions already fit the plant, say to keep them unchanged instead of giving generic light advice.",
           "For Haworthia and similar succulents, wet soil and abrupt direct sun are usually more important risks than short-term dry soil; old damaged leaves may remain marked while new growth shows recovery.",
           "Do not repeat species descriptions unless the trait directly supports the current recommendation for this plant.",
           "If a species trait does not change what the owner should do, watch, avoid, or ask next for this plant, omit it.",
@@ -806,6 +812,7 @@ export async function POST(request: Request) {
           "For watering, prefer nextAction check_soil over water unless dry soil is directly visible or user-provided context confirms dryness.",
           `User locale: ${locale}. Photo types in order: ${photoTypes.join(", ") || "unknown"}.`,
           `Current plant context, if this is a follow-up photo analysis: commonName="${currentCommonName || "unknown"}", scientificName="${currentScientificName || "unknown"}", detectedSpecies="${currentDetectedSpecies || "unknown"}", light="${currentLightCondition || "unknown"}".`,
+          `Structured home and room context: ${environmentContext || "No structured home or room context was provided."}`,
           `Species care profiles: ${speciesProfilesPromptContext()}`
         ].join("\n")
       },

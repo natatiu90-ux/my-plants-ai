@@ -11,6 +11,13 @@ export type SoilCheckResult = "dry" | "slightly_damp" | "very_wet" | "not_sure";
 export type CareScheduleStatus = "active" | "paused" | "needs_first_check";
 export type PlantHypothesis = "soil_condition" | "repotting" | "root_condition" | "drainage" | "direct_sun" | "pests";
 export type PlantHypothesisStatus = "confirmed" | "ruled_out" | "unknown";
+export type HomeType = "apartment" | "house" | "studio" | "other";
+export type HomeHumidityLevel = "dry" | "normal" | "humid" | "unknown";
+export type RoomLightLevel = "low" | "medium_indirect" | "bright_indirect" | "direct_sun" | "unknown";
+export type RoomDirectSun = "none" | "morning" | "afternoon" | "all_day" | "unknown";
+export type RoomTemperatureRelative = "cool" | "stable" | "warm" | "variable" | "unknown";
+export type RoomAirConditioning = "inherit" | "yes" | "no" | "unknown";
+export type PlantPositionInRoom = "window_sill" | "near_window" | "shelf" | "table" | "floor" | "hanging" | "other";
 
 export type PlantMilestoneType =
   | "plant_added"
@@ -32,6 +39,9 @@ export type PlantMilestoneType =
 
 export interface Plant {
   id: string;
+  homeId?: string;
+  roomId?: string;
+  positionInRoom?: PlantPositionInRoom;
   homeName?: string;
   speciesName: string;
   scientificName?: string;
@@ -54,8 +64,26 @@ export interface Plant {
 
 export interface Room {
   id: string;
+  homeId?: string;
   name: string;
   isCustom: boolean;
+  lightLevel?: RoomLightLevel;
+  directSun?: RoomDirectSun;
+  temperatureRelative?: RoomTemperatureRelative;
+  hasAirConditioning?: RoomAirConditioning;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface HomeContext {
+  id: string;
+  name: string;
+  city?: string;
+  country?: string;
+  type?: HomeType;
+  humidityLevel?: HomeHumidityLevel;
+  hasAirConditioning?: boolean;
+  notes?: string;
   createdAt: string;
 }
 

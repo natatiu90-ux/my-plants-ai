@@ -17,6 +17,7 @@ import {
 } from "@/lib/add-plant-performance";
 import { appBuildStorageKey, appBuildVersion, isStandalonePwa } from "@/lib/app-version";
 import { inspectImageDisplay, normalizeImageBlob, readJpegExifOrientation } from "@/lib/client-image-normalization";
+import { buildPlantEnvironmentContext, formatEnvironmentContextForPrompt } from "@/lib/home-room-context";
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
 import { plantCreationDiagnosticFromError, type PlantCreationDiagnostic, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
@@ -308,7 +309,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { locale, t } = useI18n();
-  const { addPlant, plants, rooms, status, userId } = usePlantStore();
+  const { addPlant, homes, plants, rooms, status, userId } = usePlantStore();
   const [draftId, setDraftId] = useState(() => createAddPlantDraftId());
   const [analysisRequestId, setAnalysisRequestId] = useState<string | null>(null);
   const [isDraftRestored, setIsDraftRestored] = useState(false);
@@ -898,6 +899,26 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         });
 
         formData.append("locale", locale);
+        const selectedRoom = roomKey && !roomKey.startsWith("rooms.") ? rooms.find((room) => room.id === roomKey) : undefined;
+        const environmentContext = buildPlantEnvironmentContext({
+          plant: selectedRoom
+            ? {
+                id: "new-plant",
+                homeId: selectedRoom.homeId,
+                roomId: selectedRoom.id,
+                speciesName,
+                status: "unknown",
+                messageKey: "plants.new.message",
+                statusLabelKey: "status.doingGreat",
+                careScheduleStatus: "active",
+                notificationEnabled: true
+              }
+            : undefined,
+          homes,
+          rooms,
+          legacyRoomName: selectedRoom ? selectedRoom.name : undefined
+        });
+        formData.append("environmentContext", formatEnvironmentContextForPrompt(environmentContext));
         requestStartedAt = Date.now();
         uploadToken = startAddPlantPerformanceStage("network_upload", {
           finalRequestPayloadSize: totalOutgoingRequestSize,
@@ -1063,7 +1084,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         activeAnalysisRequestIdRef.current = null;
       }
     };
-  }, [analysisAttempt, ensureSuggestedNickname, locale, selectedPhotos, step]);
+  }, [analysisAttempt, ensureSuggestedNickname, homes, locale, roomKey, rooms, selectedPhotos, speciesName, step]);
 
   const copyPhotoPickerDiagnostic = () => {
     if (!photoPickerDiagnostic) {

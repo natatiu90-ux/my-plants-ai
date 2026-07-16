@@ -11,13 +11,17 @@ import { roomOptions } from "./RoomPicker";
 
 export function CareSummary({ plant }: { plant: Plant }) {
   const { locale, t } = useI18n();
-  const { rooms } = usePlantStore();
+  const { homes, rooms } = usePlantStore();
   const builtInRoomKeys = roomOptions as readonly string[];
-  const roomValue = plant.roomKey
+  const structuredHome = plant.homeId ? homes.find((home) => home.id === plant.homeId) : undefined;
+  const structuredRoom = plant.roomId ? rooms.find((room) => room.id === plant.roomId) : undefined;
+  const legacyRoomValue = plant.roomKey
     ? builtInRoomKeys.includes(plant.roomKey)
       ? t(plant.roomKey as TranslationKey)
       : rooms.find((room) => room.id === plant.roomKey)?.name ?? t("plantDetail.notYet")
-    : t("plantDetail.noRoom");
+    : undefined;
+  const roomValue = structuredRoom?.name ?? legacyRoomValue ?? t("plantDetail.noRoom");
+  const lightValue = structuredRoom?.lightLevel ? t(`homeContext.light.${structuredRoom.lightLevel}` as never) : plant.lightConditionKey ? t(plant.lightConditionKey) : t("plantDetail.notYet");
 
   const rows = [
     {
@@ -25,18 +29,27 @@ export function CareSummary({ plant }: { plant: Plant }) {
       value: formatRelativeDate(plant.lastWateredAt, locale, t("plantDetail.notYet")),
       icon: <Droplets aria-hidden="true" size={18} />
     },
-    ...(plant.roomKey
+    ...(structuredHome
+      ? [
+          {
+            label: t("homeContext.home"),
+            value: [structuredHome.name, structuredHome.city, structuredHome.country].filter(Boolean).join(", "),
+            icon: <MapPin aria-hidden="true" size={18} />
+          }
+        ]
+      : []),
+    ...(structuredRoom || plant.roomKey
       ? [
           {
             label: t("plantDetail.location"),
-            value: roomValue,
+            value: plant.positionInRoom ? `${roomValue} · ${t(`homeContext.position.${plant.positionInRoom}` as never)}` : roomValue,
             icon: <MapPin aria-hidden="true" size={18} />
           }
         ]
       : []),
     {
       label: t("plantDetail.light"),
-      value: plant.lightConditionKey ? t(plant.lightConditionKey) : t("plantDetail.notYet"),
+      value: lightValue,
       icon: <SunMedium aria-hidden="true" size={18} />
     }
   ];

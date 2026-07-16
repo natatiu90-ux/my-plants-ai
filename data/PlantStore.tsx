@@ -8,7 +8,7 @@ import { createRepositories } from "@/lib/repositories/supabase-repositories";
 import { commonNameFromScientificName } from "@/lib/plant-display";
 import { PlantCreationError, plantCreationDiagnosticFromError, plantCreationError, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { calculateSoilCheckCareResolution } from "@/lib/soil-care";
-import type { PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
+import type { HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
 
 type PlantState = {
   plants: Plant[];
@@ -17,6 +17,7 @@ type PlantState = {
   milestones: PlantMilestone[];
   analyses: PlantAnalysisRecord[];
   hypothesisResolutions: PlantHypothesisResolution[];
+  homes: HomeContext[];
   rooms: Room[];
   secondaryDataReady: boolean;
 };
@@ -25,9 +26,12 @@ type StoreStatus = "loading" | "ready" | "error" | "unauthenticated";
 
 type AddPlantInput = {
   homeName?: string;
+  homeId?: string;
   speciesName: string;
   scientificName?: string;
   roomKey?: Plant["roomKey"];
+  roomId?: string;
+  positionInRoom?: Plant["positionInRoom"];
   coverPhotoUrl?: string;
   notes?: string;
   lastWateredAt?: string;
@@ -61,8 +65,12 @@ type PlantStoreValue = PlantState & {
   getPlantHypothesisResolutions: (plantId: string) => PlantHypothesisResolution[];
   ensureFullPhotoUrl: (photoId: string) => Promise<string | undefined>;
   addPlant: (input: AddPlantInput) => Promise<string>;
-  updatePlant: (plantId: string, input: { homeName?: string; speciesName?: string; scientificName?: string; roomKey?: Plant["roomKey"]; notes?: string }) => Promise<void>;
-  addRoom: (name: string) => Promise<Room>;
+  updatePlant: (plantId: string, input: { homeId?: string; homeName?: string; speciesName?: string; scientificName?: string; roomKey?: Plant["roomKey"]; roomId?: Plant["roomId"]; positionInRoom?: Plant["positionInRoom"]; notes?: string }) => Promise<void>;
+  addHome: (input: Omit<HomeContext, "id" | "createdAt">) => Promise<HomeContext>;
+  updateHome: (homeId: string, input: Partial<Omit<HomeContext, "id" | "createdAt">>) => Promise<HomeContext>;
+  deleteHome: (homeId: string) => Promise<void>;
+  addRoom: (name: string, input?: Partial<Omit<Room, "id" | "name" | "isCustom" | "createdAt">>) => Promise<Room>;
+  updateRoom: (roomId: string, input: Partial<Omit<Room, "id" | "isCustom" | "createdAt">>) => Promise<Room>;
   deleteRoom: (roomId: string, replacementRoomKey?: Plant["roomKey"]) => Promise<void>;
   roomExists: (name: string) => boolean;
   addPlantPhoto: (plantId: string, input: { url: string; storageId?: string; type: PhotoType; isCover?: boolean; debugId?: string }) => Promise<PlantPhoto | undefined>;
@@ -114,6 +122,7 @@ const emptyState: PlantState = {
   milestones: [],
   analyses: [],
   hypothesisResolutions: [],
+  homes: [],
   rooms: [],
   secondaryDataReady: false
 };
@@ -143,9 +152,10 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
 
   const loadData = useCallback(async (nextRepositories: Repositories) => {
     console.info("ownership_query_user_id", { userId: nextRepositories.userId });
-    const [plants, photos, rooms] = await Promise.all([
+    const [plants, photos, homes, rooms] = await Promise.all([
       nextRepositories.plants.listPlants(),
       nextRepositories.photos.listPhotos(),
+      nextRepositories.homes.listHomes(),
       nextRepositories.rooms.listRooms()
     ]);
     console.info("plants_loaded_count", { count: plants.length, userId: nextRepositories.userId });
@@ -173,7 +183,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       }
     }
 
-    setState((current) => ({ ...current, plants, photos, rooms, secondaryDataReady: false }));
+    setState((current) => ({ ...current, plants, photos, homes, rooms, secondaryDataReady: false }));
 
     void Promise.all([
       nextRepositories.milestones.listMilestones(),
@@ -342,19 +352,68 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
     [state.rooms]
   );
 
+  const addHome = useCallback(
+    async (input: Omit<HomeContext, "id" | "createdAt">) => {
+      if (!repositories) {
+        throw new Error("Plant collection is not ready.");
+      }
+
+      const home = await repositories.homes.createHome(input);
+      setState((current) => ({ ...current, homes: [...current.homes, home] }));
+      return home;
+    },
+    [repositories]
+  );
+
+  const updateHome = useCallback(
+    async (homeId: string, input: Partial<Omit<HomeContext, "id" | "createdAt">>) => {
+      if (!repositories) {
+        throw new Error("Plant collection is not ready.");
+      }
+
+      const home = await repositories.homes.updateHome(homeId, input);
+      setState((current) => ({ ...current, homes: current.homes.map((item) => (item.id === home.id ? home : item)) }));
+      return home;
+    },
+    [repositories]
+  );
+
+  const deleteHome = useCallback(
+    async (homeId: string) => {
+      if (!repositories) {
+        throw new Error("Plant collection is not ready.");
+      }
+
+      await repositories.homes.deleteHome(homeId);
+      setState((current) => ({
+        ...current,
+        homes: current.homes.filter((home) => home.id !== homeId),
+        rooms: current.rooms.filter((room) => room.homeId !== homeId),
+        plants: current.plants.map((plant) =>
+          plant.homeId === homeId ? { ...plant, homeId: undefined, roomId: undefined, roomKey: undefined, positionInRoom: undefined } : plant
+        )
+      }));
+    },
+    [repositories]
+  );
+
   const addRoom = useCallback(
-    async (name: string) => {
+    async (name: string, input?: Partial<Omit<Room, "id" | "name" | "isCustom" | "createdAt">>) => {
       if (!repositories) {
         throw new Error("Plant collection is not ready.");
       }
 
       const trimmedName = name.trim();
-      const existingRoom = state.rooms.find((room) => room.name.trim().toLocaleLowerCase() === trimmedName.toLocaleLowerCase());
+      const existingRoom = state.rooms.find(
+        (room) =>
+          room.name.trim().toLocaleLowerCase() === trimmedName.toLocaleLowerCase() &&
+          (input?.homeId ? room.homeId === input.homeId : true)
+      );
       if (existingRoom) {
         return existingRoom;
       }
 
-      const room = await repositories.rooms.addRoom(trimmedName);
+      const room = await repositories.rooms.addRoom(trimmedName, input);
       setState((current) => {
         const currentRoom = current.rooms.find((item) => item.id === room.id || item.name.trim().toLocaleLowerCase() === room.name.trim().toLocaleLowerCase());
         if (currentRoom) {
@@ -367,6 +426,31 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
     [repositories, state.rooms]
   );
 
+  const updateRoom = useCallback(
+    async (roomId: string, input: Partial<Omit<Room, "id" | "isCustom" | "createdAt">>) => {
+      if (!repositories) {
+        throw new Error("Plant collection is not ready.");
+      }
+
+      const room = await repositories.rooms.updateRoom(roomId, input);
+      setState((current) => ({
+        ...current,
+        rooms: current.rooms.map((item) => (item.id === room.id ? room : item)),
+        plants: current.plants.map((plant) => {
+          if (plant.roomId !== room.id && plant.roomKey !== room.id) {
+            return plant;
+          }
+          if (room.homeId && plant.homeId && room.homeId !== plant.homeId) {
+            return { ...plant, roomId: undefined, roomKey: undefined, positionInRoom: undefined };
+          }
+          return plant;
+        })
+      }));
+      return room;
+    },
+    [repositories]
+  );
+
   const deleteRoom = useCallback(
     async (roomId: string, replacementRoomKey?: Plant["roomKey"]) => {
       if (!repositories) {
@@ -377,7 +461,11 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       setState((current) => ({
         ...current,
         rooms: current.rooms.filter((room) => room.id !== roomId),
-        plants: current.plants.map((plant) => (plant.roomKey === roomId ? { ...plant, roomKey: replacementRoomKey } : plant))
+        plants: current.plants.map((plant) =>
+          plant.roomKey === roomId || plant.roomId === roomId
+            ? { ...plant, roomId: replacementRoomKey?.startsWith("rooms.") ? undefined : replacementRoomKey, roomKey: replacementRoomKey, positionInRoom: undefined }
+            : plant
+        )
       }));
     },
     [repositories]
@@ -453,10 +541,13 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       let plant: Plant;
       try {
         plant = await repositories.plants.createPlant({
+          homeId: input.homeId,
           homeName: input.homeName,
           speciesName: input.speciesName,
           scientificName: input.scientificName,
           roomKey: input.roomKey,
+          roomId: input.roomId,
+          positionInRoom: input.positionInRoom,
           notes: input.notes,
           status: input.analysis?.condition ?? "unknown",
           nextAction: input.analysis?.nextAction ?? null,
@@ -599,7 +690,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
   );
 
   const updatePlant = useCallback(
-    async (plantId: string, input: { homeName?: string; speciesName?: string; scientificName?: string; roomKey?: Plant["roomKey"]; notes?: string }) => {
+    async (plantId: string, input: { homeId?: string; homeName?: string; speciesName?: string; scientificName?: string; roomKey?: Plant["roomKey"]; roomId?: Plant["roomId"]; positionInRoom?: Plant["positionInRoom"]; notes?: string }) => {
       await repositories?.plants.updatePlant(plantId, input);
       setState((current) => ({
         ...current,
@@ -607,10 +698,13 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           plant.id === plantId
             ? {
                 ...plant,
+                homeId: input.homeId || undefined,
                 homeName: input.homeName || undefined,
                 speciesName: input.speciesName || commonNameFromScientificName(input.scientificName),
                 scientificName: input.scientificName || undefined,
+                roomId: input.roomId || (input.roomKey && !input.roomKey.startsWith("rooms.") ? input.roomKey : undefined),
                 roomKey: input.roomKey,
+                positionInRoom: input.positionInRoom,
                 notes: input.notes
               }
             : plant
@@ -1019,6 +1113,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         milestones: current.milestones.filter((milestone) => milestone.plantId !== plantId),
         analyses: current.analyses.filter((analysis) => analysis.plantId !== plantId),
         hypothesisResolutions: current.hypothesisResolutions.filter((resolution) => resolution.plantId !== plantId),
+        homes: current.homes,
         rooms: current.rooms,
         secondaryDataReady: current.secondaryDataReady
       }));
@@ -1045,7 +1140,11 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       ensureFullPhotoUrl,
       addPlant,
       updatePlant,
+      addHome,
+      updateHome,
+      deleteHome,
       addRoom,
+      updateRoom,
       deleteRoom,
       roomExists,
       addPlantPhoto,
@@ -1070,8 +1169,10 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       addPlant,
       addPlantPhoto,
       addPlantPhotos,
+      addHome,
       addRoom,
       bootstrap,
+      deleteHome,
       deleteMilestone,
       deleteRoom,
       deletePlant,
@@ -1095,10 +1196,12 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       state,
       status,
       updateMilestone,
+      updateHome,
       updatePhotoType,
       updatePlant,
       updatePlantNextCheck,
       updatePlantNotification,
+      updateRoom,
       user?.email,
       user?.id,
       waterPlant

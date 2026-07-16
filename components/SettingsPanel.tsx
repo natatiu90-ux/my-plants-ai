@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Bell, Home, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, Bell, Trash2, UserRound } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
 import { supabase } from "@/lib/supabase/client";
@@ -17,12 +17,9 @@ import {
   type PushDiagnostics
 } from "@/lib/push-client";
 import { AuthInput } from "./AuthInput";
+import { HomeRoomSettings } from "./HomeRoomSettings";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { roomOptions } from "./RoomPicker";
-
-const futureSections = [
-  { key: "settings.home", icon: Home }
-] as const;
 
 export function SettingsPanel() {
   const { locale, t } = useI18n();
@@ -47,7 +44,7 @@ export function SettingsPanel() {
   const [isPasswordSaving, setIsPasswordSaving] = useState(false);
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
   const selectedRoom = rooms.find((room) => room.id === roomToDelete);
-  const selectedRoomPlantCount = plants.filter((plant) => plant.roomKey === roomToDelete).length;
+  const selectedRoomPlantCount = plants.filter((plant) => plant.roomId === roomToDelete || plant.roomKey === roomToDelete).length;
   const isPermissionGranted = notificationPermission === "granted";
   const isPermissionDenied = notificationPermission === "denied";
   const showPushDiagnostics = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_SHOW_PUSH_DIAGNOSTICS === "true";
@@ -307,7 +304,7 @@ export function SettingsPanel() {
         {rooms.length ? (
           <div className="grid gap-2">
             {rooms.map((room) => {
-              const plantCount = plants.filter((plant) => plant.roomKey === room.id).length;
+              const plantCount = plants.filter((plant) => plant.roomId === room.id || plant.roomKey === room.id).length;
               return (
                 <div key={room.id} className="flex min-h-[58px] items-center justify-between gap-3 rounded-[22px] bg-white/70 px-3">
                   <div>
@@ -333,6 +330,8 @@ export function SettingsPanel() {
           <p className="rounded-[22px] bg-white/70 p-3 text-sm font-bold text-[#7a7166]">{t("rooms.noCustomRooms")}</p>
         )}
       </section>
+
+      <HomeRoomSettings />
 
       <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
         <div className="flex items-start gap-3">
@@ -455,21 +454,6 @@ export function SettingsPanel() {
         )}
       </section>
 
-      <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-2 shadow-soft">
-        {futureSections.map(({ key, icon: Icon }) => (
-          <div key={key} className="flex min-h-[58px] items-center justify-between rounded-[22px] px-3 opacity-60">
-            <div className="flex items-center gap-3">
-              <span className="flex size-10 items-center justify-center rounded-2xl bg-[#f1eadf] text-[#7d776b]">
-                <Icon aria-hidden="true" size={18} />
-              </span>
-              <span className="font-bold text-[#565149]">{t(key)}</span>
-            </div>
-            <span className="rounded-full bg-[#f1eadf] px-3 py-1 text-xs font-bold text-[#8b8173]">
-              {t("settings.future")}
-            </span>
-          </div>
-        ))}
-      </section>
       {selectedRoom ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#1c1c1e]/20 px-4 pb-4 backdrop-blur-[2px] sm:items-center sm:pb-0">
           <div role="dialog" aria-modal="true" className="w-full max-w-[390px] rounded-[28px] bg-[#fffaf3] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]">

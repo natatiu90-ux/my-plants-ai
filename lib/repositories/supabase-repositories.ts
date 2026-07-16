@@ -5,8 +5,8 @@ import { inspectImageDisplay, readJpegExifOrientation } from "@/lib/client-image
 import { PhotoStorageRepository } from "@/lib/photo-storage";
 import { plantCreationError } from "@/lib/plant-save-diagnostics";
 import { temporaryPhotoStorageIdFromUrl } from "@/lib/temporary-photo-url";
-import type { CareScheduleStatus, PhotoType, Plant, PlantCareEvent, PlantHypothesis, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
-import { mapAnalysis, mapCareEvent, mapHypothesisResolution, mapMilestone, mapPhoto, mapPlant, mapRoom, type PlantPhotoRow } from "./mappers";
+import type { CareScheduleStatus, HomeContext, PhotoType, Plant, PlantCareEvent, PlantHypothesis, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
+import { mapAnalysis, mapCareEvent, mapHome, mapHypothesisResolution, mapMilestone, mapPhoto, mapPlant, mapRoom, type PlantPhotoRow } from "./mappers";
 
 const photoBucket = "plant-photos";
 const signedUrlTtlSeconds = 60 * 60;
@@ -176,10 +176,13 @@ export class PlantRepository {
   }
 
   async createPlant(input: {
+    homeId?: string;
     homeName?: string;
     speciesName: string;
     scientificName?: string;
     roomKey?: string;
+    roomId?: string;
+    positionInRoom?: Plant["positionInRoom"];
     notes?: string;
     status?: Plant["status"];
     nextAction?: Plant["nextAction"];
@@ -192,7 +195,9 @@ export class PlantRepository {
       .from("plants")
       .insert({
         user_id: this.user.id,
-        room_id: input.roomKey && !isBuiltInRoomKey(input.roomKey) ? input.roomKey : null,
+        home_id: input.homeId ?? null,
+        room_id: input.roomId ?? (input.roomKey && !isBuiltInRoomKey(input.roomKey) ? input.roomKey : null),
+        position_in_room: input.positionInRoom ?? null,
         room_key: isBuiltInRoomKey(input.roomKey) ? input.roomKey : null,
         home_name: input.homeName || null,
         species_name: input.speciesName || null,
@@ -221,14 +226,30 @@ export class PlantRepository {
     return mapPlant(data);
   }
 
-  async updatePlant(plantId: string, input: { homeName?: string; speciesName?: string; scientificName?: string; roomKey?: string; notes?: string }) {
+  async updatePlant(plantId: string, input: { homeId?: string; homeName?: string; speciesName?: string; scientificName?: string; roomKey?: string; roomId?: string; positionInRoom?: Plant["positionInRoom"]; notes?: string }) {
+    let nextRoomId = input.roomId ?? (input.roomKey && !isBuiltInRoomKey(input.roomKey) ? input.roomKey : null);
+    if (input.homeId && nextRoomId) {
+      const { data: room, error: roomError } = await this.supabase
+        .from("rooms")
+        .select("id, home_id")
+        .eq("id", nextRoomId)
+        .eq("user_id", this.user.id)
+        .maybeSingle();
+      assertNoError(roomError);
+      if (!room || room.home_id !== input.homeId) {
+        nextRoomId = null;
+      }
+    }
+
     const { error } = await this.supabase
       .from("plants")
       .update({
+        home_id: input.homeId || null,
         home_name: input.homeName || null,
         species_name: input.speciesName || null,
         scientific_name: input.scientificName || null,
-        room_id: input.roomKey && !isBuiltInRoomKey(input.roomKey) ? input.roomKey : null,
+        room_id: nextRoomId,
+        position_in_room: input.positionInRoom || null,
         room_key: isBuiltInRoomKey(input.roomKey) ? input.roomKey : null,
         notes: input.notes || null
       })
@@ -679,6 +700,77 @@ export class PhotoRepository {
   }
 }
 
+export class HomeRepository {
+  constructor(private supabase: SupabaseClient, private user: User) {}
+
+  async listHomes() {
+    const { data, error } = await this.supabase
+      .from("homes")
+      .select("*")
+      .eq("user_id", this.user.id)
+      .order("created_at", { ascending: true });
+
+    assertNoError(error);
+    return (data ?? []).map(mapHome);
+  }
+
+  async createHome(input: Omit<HomeContext, "id" | "createdAt">) {
+    const { data, error } = await this.supabase
+      .from("homes")
+      .insert({
+        user_id: this.user.id,
+        name: input.name.trim() || "Home",
+        city: input.city?.trim() || null,
+        country: input.country?.trim() || null,
+        home_type: input.type ?? null,
+        humidity_level: input.humidityLevel ?? null,
+        has_air_conditioning: input.hasAirConditioning ?? null,
+        notes: input.notes?.trim() || null
+      })
+      .select("*")
+      .single();
+
+    assertNoError(error);
+    return mapHome(data);
+  }
+
+  async updateHome(homeId: string, input: Partial<Omit<HomeContext, "id" | "createdAt">>) {
+    const { data, error } = await this.supabase
+      .from("homes")
+      .update({
+        ...(input.name !== undefined ? { name: input.name.trim() || "Home" } : {}),
+        ...(input.city !== undefined ? { city: input.city.trim() || null } : {}),
+        ...(input.country !== undefined ? { country: input.country.trim() || null } : {}),
+        ...(input.type !== undefined ? { home_type: input.type ?? null } : {}),
+        ...(input.humidityLevel !== undefined ? { humidity_level: input.humidityLevel ?? null } : {}),
+        ...(input.hasAirConditioning !== undefined ? { has_air_conditioning: input.hasAirConditioning ?? null } : {}),
+        ...(input.notes !== undefined ? { notes: input.notes.trim() || null } : {})
+      })
+      .eq("id", homeId)
+      .eq("user_id", this.user.id)
+      .select("*")
+      .single();
+
+    assertNoError(error);
+    return mapHome(data);
+  }
+
+  async deleteHome(homeId: string) {
+    const { error: clearPlantsError } = await this.supabase
+      .from("plants")
+      .update({ home_id: null, room_id: null, position_in_room: null })
+      .eq("user_id", this.user.id)
+      .eq("home_id", homeId);
+    assertNoError(clearPlantsError);
+
+    const { error: deleteRoomsError } = await this.supabase.from("rooms").delete().eq("user_id", this.user.id).eq("home_id", homeId);
+    assertNoError(deleteRoomsError);
+
+    const { error } = await this.supabase.from("homes").delete().eq("id", homeId).eq("user_id", this.user.id);
+    assertNoError(error);
+  }
+}
+
 export class RoomRepository {
   constructor(private supabase: SupabaseClient, private user: User) {}
 
@@ -693,14 +785,20 @@ export class RoomRepository {
     return (data ?? []).map(mapRoom);
   }
 
-  async addRoom(name: string) {
+  async addRoom(name: string, input?: Partial<Omit<Room, "id" | "name" | "isCustom" | "createdAt">>) {
     const trimmedName = name.trim();
     const { data, error } = await this.supabase
       .from("rooms")
       .insert({
         user_id: this.user.id,
+        home_id: input?.homeId ?? null,
         name: trimmedName,
-        is_custom: true
+        is_custom: true,
+        light_level: input?.lightLevel ?? null,
+        direct_sun: input?.directSun ?? null,
+        temperature_relative: input?.temperatureRelative ?? null,
+        has_air_conditioning: input?.hasAirConditioning ?? null,
+        notes: input?.notes ?? null
       })
       .select("*")
       .single();
@@ -711,6 +809,27 @@ export class RoomRepository {
         return existing;
       }
     }
+
+    assertNoError(error);
+    return mapRoom(data);
+  }
+
+  async updateRoom(roomId: string, input: Partial<Omit<Room, "id" | "isCustom" | "createdAt">>) {
+    const { data, error } = await this.supabase
+      .from("rooms")
+      .update({
+        ...(input.homeId !== undefined ? { home_id: input.homeId ?? null } : {}),
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.lightLevel !== undefined ? { light_level: input.lightLevel ?? null } : {}),
+        ...(input.directSun !== undefined ? { direct_sun: input.directSun ?? null } : {}),
+        ...(input.temperatureRelative !== undefined ? { temperature_relative: input.temperatureRelative ?? null } : {}),
+        ...(input.hasAirConditioning !== undefined ? { has_air_conditioning: input.hasAirConditioning ?? null } : {}),
+        ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {})
+      })
+      .eq("id", roomId)
+      .eq("user_id", this.user.id)
+      .select("*")
+      .single();
 
     assertNoError(error);
     return mapRoom(data);
@@ -737,6 +856,7 @@ export class RoomRepository {
       .from("plants")
       .update({
         room_id: nextRoomId,
+        position_in_room: null,
         room_key: nextRoomKey
       })
       .eq("user_id", this.user.id)
@@ -1029,6 +1149,7 @@ export async function createRepositories(supabase: SupabaseClient, user: User) {
     userId: user.id,
     plants: new PlantRepository(supabase, user),
     photos: new PhotoRepository(supabase, user),
+    homes: new HomeRepository(supabase, user),
     rooms: new RoomRepository(supabase, user),
     milestones: new MilestoneRepository(supabase, user),
     careEvents: new CareEventRepository(supabase, user),

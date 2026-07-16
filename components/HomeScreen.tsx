@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Leaf, Sprout } from "lucide-react";
+import Link from "next/link";
 import { AttentionBanner } from "./AttentionBanner";
 import { FloatingAddButton } from "./FloatingAddButton";
 import { HomeHeader } from "./HomeHeader";
@@ -12,6 +13,8 @@ import { useI18n } from "@/i18n/I18nProvider";
 import { hasUnfinishedAddPlantDraft } from "@/lib/add-plant-draft";
 import { deriveCareActionState, isDueCareActionState, type DerivedCareActionState } from "@/lib/plant-action-eligibility";
 import type { Plant } from "@/types/plant";
+
+const homeSetupDismissedKey = "my_plants_home_setup_dismissed_until";
 
 function sortPlantsByPriority(plants: Plant[]) {
   const priority = { needs_attention: 0, check_soon: 1, unknown: 2, healthy: 3 };
@@ -76,9 +79,30 @@ function HomeErrorState({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+function HomeSetupCard({ onDismiss }: { onDismiss: () => void }) {
+  const { t } = useI18n();
+  return (
+    <section className="px-5 pt-5">
+      <div className="rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
+        <h2 className="font-rounded text-xl font-extrabold text-ink">{t("homeContext.setupTitle")}</h2>
+        <p className="mt-2 text-sm font-bold leading-5 text-[#7a7166]">{t("homeContext.setupBody")}</p>
+        <div className="mt-4 grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+          <Link href="/settings" className="flex min-h-11 items-center justify-center rounded-[16px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]">
+            {t("homeContext.setupAction")}
+          </Link>
+          <button type="button" onClick={onDismiss} className="min-h-11 rounded-[16px] bg-white/75 px-4 text-sm font-extrabold text-[#7a7166]">
+            {t("homeContext.later")}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function HomeScreen() {
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const { getPlantHypothesisResolutions, plants: storedPlants, retry, secondaryDataReady, status } = usePlantStore();
+  const [isHomeSetupDismissed, setIsHomeSetupDismissed] = useState(false);
+  const { getPlantHypothesisResolutions, homes, plants: storedPlants, retry, secondaryDataReady, status } = usePlantStore();
   const plants = useMemo(() => sortPlantsByPriority(storedPlants), [storedPlants]);
   const careActionByPlantId = useMemo(() => {
     const states = new Map<string, DerivedCareActionState>();
@@ -108,7 +132,13 @@ export function HomeScreen() {
     if (hasUnfinishedAddPlantDraft()) {
       setIsAddOpen(true);
     }
+    const dismissedUntil = Number(window.localStorage.getItem(homeSetupDismissedKey) ?? "0");
+    setIsHomeSetupDismissed(dismissedUntil > Date.now());
   }, []);
+  const dismissHomeSetup = () => {
+    window.localStorage.setItem(homeSetupDismissedKey, String(Date.now() + 7 * 24 * 60 * 60 * 1000));
+    setIsHomeSetupDismissed(true);
+  };
   const focusAttentionPlant = () => {
     const firstDuePlantId = duePlantIds[0];
     if (!firstDuePlantId) {
@@ -125,6 +155,7 @@ export function HomeScreen() {
       <div className="pb-[144px]">
         {status === "loading" ? <HomeSkeleton /> : null}
         {status === "error" ? <HomeErrorState onRetry={() => void retry()} /> : null}
+        {isReady && !homes.length && !isHomeSetupDismissed ? <HomeSetupCard onDismiss={dismissHomeSetup} /> : null}
         {isReady && plants.length === 0 ? <HomeEmptyState onAddPlant={() => setIsAddOpen(true)} /> : null}
         {isReady && plants.length > 0 ? <PlantList plants={plants} careActionByPlantId={careActionByPlantId} /> : null}
       </div>

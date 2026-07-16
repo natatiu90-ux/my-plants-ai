@@ -10,9 +10,9 @@ import { cleanScientificName, plantCommonName, plantDisplayName } from "@/lib/pl
 import { logNavigationEvent } from "@/lib/navigation-performance";
 import { DeletePlantDialog } from "./DeletePlantDialog";
 import { DeletePhotoDialog } from "./DeletePhotoDialog";
+import { LocationPicker } from "./LocationPicker";
 import { PhotoUploadFlow } from "./PhotoUploadFlow";
 import { PhotoReviewGrid } from "./PhotoReviewGrid";
-import { RoomPicker } from "./RoomPicker";
 import { Toast } from "./Toast";
 
 export function PlantEditPage({ plantId }: { plantId: string }) {
@@ -33,6 +33,9 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
   const [homeName, setHomeName] = useState(plant?.homeName ?? "");
   const [speciesName, setSpeciesName] = useState(plant ? plantCommonName(plant) : "");
   const [scientificName, setScientificName] = useState(plant?.scientificName ?? "");
+  const [homeId, setHomeId] = useState<string | undefined>(plant?.homeId);
+  const [roomId, setRoomId] = useState<string | undefined>(plant?.roomId ?? (plant?.roomKey?.startsWith("rooms.") ? undefined : plant?.roomKey));
+  const [positionInRoom, setPositionInRoom] = useState(plant?.positionInRoom);
   const [roomKey, setRoomKey] = useState<string | undefined>(plant?.roomKey);
   const [isAddingPhoto, setIsAddingPhoto] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
@@ -61,7 +64,15 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
   }
 
   const save = () => {
-    updatePlant(plant.id, { homeName, speciesName, scientificName: cleanScientificName(scientificName), roomKey });
+    updatePlant(plant.id, {
+      homeId,
+      homeName,
+      speciesName,
+      scientificName: cleanScientificName(scientificName),
+      roomId,
+      roomKey: roomId ?? roomKey,
+      positionInRoom
+    });
     setToast(t("edit.saved"));
   };
 
@@ -122,10 +133,26 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
           {t("addPlant.scientificName")}
           <input value={scientificName} onChange={(event) => setScientificName(event.target.value)} className="mt-2 block min-h-12 w-full min-w-0 max-w-full rounded-[18px] bg-white/80 px-4 text-base outline-none" />
         </label>
-        <div className="mt-4">
-          <p className="mb-2 text-sm font-extrabold text-[#4f4940]">{t("plantDetail.location")}</p>
-          <RoomPicker value={roomKey} onChange={setRoomKey} />
-        </div>
+      </section>
+
+      <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
+        <h2 className="mb-3 px-1 font-rounded text-xl font-extrabold text-ink">{t("plantDetail.location")}</h2>
+        <LocationPicker
+          homeId={homeId}
+          roomId={roomId}
+          positionInRoom={positionInRoom}
+          onChange={(location) => {
+            setHomeId(location.homeId);
+            setRoomId(location.roomId);
+            setRoomKey(location.roomId);
+            setPositionInRoom(location.positionInRoom);
+          }}
+        />
+        {plant.roomKey?.startsWith("rooms.") && !roomId ? (
+          <p className="mt-3 rounded-[18px] bg-white/70 p-3 text-sm font-bold text-[#7a7166]">
+            {t("homeContext.legacyRoomNote")}
+          </p>
+        ) : null}
       </section>
 
       <button type="button" onClick={save} className="mt-5 min-h-12 w-full rounded-[18px] bg-gradient-to-br from-[#92cc90] to-[#6ba369] px-4 text-sm font-extrabold text-white shadow-fab">

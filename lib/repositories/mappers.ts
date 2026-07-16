@@ -13,6 +13,7 @@ import type {
   PlantMilestoneType,
   PlantPhoto,
   PlantStatus,
+  HomeContext,
   Room,
   SoilCheckResult
 } from "@/types/plant";
@@ -21,7 +22,9 @@ import { commonNameFromScientificName } from "@/lib/plant-display";
 
 export type PlantRow = {
   id: string;
+  home_id?: string | null;
   room_id: string | null;
+  position_in_room?: Plant["positionInRoom"] | null;
   room_key?: string | null;
   home_name: string | null;
   species_name: string | null;
@@ -53,8 +56,27 @@ export type PlantPhotoRow = {
 
 export type RoomRow = {
   id: string;
+  home_id?: string | null;
   name: string;
   is_custom: boolean;
+  light_level?: Room["lightLevel"] | null;
+  direct_sun?: Room["directSun"] | null;
+  temperature_relative?: Room["temperatureRelative"] | null;
+  has_air_conditioning?: Room["hasAirConditioning"] | null;
+  notes?: string | null;
+  created_at: string;
+};
+
+export type HomeRow = {
+  id: string;
+  name: string;
+  city?: string | null;
+  country?: string | null;
+  country_code?: string | null;
+  home_type?: HomeContext["type"] | null;
+  humidity_level?: HomeContext["humidityLevel"] | null;
+  has_air_conditioning?: boolean | null;
+  notes?: string | null;
   created_at: string;
 };
 
@@ -131,6 +153,9 @@ export function mapPlant(row: PlantRow): Plant {
 
   return {
     id: row.id,
+    homeId: row.home_id ?? undefined,
+    roomId: row.room_id ?? undefined,
+    positionInRoom: row.position_in_room ?? undefined,
     homeName: row.home_name ?? undefined,
     speciesName: row.species_name || commonNameFromScientificName(row.scientific_name),
     scientificName: row.scientific_name ?? undefined,
@@ -170,8 +195,28 @@ export function mapPhoto(row: PlantPhotoRow): PlantPhoto {
 export function mapRoom(row: RoomRow): Room {
   return {
     id: row.id,
+    homeId: row.home_id ?? undefined,
     name: row.name,
     isCustom: row.is_custom,
+    lightLevel: row.light_level ?? undefined,
+    directSun: row.direct_sun ?? undefined,
+    temperatureRelative: row.temperature_relative ?? undefined,
+    hasAirConditioning: row.has_air_conditioning ?? undefined,
+    notes: row.notes ?? undefined,
+    createdAt: toDateKey(row.created_at) ?? row.created_at
+  };
+}
+
+export function mapHome(row: HomeRow): HomeContext {
+  return {
+    id: row.id,
+    name: row.name,
+    city: row.city ?? undefined,
+    country: row.country ?? row.country_code ?? undefined,
+    type: row.home_type ?? undefined,
+    humidityLevel: row.humidity_level ?? undefined,
+    hasAirConditioning: row.has_air_conditioning ?? undefined,
+    notes: row.notes ?? undefined,
     createdAt: toDateKey(row.created_at) ?? row.created_at
   };
 }

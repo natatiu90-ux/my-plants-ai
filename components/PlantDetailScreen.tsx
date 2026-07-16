@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
 import { addDays, formatLongDate, toDateKey } from "@/lib/date-format";
+import { buildPlantEnvironmentContext, formatEnvironmentContextForPrompt } from "@/lib/home-room-context";
 import { plantDisplayName } from "@/lib/plant-display";
 import { deriveCareActionState } from "@/lib/plant-action-eligibility";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
@@ -59,7 +60,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useI18n();
-  const { addMilestone, addPlantPhotos, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getPlant, getPlantAnalysis, getPlantHypothesisResolutions, getPlantMilestones, getPlantPhotos, recordSoilChecked, resolvePlantHypothesis, saveBaselineHistory, savePlantAnalysis, secondaryDataReady, waterPlant } =
+  const { addMilestone, addPlantPhotos, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getPlant, getPlantAnalysis, getPlantHypothesisResolutions, getPlantMilestones, getPlantPhotos, homes, recordSoilChecked, resolvePlantHypothesis, rooms, saveBaselineHistory, savePlantAnalysis, secondaryDataReady, waterPlant } =
     usePlantStore();
   const { locale } = useI18n();
   const plant = getPlant(plantId);
@@ -253,6 +254,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       formData.append("currentScientificName", plant.scientificName ?? "");
       formData.append("currentDetectedSpecies", [plant.speciesName, plant.scientificName].filter(Boolean).join(" "));
       formData.append("currentLightCondition", plant.lightConditionKey ? t(plant.lightConditionKey) : "");
+      formData.append("environmentContext", formatEnvironmentContextForPrompt(buildPlantEnvironmentContext({ plant, homes, rooms })));
 
       const response = await fetch("/api/analyze-plant", { method: "POST", body: formData });
       const payload = await response.json().catch(() => null);
