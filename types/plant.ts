@@ -114,6 +114,7 @@ export interface PlantAnalysisRecord {
     ru?: string;
   }[];
   rawResult?: {
+    plantStatus?: "healthy" | "adapting" | "watch" | "needs_attention" | "action_needed";
     visibleObservations?: { en?: string; ru?: string }[];
     uncertainties?: { en?: string; ru?: string }[];
     careRightNow?: {

@@ -667,7 +667,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           logNavigationEvent("detail", plant.id, fullCoverUrl ? "cover_full_image_ready" : "cover_thumbnail_ready");
         }}
       />
-      <PlantStatusSection plant={plant} careActionState={careActionState} analysis={displayAnalysis} />
+      <PlantStatusSection plant={plant} careActionState={careActionState} analysis={displayAnalysis} milestones={milestones} />
       {baselineQuestion ? (
         <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
           <p className="text-xs font-bold uppercase text-[#a09a90]">{baselineQuestion === "watering" ? t("baseline.welcome") : t("baseline.thanks")}</p>

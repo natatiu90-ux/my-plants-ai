@@ -12,13 +12,15 @@ export function PlantList({
   plants: Plant[];
   careActionByPlantId: Map<string, DerivedCareActionState>;
 }) {
-  const { getCoverPhoto } = usePlantStore();
+  const { getCoverPhoto, getPlantAnalysis, getPlantMilestones } = usePlantStore();
 
   return (
     <section className="flex flex-col gap-4 px-5 pt-6">
       {plants.map((plant) => {
         const coverPhoto = getCoverPhoto(plant.id);
         const careAction = careActionByPlantId.get(plant.id);
+        const analysis = getPlantAnalysis(plant.id);
+        const milestones = getPlantMilestones(plant.id);
         if (!careAction) {
           return null;
         }
@@ -28,6 +30,8 @@ export function PlantList({
             key={plant.id}
             plant={plant}
             careAction={careAction}
+            analysis={analysis}
+            milestones={milestones}
             coverPhotoUrl={coverPhoto?.thumbnailUrl ?? coverPhoto?.url ?? "/plants/martha.png"}
           />
         );

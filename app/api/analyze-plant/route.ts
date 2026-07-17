@@ -68,6 +68,7 @@ type AnalysisPayload = {
   detectedSpecies?: unknown;
   commonName?: unknown;
   scientificName?: unknown;
+  plantStatus?: unknown;
   condition?: unknown;
   recommendations?: { type?: string; priority?: string; en?: string; ru?: string }[];
   careRightNow?: { type?: string; priority?: string; action?: { en?: string; ru?: string }; reason?: { en?: string; ru?: string } }[];
@@ -145,6 +146,7 @@ const schema = {
       },
       scientificName: { type: ["string", "null"] },
       confidence: { type: "number", minimum: 0, maximum: 1 },
+      plantStatus: { type: "string", enum: ["healthy", "adapting", "watch", "needs_attention", "action_needed"] },
       condition: { type: "string", enum: ["healthy", "check_soon", "needs_attention", "unknown"] },
       statusLabel: {
         type: "object",
@@ -361,6 +363,7 @@ const schema = {
       "commonName",
       "scientificName",
       "confidence",
+      "plantStatus",
       "condition",
       "statusLabel",
       "summary",
@@ -505,7 +508,7 @@ function applySpeciesAwareQuestionLimits(analysis: AnalysisPayload) {
   });
   const selectedQuestions: string[] = [];
   const removedQuestions: string[] = [];
-  const healthyAnalysis = analysis.condition === "healthy";
+  const healthyAnalysis = analysis.plantStatus === "healthy" || analysis.plantStatus === "adapting" || analysis.condition === "healthy";
 
   if (Array.isArray(analysis.hypotheses)) {
     let keptQuestions = 0;
@@ -787,11 +790,27 @@ export async function POST(request: Request) {
           "You are helping with houseplant care from user-provided photos.",
           "Return only cautious, advisory plant-care analysis.",
           "Write like an experienced, calm plant caretaker: warm, confident, concise, practical, reassuring, and observant.",
-          "Never talk to the user about prompts, AI reasoning, recommendation generation, database context, internal updates, or processing steps. Talk only about the plant, its leaves, soil, light, care, and what to do next.",
+          "Never talk to the user about prompts, AI reasoning, recommendation generation, database context, internal updates, or processing steps. Talk only about the plant, its species-appropriate organs, soil, light, care, and what to do next.",
           "Avoid robotic phrases such as 'I updated recommendations because', 'recommendations were reduced to', 'no urgent measures are needed', 'context was updated', or 'AI thinks'. Prefer practical plant-centered wording.",
           "Every recommendation should naturally answer: what is happening, why that seems likely, and what the owner should do. Avoid repeating the user's inputs as raw facts.",
+          "Choose plantStatus intentionally from exactly: healthy, adapting, watch, needs_attention, action_needed.",
+          "plantStatus describes overall health and urgency, not model uncertainty. Uncertainty alone must not downgrade a plant.",
+          "Use healthy as the default when leaves look healthy, no meaningful stress is visible, and no care action is needed. Healthy plants should frequently be healthy.",
+          "Use adapting when the plant was recently repotted, moved, watered, or otherwise changed and small adjustment signs are expected without urgent action.",
+          "Use watch only when there are minor visible signs worth monitoring, such as old dry edges, mild cosmetic marks, or recovery signs, but no intervention is recommended now.",
+          "Use needs_attention when something should be checked soon, such as soil, light, watering, or room conditions, but immediate care is not clearly required.",
+          "Use action_needed only for likely immediate care needs, severe stress, pests, disease, rot risk, rapid decline, or urgent watering/light correction.",
+          "Keep legacy condition compatible: healthy maps to healthy; adapting/watch usually map to check_soon only when the app should observe; needs_attention/action_needed map to needs_attention.",
           "When possible, provide commonName as a short human-readable plant name in English and Russian, and scientificName as Latin botanical name only.",
           "First identify the likely species, then reason from that plant's actual biology instead of applying a universal houseplant checklist.",
+          "Before writing recommendations, identify the plant's growth habit and the correct plant organs to discuss. Use species-appropriate terminology throughout.",
+          "Never mention plant organs that do not exist for the likely plant. Forbidden mismatches: cactus/cacti/succulents with leaves, leaf edges, leaf yellowing, leaf undersides, or leaf drop; orchids with trunks; Sansevieria/snake plants with branches.",
+          "For cactus and drought-tolerant succulents, describe body firmness, color, ribs, apex growth, offsets/pups, wrinkles, corking, translucent or mushy tissue, and the base. Do not mention leaves unless the identified succulent species actually has leaves, such as Portulacaria, Aloe, Echeveria, or ZZ plant.",
+          "For Monstera, it is appropriate to discuss new leaves, aerial roots, fenestrations, petioles, leaf edges, and support.",
+          "For Ficus, discuss leaves, leaf drop, new shoots, stems, and light response.",
+          "For Sansevieria/snake plant, discuss upright leaves, firmness, center growth, base softness, and rhizome/root-zone issues; do not mention branches.",
+          "For orchids, discuss roots, flower spikes, flowers, pseudobulbs when relevant, leaves when visible, and potting medium; do not mention trunks.",
+          "If species confidence is low or growth habit is unclear, use neutral wording such as 'new growth', 'new tissue', 'the plant body', 'affected areas', or 'visible parts' instead of species-specific organs.",
           "Use the structured species profiles below as decision support. They are not encyclopedia text for the user; use them to rank hypotheses, choose actions, and decide which questions are worth asking.",
           "Never output generic plant encyclopedia facts. Every species fact shown to the user must connect to this plant's current photos, current diagnosis, current action, or previous user answers.",
           "Return the new recommendation model as independent sections: careRightNow, aboutSpecies, clarificationQuestions, reasoning, and alternativeCauses.",
@@ -831,7 +850,7 @@ export async function POST(request: Request) {
           "Do not satisfy the response with generic reassurance alone. A summary may start calmly, but the recommendation must contain at least one species-specific observation target and at least one context-specific action or non-action.",
           "If there is no urgent action, still be useful: explain exactly what to observe next, what improvement would look like, what deterioration would look like, and what not to do when relevant.",
           "Use saved care data instead of re-asking. If watering, repotting, soil condition, room, home, or location is already present in context or previous answers, treat it as known unless it is contradictory or stale enough to change care.",
-          "For healthy or observe states, avoid filler such as 'keep observing' by itself. Tie observation to the detected species, room light/direct sun, watering or repotting history, season/location, or photo age.",
+          "For healthy or adapting states, avoid filler such as 'keep observing' by itself. Tie any observation to the detected species, room light/direct sun, watering or repotting history, season/location, or photo age.",
           "When evidence is limited, say the next useful check instead of producing empty generic text. Do not invent symptoms to make advice sound specific.",
           "Keep legacy recommendations aligned with careRightNow. Do not put aboutSpecies facts into legacy recommendations.",
           "Separate visible observations from cautious inferences and user actions needed to verify.",
@@ -918,6 +937,7 @@ export async function POST(request: Request) {
       recommendationCount: Array.isArray(analysis?.recommendations) ? analysis.recommendations.length : null,
       hasHypotheses: Array.isArray(analysis?.hypotheses),
       hypothesisCount: Array.isArray(analysis?.hypotheses) ? analysis.hypotheses.length : null,
+      plantStatus: analysis?.plantStatus ?? null,
       condition: analysis?.condition ?? null
     });
     traceEvent(trace, "schema_validation_completed", {
