@@ -99,7 +99,7 @@ export const speciesCareProfiles: SpeciesCareProfile[] = [
       "замиокулькас"
     ],
     displayName: "cactus or drought-tolerant succulent",
-    preferredLight: "Usually wants strong bright light; some acclimated plants tolerate direct sun, but sudden harsh sun can still burn leaves.",
+    preferredLight: "Usually wants strong bright light; some acclimated plants tolerate direct sun, but sudden harsh sun can still burn tissue.",
     wateringPattern: "Dry soil is often normal. Water only after the mix dries well, and be more cautious after recent watering.",
     soil: "Needs a gritty, fast-draining mix; dense wet soil is a bigger risk than short dry periods.",
     humidity: "Low household humidity is usually fine and rarely the first concern.",
