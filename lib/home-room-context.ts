@@ -184,8 +184,7 @@ export function buildPlantEnvironmentContext(input: {
           lightLevel: room.lightLevel ?? null,
           directSun: room.directSun ?? null,
           temperatureRelative: room.temperatureRelative ?? null,
-          hasAirConditioning: room.hasAirConditioning ?? null,
-          notes: room.notes ?? null
+          hasAirConditioning: room.hasAirConditioning ?? null
         }
       : null,
     plantPosition: plant?.positionInRoom ?? null,

@@ -80,6 +80,21 @@ assert.equal(strovolosContext?.home?.country, "Cyprus");
 assert.equal(strovolosContext?.room?.lightLevel, "low");
 assert.equal(strovolosContext?.room?.directSun, "morning");
 
+const eveningSunRoom: Room = {
+  ...room,
+  id: "room-evening",
+  name: "Warm evening room",
+  lightLevel: "bright_indirect",
+  directSun: "evening",
+  temperatureRelative: "warm",
+  hasAirConditioning: "no"
+};
+const eveningContext = buildPlantEnvironmentContext({ plant: { ...plant, roomId: eveningSunRoom.id }, homes: [home], rooms: [eveningSunRoom] });
+assert.equal(eveningContext?.room?.lightLevel, "bright_indirect");
+assert.equal(eveningContext?.room?.directSun, "evening");
+assert.equal(eveningContext?.room?.temperatureRelative, "warm");
+assert.equal(eveningContext?.room?.hasAirConditioning, "no");
+
 const legacyContext = buildPlantEnvironmentContext({
   plant: { ...plant, homeId: undefined, roomId: undefined, roomKey: "rooms.kitchen" },
   homes: [],

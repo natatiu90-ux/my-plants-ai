@@ -10,7 +10,7 @@ import { detectCityFromCoordinates, getBrowserPosition, searchCities, type CityS
 import { AnswerChips } from "./AnswerChips";
 
 const lightOptions: NonNullable<Room["lightLevel"]>[] = ["low", "medium_indirect", "bright_indirect", "direct_sun", "unknown"];
-const sunOptions: NonNullable<Room["directSun"]>[] = ["none", "morning", "afternoon", "all_day", "unknown"];
+const sunOptions: NonNullable<Room["directSun"]>[] = ["none", "morning", "midday", "evening", "most_of_day", "unsure"];
 const tempOptions: NonNullable<Room["temperatureRelative"]>[] = ["cool", "stable", "warm", "variable", "unknown"];
 const acOptions: NonNullable<Room["hasAirConditioning"]>[] = ["inherit", "yes", "no", "unknown"];
 const humidityOptions: NonNullable<HomeContext["humidityLevel"]>[] = ["dry", "normal", "humid", "unknown"];
@@ -33,7 +33,6 @@ type RoomDraft = {
   directSun: string;
   temperatureRelative: string;
   hasAirConditioning: string;
-  notes: string;
 };
 
 type ImportDebugDetail = {
@@ -50,7 +49,7 @@ type ImportDebugDetail = {
 };
 
 const emptyHomeDraft: Draft = { name: "", city: "", country: "", type: "", humidityLevel: "", hasAirConditioning: "", notes: "" };
-const emptyRoomDraft: RoomDraft = { id: "", name: "", lightLevel: "", directSun: "", temperatureRelative: "", hasAirConditioning: "inherit", notes: "" };
+const emptyRoomDraft: RoomDraft = { id: "", name: "", lightLevel: "", directSun: "", temperatureRelative: "", hasAirConditioning: "inherit" };
 
 function homeToDraft(home: HomeContext): Draft {
   return {
@@ -71,8 +70,7 @@ function roomToDraft(room: Room): RoomDraft {
     lightLevel: room.lightLevel ?? "",
     directSun: room.directSun ?? "",
     temperatureRelative: room.temperatureRelative ?? "",
-    hasAirConditioning: room.hasAirConditioning ?? "inherit",
-    notes: room.notes ?? ""
+    hasAirConditioning: room.hasAirConditioning ?? "inherit"
   };
 }
 
@@ -85,19 +83,20 @@ function roomDraftEqualsRoom(draft: RoomDraft, room: Room | null) {
     (draft.lightLevel || "") === (room.lightLevel ?? "") &&
     (draft.directSun || "") === (room.directSun ?? "") &&
     (draft.temperatureRelative || "") === (room.temperatureRelative ?? "") &&
-    (draft.hasAirConditioning || "inherit") === (room.hasAirConditioning ?? "inherit") &&
-    draft.notes.trim() === (room.notes ?? "")
+    (draft.hasAirConditioning || "inherit") === (room.hasAirConditioning ?? "inherit")
   );
 }
 
 function RoomOptionGroup<T extends string>({
   title,
+  helper,
   value,
   options,
   onChange,
   labelFor
 }: {
   title: string;
+  helper?: string;
   value: string;
   options: readonly T[];
   onChange: (value: string) => void;
@@ -106,6 +105,7 @@ function RoomOptionGroup<T extends string>({
   return (
     <div className="rounded-[18px] bg-white/70 p-3">
       <p className="text-sm font-extrabold text-[#4f4940]">{title}</p>
+      {helper ? <p className="mt-1 text-xs font-bold leading-4 text-[#8a8378]">{helper}</p> : null}
       <AnswerChips
         options={options}
         getKey={(option) => option}
@@ -344,6 +344,8 @@ export function HomeRoomSettings({
 
   const saveRoom = async () => {
     if (!selectedHome || isSaving || !roomDraft.name.trim()) return;
+    setSaveError(null);
+    setSuccessMessage(null);
     setIsSaving(true);
     try {
       const input = {
@@ -351,8 +353,7 @@ export function HomeRoomSettings({
         lightLevel: (roomDraft.lightLevel || undefined) as Room["lightLevel"],
         directSun: (roomDraft.directSun || undefined) as Room["directSun"],
         temperatureRelative: (roomDraft.temperatureRelative || undefined) as Room["temperatureRelative"],
-        hasAirConditioning: (roomDraft.hasAirConditioning || "inherit") as Room["hasAirConditioning"],
-        notes: roomDraft.notes.trim() || undefined
+        hasAirConditioning: (roomDraft.hasAirConditioning || "inherit") as Room["hasAirConditioning"]
       };
       if (roomDraft.id) {
         await updateRoom(roomDraft.id, { name: roomDraft.name.trim(), ...input });
@@ -361,6 +362,7 @@ export function HomeRoomSettings({
       }
       setRoomDraft(emptyRoomDraft);
       setMode("home");
+      setSuccessMessage(t("homeContext.roomSaved"));
     } finally {
       setIsSaving(false);
     }
@@ -490,7 +492,7 @@ export function HomeRoomSettings({
           {t("settings.back")}
         </button>
         <h2 className="font-rounded text-xl font-extrabold text-ink">{roomDraft.id ? t("homeContext.editRoom") : t("homeContext.addRoom")}</h2>
-        <div className="mt-4 grid gap-2 rounded-[22px] bg-white/70 p-3">
+        <div className="mt-4 grid gap-3 rounded-[22px] bg-white/70 p-3">
           <label className="block rounded-[18px] bg-white/70 p-3">
             <span className="text-sm font-extrabold text-[#4f4940]">{t("rooms.roomName")}</span>
             <input value={roomDraft.name} onChange={(event) => setRoomDraft((draft) => ({ ...draft, name: event.target.value }))} placeholder={t("rooms.roomName")} className="mt-2 min-h-11 w-full rounded-[16px] bg-[#fffaf3] px-3 text-base font-bold outline-none" />
@@ -504,6 +506,7 @@ export function HomeRoomSettings({
           />
           <RoomOptionGroup
             title={t("homeContext.directSun")}
+            helper={t("homeContext.directSunHelper")}
             value={roomDraft.directSun}
             options={sunOptions}
             onChange={(value) => setRoomDraft((draft) => ({ ...draft, directSun: value }))}
@@ -523,11 +526,8 @@ export function HomeRoomSettings({
             onChange={(value) => setRoomDraft((draft) => ({ ...draft, hasAirConditioning: value || "inherit" }))}
             labelFor={(option) => t(`homeContext.ac.${option}` as never)}
           />
-          <label className="block rounded-[18px] bg-white/70 p-3">
-            <span className="text-sm font-extrabold text-[#4f4940]">{t("homeContext.roomNotes")}</span>
-            <textarea value={roomDraft.notes} onChange={(event) => setRoomDraft((draft) => ({ ...draft, notes: event.target.value }))} placeholder={t("homeContext.roomNotes")} className="mt-2 min-h-20 w-full rounded-[16px] bg-[#fffaf3] px-3 py-3 text-base outline-none" />
-          </label>
         </div>
+        {!roomDraft.name.trim() ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{t("homeContext.roomNameRequired")}</p> : !hasRoomChanges ? <p className="mt-3 text-center text-xs font-bold text-[#8a8378]">{t("homeContext.noRoomChanges")}</p> : null}
         <button type="button" onClick={() => void saveRoom()} disabled={isSaving || !roomDraft.name.trim() || !hasRoomChanges} className="mt-4 min-h-12 w-full rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f] disabled:opacity-60">
           {roomDraft.id ? t("homeContext.saveRoom") : t("homeContext.addRoom")}
         </button>

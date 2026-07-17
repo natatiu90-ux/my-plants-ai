@@ -4,9 +4,11 @@ import { useEffect, useState } from "react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { appBuildStorageKey, appBuildVersion, isStandalonePwa } from "@/lib/app-version";
 import { PhotoStorageRepository, temporaryPhotoSchemaVersion } from "@/lib/photo-storage";
+import { buildIdFromServiceWorkerUrl, shouldShowPwaUpdateBanner } from "@/lib/pwa-update-state";
 
 const updateRequestedSessionKey = "my-plants-update-requested";
-const dismissedWorkerSessionKey = "my-plants-dismissed-update-worker";
+const dismissedWorkerBuildSessionKey = "my-plants-dismissed-update-worker-build";
+const staleUpdateStorageKeys = ["my-plants-update-available", "my-plants-update-ready", "my_plants_update_available"];
 
 function canUseServiceWorker() {
   return (
@@ -17,9 +19,20 @@ function canUseServiceWorker() {
   );
 }
 
-function isActionableWaitingWorker(registration: ServiceWorkerRegistration, worker: ServiceWorker | null) {
+function isActionableWaitingWorker(registration: ServiceWorkerRegistration, worker: ServiceWorker | null, detectedThisSession: boolean) {
   const controller = navigator.serviceWorker.controller;
-  return Boolean(worker && controller && worker.scriptURL !== controller.scriptURL && registration.waiting === worker);
+  return Boolean(
+    worker &&
+      controller &&
+      registration.waiting === worker &&
+      shouldShowPwaUpdateBanner({
+        clientBuildId: appBuildVersion,
+        controllerBuildId: buildIdFromServiceWorkerUrl(controller.scriptURL),
+        waitingBuildId: buildIdFromServiceWorkerUrl(worker.scriptURL),
+        waitingDetectedThisSession: detectedThisSession,
+        dismissedWaitingBuildId: window.sessionStorage.getItem(dismissedWorkerBuildSessionKey)
+      })
+  );
 }
 
 function logPwaUpdateDecision(registration: ServiceWorkerRegistration, reason: string) {
@@ -29,12 +42,16 @@ function logPwaUpdateDecision(registration: ServiceWorkerRegistration, reason: s
 
   console.info("pwa_update_state", {
     reason,
+    clientBuildId: appBuildVersion,
     controllerUrl: navigator.serviceWorker.controller?.scriptURL ?? null,
+    controllerBuildId: buildIdFromServiceWorkerUrl(navigator.serviceWorker.controller?.scriptURL),
     activeState: registration.active?.state ?? null,
     waitingState: registration.waiting?.state ?? null,
     installingState: registration.installing?.state ?? null,
     activeUrl: registration.active?.scriptURL ?? null,
+    activeBuildId: buildIdFromServiceWorkerUrl(registration.active?.scriptURL),
     waitingUrl: registration.waiting?.scriptURL ?? null,
+    waitingBuildId: buildIdFromServiceWorkerUrl(registration.waiting?.scriptURL),
     installingUrl: registration.installing?.scriptURL ?? null
   });
 }
@@ -54,6 +71,7 @@ export function ServiceWorkerRegistration() {
     let registrationRef: ServiceWorkerRegistration | null = null;
     const previousVersion = window.localStorage.getItem(appBuildStorageKey);
     const shouldClearDisposablePhotos = !previousVersion || previousVersion !== appBuildVersion;
+    staleUpdateStorageKeys.forEach((key) => window.localStorage.removeItem(key));
 
     if (shouldClearDisposablePhotos) {
       void PhotoStorageRepository.clearTemporaryPhotos()
@@ -79,15 +97,9 @@ export function ServiceWorkerRegistration() {
         logPwaUpdateDecision(registration, reason);
       };
 
-      const showUpdateBannerIfActionable = (worker: ServiceWorker | null, reason: string) => {
-        const dismissedWorkerUrl = window.sessionStorage.getItem(dismissedWorkerSessionKey);
-        if (!isActionableWaitingWorker(registration, worker)) {
+      const showUpdateBannerIfActionable = (worker: ServiceWorker | null, reason: string, detectedThisSession: boolean) => {
+        if (!isActionableWaitingWorker(registration, worker, detectedThisSession)) {
           hideUpdateBanner(reason);
-          return;
-        }
-
-        if (worker?.scriptURL && dismissedWorkerUrl === worker.scriptURL) {
-          hideUpdateBanner("waiting_worker_dismissed_for_session");
           return;
         }
 
@@ -108,9 +120,12 @@ export function ServiceWorkerRegistration() {
           currentBuildVersion: appBuildVersion,
           storedPreviousBuildVersion: previousVersion,
           serviceWorkerController: navigator.serviceWorker.controller?.scriptURL ?? null,
+          serviceWorkerControllerBuildId: buildIdFromServiceWorkerUrl(navigator.serviceWorker.controller?.scriptURL),
           serviceWorkerInstalling: registration.installing?.scriptURL ?? null,
           serviceWorkerWaiting: registration.waiting?.scriptURL ?? null,
+          serviceWorkerWaitingBuildId: buildIdFromServiceWorkerUrl(registration.waiting?.scriptURL),
           serviceWorkerActive: registration.active?.scriptURL ?? null,
+          serviceWorkerActiveBuildId: buildIdFromServiceWorkerUrl(registration.active?.scriptURL),
           activeCacheNames: cacheNames,
           temporaryPhotoSchemaVersion,
           temporaryPhotoCount: temporaryPhotoIds.length
@@ -119,9 +134,9 @@ export function ServiceWorkerRegistration() {
 
       void reportDiagnostics();
 
-      showUpdateBannerIfActionable(registration.waiting, registration.waiting ? "existing_waiting_worker" : "no_waiting_worker");
+      showUpdateBannerIfActionable(registration.waiting, registration.waiting ? "existing_waiting_worker_ignored_until_session_update" : "no_waiting_worker", false);
       void registration.update().then(() => {
-        showUpdateBannerIfActionable(registration.waiting, registration.waiting ? "waiting_worker_after_update_check" : "no_waiting_worker_after_update_check");
+        showUpdateBannerIfActionable(registration.waiting, registration.waiting ? "waiting_worker_after_update_check" : "no_waiting_worker_after_update_check", false);
       }).catch((error) => {
         console.info("service_worker_update_check_failed", {
           message: error instanceof Error ? error.message : "Unknown error"
@@ -138,7 +153,7 @@ export function ServiceWorkerRegistration() {
         logPwaUpdateDecision(registration, "updatefound");
         nextWorker.addEventListener("statechange", () => {
           if (nextWorker.state === "installed") {
-            showUpdateBannerIfActionable(nextWorker, "installing_worker_installed");
+            showUpdateBannerIfActionable(nextWorker, "installing_worker_installed", true);
           }
         });
       });
@@ -188,7 +203,10 @@ export function ServiceWorkerRegistration() {
 
   const dismissUpdate = () => {
     if (waitingWorker?.scriptURL) {
-      window.sessionStorage.setItem(dismissedWorkerSessionKey, waitingWorker.scriptURL);
+      const waitingBuildId = buildIdFromServiceWorkerUrl(waitingWorker.scriptURL);
+      if (waitingBuildId) {
+        window.sessionStorage.setItem(dismissedWorkerBuildSessionKey, waitingBuildId);
+      }
     }
     setWaitingWorker(null);
     setIsUpdateReady(false);
@@ -199,7 +217,7 @@ export function ServiceWorkerRegistration() {
   }
 
   return (
-    <div className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+16px)] z-[70] mx-auto flex max-w-[390px] items-center gap-3 rounded-[20px] bg-[#fffaf3] p-3 shadow-[0_14px_40px_rgba(0,0,0,0.16)]">
+    <div className="fixed inset-x-4 top-[calc(env(safe-area-inset-top)+12px)] z-[70] mx-auto flex max-w-[390px] items-center gap-3 rounded-[20px] bg-[#fffaf3] p-3 shadow-[0_14px_40px_rgba(0,0,0,0.16)]">
       <p className="min-w-0 flex-1 text-sm font-extrabold leading-5 text-[#3f3b35]">{t("pwa.updateReady")}</p>
       <button
         type="button"

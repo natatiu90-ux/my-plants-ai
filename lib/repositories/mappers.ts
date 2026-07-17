@@ -169,6 +169,16 @@ function toDateKey(value: string | null | undefined) {
   return value ? value.slice(0, 10) : undefined;
 }
 
+function normalizeRoomDirectSun(value: string | null | undefined): Room["directSun"] | undefined {
+  if (value === "afternoon") return "midday";
+  if (value === "all_day") return "most_of_day";
+  if (value === "unknown") return "unsure";
+  if (value === "none" || value === "morning" || value === "midday" || value === "evening" || value === "most_of_day" || value === "unsure") {
+    return value;
+  }
+  return undefined;
+}
+
 export function mapPlant(row: PlantRow): Plant {
   const nextAction = row.next_action === "none" ? null : row.next_action;
   const statusLabelKey =
@@ -227,7 +237,7 @@ export function mapRoom(row: RoomRow): Room {
     name: row.name,
     isCustom: row.is_custom,
     lightLevel: row.light_level ?? undefined,
-    directSun: row.direct_sun ?? undefined,
+    directSun: normalizeRoomDirectSun(row.direct_sun),
     temperatureRelative: row.temperature_relative ?? undefined,
     hasAirConditioning: row.has_air_conditioning ?? undefined,
     notes: row.notes ?? undefined,
