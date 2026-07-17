@@ -130,45 +130,45 @@ function recommendationRefreshReason(
   if (changedContext.room.lightLevel && currentSnapshot.room?.lightLevel) {
     const light = t(`homeContext.light.${currentSnapshot.room.lightLevel}` as never);
     return locale === "ru"
-      ? `Я обновила рекомендации, потому что теперь знаю, что растение стоит в комнате с освещением: ${light}.`
-      : `I updated recommendations because I now know this plant is in a room with ${light}.`;
+      ? `Теперь совет точнее учитывает освещение рядом с растением: ${light}.`
+      : `The advice now fits the light around this plant: ${light}.`;
   }
 
   if (changedContext.room.directSun && currentSnapshot.room?.directSun) {
     const sun = t(`homeContext.sun.${currentSnapshot.room.directSun}` as never);
     return locale === "ru"
-      ? `Я обновила рекомендации с учётом прямого солнца в этой комнате: ${sun}.`
-      : `I updated recommendations using the direct-sun context for this room: ${sun}.`;
+      ? `Теперь понятнее, сколько прямого солнца получает растение: ${sun}.`
+      : `The advice now reflects how much direct sun reaches this plant: ${sun}.`;
   }
 
   if (changedContext.home.humidity && currentSnapshot.home?.humidityLevel) {
     const humidity = t(`homeContext.humidity.${currentSnapshot.home.humidityLevel}` as never);
     return locale === "ru"
-      ? `Я обновила рекомендации, потому что теперь учитываю влажность дома: ${humidity}.`
-      : `I updated recommendations because I now know the home humidity: ${humidity}.`;
+      ? `Теперь уход лучше подходит к влажности дома: ${humidity}.`
+      : `The care guidance now fits the home humidity: ${humidity}.`;
   }
 
   if (changedContext.room.assignment && currentSnapshot.room?.name) {
     return locale === "ru"
-      ? `Я обновила рекомендации с учётом комнаты: ${currentSnapshot.room.name}.`
-      : `I updated recommendations using the room context: ${currentSnapshot.room.name}.`;
+      ? `Теперь совет лучше соответствует месту, где стоит растение: ${currentSnapshot.room.name}.`
+      : `The advice now fits where this plant lives: ${currentSnapshot.room.name}.`;
   }
 
   if (changedContext.care.soilCondition) {
-    return locale === "ru" ? "Рекомендации обновлены с учётом новой проверки почвы." : "I updated recommendations using the latest soil check.";
+    return locale === "ru" ? "Теперь главный ориентир — текущее состояние почвы." : "The soil condition now guides the next care step.";
   }
 
   if (changedContext.care.watering || changedContext.care.repotting || changedContext.care.history) {
-    return locale === "ru" ? "Я обновила рекомендации с учётом последней истории ухода." : "I updated recommendations using the latest care history.";
+    return locale === "ru" ? "Совет стал точнее, потому что история ухода теперь яснее." : "The advice is more precise now that the recent care history is clearer.";
   }
 
   if (changedContext.system.promptVersion || changedContext.system.modelVersion) {
-    return locale === "ru" ? "Рекомендации обновлены с учётом новой логики анализа." : "I updated recommendations using the latest analysis logic.";
+    return locale === "ru" ? "Совет стал мягче и практичнее для текущего состояния растения." : "The guidance is now calmer and more practical for this plant's current state.";
   }
 
   return locale === "ru"
-    ? "Рекомендации уже были актуальны, я проверила их ещё раз."
-    : "Recommendations were already current, so I checked them again.";
+    ? "Хорошая новость — серьёзных изменений для ухода сейчас нет."
+    : "Good news — the care guidance does not need a major change right now.";
 }
 
 function staleReasonMessage(reasonKey: string, t: (key: never) => string) {
@@ -454,7 +454,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
             recommendationChanges: changes,
             confidenceChanges: { previous: Number.isFinite(previousConfidence) ? previousConfidence : null, current: payload.analysis.confidence ?? null },
             reliableComparison: false,
-            message: { en: payload.analysis.condition === "needs_attention" ? "I found new signs and updated the recommendations." : "I reviewed the new photos. The plant looks stable.", ru: message }
+            message: { en: payload.analysis.condition === "needs_attention" ? "I found new signs, so the care plan should adjust." : "I reviewed the new photos. The plant looks stable.", ru: message }
           }
         },
         model: payload.model
