@@ -11,6 +11,7 @@ import { recommendationRevisionIsUnchanged, type RecommendationChangedContext, t
 import { PlantCreationError, plantCreationDiagnosticFromError, plantCreationError, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { calculateSoilCheckCareResolution } from "@/lib/soil-care";
 import { baselineMilestoneType, findExistingBaselineMilestone } from "@/lib/care-baseline";
+import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
 import type { HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, PlantRecommendationRevision, Room, SoilCheckResult } from "@/types/plant";
 import type { LegacyRoomImportGroup } from "@/lib/home-room-context";
 
@@ -339,7 +340,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
     (plantId: string) =>
       state.milestones
         .filter((milestone) => milestone.plantId === plantId)
-        .sort((a, b) => (b.eventDate ?? b.createdAt).localeCompare(a.eventDate ?? a.createdAt)),
+        .sort(compareMilestonesNewestFirst),
     [state.milestones]
   );
 
@@ -862,7 +863,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         ...current,
         milestones: current.milestones.map((milestone) =>
           milestone.id === milestoneId
-            ? { ...milestone, type: input.type, eventDate: input.eventDate ?? undefined, updatedAt, note: input.note?.trim() || undefined, photoId: input.photoId }
+            ? { ...milestone, type: input.type, eventDate: input.eventDate ?? null, updatedAt, note: input.note?.trim() || undefined, photoId: input.photoId }
             : milestone
         )
       }));
@@ -1010,7 +1011,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           return {
             ...existingBaseline,
             type,
-            eventDate: nextEventDate,
+            eventDate: nextEventDate ?? null,
             updatedAt: new Date().toISOString(),
             note: undefined,
             photoId: undefined

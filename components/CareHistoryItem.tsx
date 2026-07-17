@@ -1,6 +1,6 @@
 "use client";
 
-import { formatRelativeDate } from "@/lib/date-format";
+import { milestoneDateLabel } from "@/lib/milestone-dates";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
 import type { PlantMilestone, PlantMilestoneType } from "@/types/plant";
@@ -66,7 +66,6 @@ export function CareHistoryItem({ milestone }: { milestone: PlantMilestone }) {
   const { locale, t } = useI18n();
   const title = milestone.customTitle ?? t(milestone.titleKey ?? fallbackTitleKeys[milestone.type]);
   const description = milestone.note || milestone.customDescription || t(milestone.descriptionKey ?? fallbackDescriptionKeys[milestone.type]);
-  const eventDate = milestone.eventDate ?? milestone.createdAt;
 
   return (
     <li className="flex min-w-0 gap-3 rounded-[22px] bg-white/55 px-3.5 py-4 shadow-[0_1px_7px_rgba(0,0,0,0.025)]">
@@ -76,7 +75,7 @@ export function CareHistoryItem({ milestone }: { milestone: PlantMilestone }) {
       <div className="min-w-0 flex-1">
         <h3 className="font-rounded text-[16px] font-extrabold leading-5 text-[#332f2a] [overflow-wrap:anywhere]">{title}</h3>
         {description ? <p className="mt-1 text-sm leading-5 text-[#676157] [overflow-wrap:anywhere]">{description}</p> : null}
-        <p className="mt-2 text-xs font-bold text-[#a29a8f]">{formatRelativeDate(eventDate, locale, "")}</p>
+        <p className="mt-2 text-xs font-bold text-[#a29a8f]">{milestoneDateLabel(milestone, locale, t("milestones.dateUnknown"))}</p>
       </div>
     </li>
   );

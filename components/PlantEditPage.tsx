@@ -216,7 +216,7 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
         <h2 className="mb-3 px-1 font-rounded text-xl font-extrabold text-ink">{t("edit.careHistory")}</h2>
         <CareDateEditor
           label={t("baseline.lastRepottingLabel")}
-          value={repottingBaseline?.type === "repotted" ? repottingBaseline.eventDate : undefined}
+          value={repottingBaseline?.type === "repotted" ? repottingBaseline.eventDate ?? undefined : undefined}
           isUnknown={repottingBaseline?.type === "repotting_unknown"}
           onSaveDate={(date) => void saveRepottingDate(date)}
           onSaveUnknown={() => void saveRepottingDate(undefined, true)}

@@ -557,6 +557,7 @@
   "milestones.repotted.description": "Растение пересажено в горшок побольше.",
   "milestones.repotting_unknown.title": "Дата пересадки неизвестна",
   "milestones.repotting_unknown.description": "Последнюю пересадку не удалось вспомнить.",
+  "milestones.dateUnknown": "Дата не указана",
   "milestones.fertilized.title": "Удобрение",
   "milestones.fertilized.description": "Растение получило подкормку.",
   "milestones.new_leaf.title": "Новый лист! ✨",

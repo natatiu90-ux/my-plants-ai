@@ -557,6 +557,7 @@
   "milestones.repotted.description": "Repotted into a larger pot.",
   "milestones.repotting_unknown.title": "Repotting date unknown",
   "milestones.repotting_unknown.description": "The last repotting date was not remembered.",
+  "milestones.dateUnknown": "Date unknown",
   "milestones.fertilized.title": "Fertilizing",
   "milestones.fertilized.description": "The plant was fertilized.",
   "milestones.new_leaf.title": "A new leaf! ✨",

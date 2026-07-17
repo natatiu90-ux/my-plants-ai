@@ -261,7 +261,7 @@ export interface PlantMilestone {
   type: PlantMilestoneType;
   createdAt: string;
   updatedAt?: string;
-  eventDate?: string;
+  eventDate: string | null;
   titleKey?: TranslationKey;
   descriptionKey?: TranslationKey;
   customTitle?: string;

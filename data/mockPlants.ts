@@ -97,6 +97,7 @@ export const mockMilestones: PlantMilestone[] = [
     plantId: "martha",
     type: "new_leaf",
     createdAt: "2026-07-10",
+    eventDate: null,
     titleKey: "milestones.new_leaf.title",
     descriptionKey: "milestones.new_leaf.description"
   },
@@ -105,6 +106,7 @@ export const mockMilestones: PlantMilestone[] = [
     plantId: "martha",
     type: "plant_added",
     createdAt: "2026-06-28",
+    eventDate: null,
     titleKey: "milestones.plant_added.title",
     descriptionKey: "milestones.martha.plant_added.description"
   },
@@ -113,6 +115,7 @@ export const mockMilestones: PlantMilestone[] = [
     plantId: "ollie",
     type: "repotted",
     createdAt: "2026-07-01",
+    eventDate: null,
     titleKey: "milestones.repotted.title",
     descriptionKey: "milestones.repotted.description"
   },
@@ -121,6 +124,7 @@ export const mockMilestones: PlantMilestone[] = [
     plantId: "ollie",
     type: "plant_added",
     createdAt: "2026-06-29",
+    eventDate: null,
     titleKey: "milestones.plant_added.title",
     descriptionKey: "milestones.ollie.plant_added.description"
   },
@@ -129,6 +133,7 @@ export const mockMilestones: PlantMilestone[] = [
     plantId: "franklin",
     type: "damaged",
     createdAt: "2026-07-11",
+    eventDate: null,
     titleKey: "milestones.damaged.title",
     descriptionKey: "milestones.damaged.description"
   },
@@ -137,6 +142,7 @@ export const mockMilestones: PlantMilestone[] = [
     plantId: "franklin",
     type: "recovered",
     createdAt: "2026-07-04",
+    eventDate: null,
     titleKey: "milestones.recovered.title",
     descriptionKey: "milestones.recovered.description"
   },
@@ -145,6 +151,7 @@ export const mockMilestones: PlantMilestone[] = [
     plantId: "franklin",
     type: "plant_added",
     createdAt: "2026-06-28",
+    eventDate: null,
     titleKey: "milestones.plant_added.title",
     descriptionKey: "milestones.franklin.plant_added.description"
   },
@@ -153,6 +160,7 @@ export const mockMilestones: PlantMilestone[] = [
     plantId: "luna",
     type: "bloomed",
     createdAt: "2026-07-08",
+    eventDate: null,
     titleKey: "milestones.bloomed.title",
     descriptionKey: "milestones.bloomed.description"
   },
@@ -161,6 +169,7 @@ export const mockMilestones: PlantMilestone[] = [
     plantId: "luna",
     type: "plant_added",
     createdAt: "2026-06-27",
+    eventDate: null,
     titleKey: "milestones.plant_added.title",
     descriptionKey: "milestones.luna.plant_added.description"
   }

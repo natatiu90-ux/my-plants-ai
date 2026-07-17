@@ -16,7 +16,7 @@ export function toDateKey(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-export function formatRelativeDate(dateKey: string | undefined, locale: Locale, fallback: string) {
+export function formatRelativeDate(dateKey: string | null | undefined, locale: Locale, fallback: string) {
   if (!dateKey) {
     return fallback;
   }

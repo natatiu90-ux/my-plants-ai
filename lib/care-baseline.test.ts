@@ -4,7 +4,7 @@ import type { PlantMilestone } from "@/types/plant";
 
 const milestones: PlantMilestone[] = [
   { id: "old", plantId: "plant-1", type: "repotted", eventDate: "2026-07-01", createdAt: "2026-07-01T08:00:00.000Z" },
-  { id: "new", plantId: "plant-1", type: "repotting_unknown", createdAt: "2026-07-04T08:00:00.000Z", updatedAt: "2026-07-05T08:00:00.000Z" },
+  { id: "new", plantId: "plant-1", type: "repotting_unknown", eventDate: null, createdAt: "2026-07-04T08:00:00.000Z", updatedAt: "2026-07-05T08:00:00.000Z" },
   { id: "other", plantId: "plant-2", type: "repotted", eventDate: "2026-07-03", createdAt: "2026-07-03T08:00:00.000Z" }
 ];
 

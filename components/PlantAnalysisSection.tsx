@@ -278,10 +278,10 @@ export function PlantAnalysisSection({
     const combinedTextWithoutUncertainty = [localized(analysis.summary, locale), ...observations, ...recommendationTexts].join(" ");
     const combinedText = [combinedTextWithoutUncertainty, ...uncertainties].join(" ");
     const recentRepot = milestones
-      .filter((milestone) => milestone.type === "repotted")
-      .sort((a, b) => (b.eventDate ?? b.createdAt).localeCompare(a.eventDate ?? a.createdAt))[0];
-    const repotDate = recentRepot?.eventDate ?? recentRepot?.createdAt;
-    const repottedDaysAgo = daysSince(repotDate);
+      .filter((milestone) => milestone.type === "repotted" && milestone.eventDate)
+      .sort((a, b) => (b.eventDate ?? "").localeCompare(a.eventDate ?? ""))[0];
+    const repotDate = recentRepot?.eventDate;
+    const repottedDaysAgo = daysSince(repotDate ?? undefined);
     const wasRepottedRecently = repottedDaysAgo != null && repottedDaysAgo <= 21;
     const pestsResolution = resolutionFor(hypothesisResolutions, "pests");
     const noPests = pestsResolution?.status === "ruled_out";

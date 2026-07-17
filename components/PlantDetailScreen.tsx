@@ -8,6 +8,7 @@ import { addDays, toDateKey } from "@/lib/date-format";
 import { buildPlantEnvironmentContext, formatEnvironmentContextForPrompt } from "@/lib/home-room-context";
 import { plantDisplayName } from "@/lib/plant-display";
 import { deriveCareActionState } from "@/lib/plant-action-eligibility";
+import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
 import { buildRecommendationContextSnapshot, changedContextSince, impactLabelKey, isRecommendationStale, isVisualEvidenceStale, reasonTypeFromChangedContext, sourceAnalysisAgeDays, staleReasonKeys, type RecommendationChangedContext, type RecommendationContextSnapshot } from "@/lib/recommendation-refresh";
@@ -186,7 +187,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const coverPhoto = getCoverPhoto(plantId);
   const photos = getPlantPhotos(plantId);
   const milestones = useMemo(
-    () => getPlantMilestones(plantId).sort((a, b) => (b.eventDate ?? b.createdAt).localeCompare(a.eventDate ?? a.createdAt)),
+    () => getPlantMilestones(plantId).sort(compareMilestonesNewestFirst),
     [getPlantMilestones, plantId]
   );
   const hypothesisResolutions = getPlantHypothesisResolutions(plantId);

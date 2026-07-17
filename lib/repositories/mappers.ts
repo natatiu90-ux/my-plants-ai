@@ -269,7 +269,7 @@ export function mapMilestone(row: MilestoneRow): PlantMilestone {
     type: row.type,
     createdAt: row.created_at,
     updatedAt: row.updated_at ?? undefined,
-    eventDate: row.event_date ?? undefined,
+    eventDate: row.event_date,
     note: row.note ?? undefined,
     photoId: row.photo_id ?? undefined,
     isManual: row.type !== "plant_added"

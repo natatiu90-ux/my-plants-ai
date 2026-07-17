@@ -65,7 +65,7 @@ function hasPoorDrainage(resolutions: PlantHypothesisResolution[]) {
 }
 
 function wasRepottedRecently(milestones: PlantMilestone[]) {
-  return milestones.some((milestone) => milestone.type === "repotted" && (daysSince(milestone.eventDate ?? milestone.createdAt) ?? Number.POSITIVE_INFINITY) <= 14);
+  return milestones.some((milestone) => milestone.type === "repotted" && milestone.eventDate && (daysSince(milestone.eventDate) ?? Number.POSITIVE_INFINITY) <= 14);
 }
 
 function dateInDays(days: number | null) {
