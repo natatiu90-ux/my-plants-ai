@@ -105,7 +105,7 @@ assert.deepEqual(plantsForHomeScope([plant, { ...plant, id: "free", homeId: unde
 assert.equal(resolveSelectedHomeId({ storedHomeId: "missing", homes: [home], hasUnassignedPlants: false }), home.id);
 assert.equal(resolveSelectedHomeId({ storedHomeId: "__no_home__", homes: [home], hasUnassignedPlants: true }), "__no_home__");
 assert.equal(resolveSelectedHomeId({ storedHomeId: null, homes: [home], hasUnassignedPlants: true, shouldPreferUnassigned: true }), "__no_home__");
-assert.equal(resolveSelectedHomeId({ storedHomeId: home.id, homes: [home], hasUnassignedPlants: true, shouldPreferUnassigned: true }), home.id);
+assert.equal(resolveSelectedHomeId({ storedHomeId: home.id, homes: [home], hasUnassignedPlants: true, shouldPreferUnassigned: true }), "__no_home__");
 assert.equal(shouldOfferExistingHomeImport({ homes: [home], plants: legacyPlants, homeId: home.id }), true);
 assert.equal(shouldOfferExistingHomeImport({ homes: [home, otherHome], plants: legacyPlants, homeId: home.id }), false);
 assert.equal(shouldOfferExistingHomeImport({ homes: [home], plants: [{ ...plant, homeId: home.id }], homeId: home.id }), false);

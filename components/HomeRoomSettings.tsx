@@ -35,6 +35,19 @@ type RoomDraft = {
   notes: string;
 };
 
+type ImportDebugDetail = {
+  rpcName: string;
+  code?: string;
+  message: string;
+  details?: string;
+  hint?: string;
+  roomImportCount: number;
+  includedRoomCount: number;
+  excludedRoomCount: number;
+  selectedPlantCount: number;
+  usesPlantIds: boolean;
+};
+
 const emptyHomeDraft: Draft = { name: "", city: "", country: "", type: "", humidityLevel: "", hasAirConditioning: "", notes: "" };
 const emptyRoomDraft: RoomDraft = { id: "", name: "", lightLevel: "", directSun: "", temperatureRelative: "", hasAirConditioning: "inherit", notes: "" };
 
@@ -74,6 +87,37 @@ function homeInputFromDraft(draft: Draft, defaultName: string): Omit<HomeContext
   };
 }
 
+function errorString(error: unknown, key: "code" | "message" | "details" | "hint") {
+  const value = error as Record<string, unknown> | null | undefined;
+  const nextValue = value?.[key];
+  if (typeof nextValue === "string") {
+    return nextValue;
+  }
+  if (key === "message" && error instanceof Error) {
+    return error.message;
+  }
+  return undefined;
+}
+
+function buildImportDebugDetail(input: {
+  error: unknown;
+  rpcName: string;
+  roomImports: LegacyRoomImportGroup[];
+}): ImportDebugDetail {
+  return {
+    rpcName: input.rpcName,
+    code: errorString(input.error, "code"),
+    message: errorString(input.error, "message") ?? "Unknown error",
+    details: errorString(input.error, "details"),
+    hint: errorString(input.error, "hint"),
+    roomImportCount: input.roomImports.length,
+    includedRoomCount: input.roomImports.filter((room) => room.include).length,
+    excludedRoomCount: input.roomImports.filter((room) => !room.include).length,
+    selectedPlantCount: input.roomImports.reduce((count, room) => count + room.plantIds.length, 0),
+    usesPlantIds: input.roomImports.some((room) => room.plantIds.length > 0)
+  };
+}
+
 export function HomeRoomSettings({
   initialImportHomeId,
   onImported
@@ -93,6 +137,7 @@ export function HomeRoomSettings({
   const [locationSuggestions, setLocationSuggestions] = useState<CitySuggestion[]>([]);
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [importDebugDetail, setImportDebugDetail] = useState<ImportDebugDetail | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [initialImportStarted, setInitialImportStarted] = useState(false);
   const selectedHome = selectedHomeId ? homes.find((home) => home.id === selectedHomeId) : null;
@@ -138,6 +183,7 @@ export function HomeRoomSettings({
 
   const startCreateHome = () => {
     setSaveError(null);
+    setImportDebugDetail(null);
     setSuccessMessage(null);
     setHomeDraft(emptyHomeDraft);
     if (!homes.length && plants.length) {
@@ -156,6 +202,7 @@ export function HomeRoomSettings({
   const startExistingHomeImport = () => {
     if (!selectedHome) return;
     setSaveError(null);
+    setImportDebugDetail(null);
     setSuccessMessage(null);
     const inferred = buildLegacyRoomImportGroups({
       plants: unassignedPlants,
@@ -182,17 +229,19 @@ export function HomeRoomSettings({
   const saveHome = async () => {
     if (isSaving) return;
     setSaveError(null);
+    setImportDebugDetail(null);
     setSuccessMessage(null);
     setIsSaving(true);
+    const dedupedImportGroups = dedupeImportGroups(importGroups);
     try {
       const input = homeInputFromDraft(homeDraft, t("homeContext.defaultHomeName"));
       if (mode === "first_import") {
-        const homeId = await createFirstHomeWithLegacyImport(input, dedupeImportGroups(importGroups));
+        const homeId = await createFirstHomeWithLegacyImport(input, dedupedImportGroups);
         setSelectedHomeId(homeId);
         setMode("home");
         onImported?.(homeId);
       } else if (mode === "import_existing" && selectedHome) {
-        const homeId = await importLegacyPlantsToHome(selectedHome.id, dedupeImportGroups(importGroups));
+        const homeId = await importLegacyPlantsToHome(selectedHome.id, dedupedImportGroups);
         setSelectedHomeId(homeId);
         setMode("home");
         setSuccessMessage(t("homeContext.importSuccess"));
@@ -213,14 +262,24 @@ export function HomeRoomSettings({
         console.error("home_import_save_failed", {
           mode,
           targetHomeId: selectedHome?.id ?? null,
-          roomImports: dedupeImportGroups(importGroups).map((room) => ({
+          roomImports: dedupedImportGroups.map((room) => ({
             legacyKey: room.legacyKey,
             name: room.name,
             include: room.include,
             plantCount: room.plantIds.length
           })),
+          code: errorString(error, "code"),
+          details: errorString(error, "details"),
+          hint: errorString(error, "hint"),
           message: error instanceof Error ? error.message : "Unknown error"
         });
+        setImportDebugDetail(
+          buildImportDebugDetail({
+            error,
+            rpcName: mode === "first_import" ? "create_first_home_with_legacy_import" : "import_legacy_plants_to_home",
+            roomImports: dedupedImportGroups
+          })
+        );
       }
       setSaveError(t("homeContext.importFailed"));
     } finally {
@@ -319,6 +378,26 @@ export function HomeRoomSettings({
           <p className="rounded-[18px] bg-white/70 p-3 text-sm font-bold text-[#6f675c]">{t("homeContext.plantsWithoutRoom").replace("{count}", String(plantsWithoutRoom))}</p>
         </div>
         {saveError ? <p className="mt-4 rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{saveError}</p> : null}
+        {process.env.NODE_ENV !== "production" && importDebugDetail ? (
+          <div className="mt-3 rounded-[18px] bg-white/80 p-3 text-xs font-bold leading-5 text-[#6f675c]">
+            <p className="font-extrabold text-[#4f4940]">Import debug</p>
+            <p>rpc: {importDebugDetail.rpcName}</p>
+            <p>code: {importDebugDetail.code ?? "-"}</p>
+            <p>message: {importDebugDetail.message}</p>
+            <p>details: {importDebugDetail.details ?? "-"}</p>
+            <p>hint: {importDebugDetail.hint ?? "-"}</p>
+            <p>rooms: {importDebugDetail.roomImportCount} / included {importDebugDetail.includedRoomCount} / skipped {importDebugDetail.excludedRoomCount}</p>
+            <p>selected plants: {importDebugDetail.selectedPlantCount}</p>
+            <p>uses plantIds: {String(importDebugDetail.usesPlantIds)}</p>
+            <button
+              type="button"
+              onClick={() => void navigator.clipboard?.writeText(JSON.stringify(importDebugDetail, null, 2))}
+              className="mt-2 min-h-9 rounded-[14px] bg-[#f1eadf] px-3 text-xs font-extrabold text-[#6f675c]"
+            >
+              Copy debug
+            </button>
+          </div>
+        ) : null}
         <button type="button" onClick={() => void saveHome()} disabled={isSaving} className="mt-4 min-h-12 w-full rounded-[18px] bg-[#2d7a4f] px-4 text-sm font-extrabold text-white disabled:opacity-60">
           {isSaving
             ? t("homeContext.importingPlants")

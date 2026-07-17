@@ -61,6 +61,17 @@ function logSupabaseStageError(
   });
 }
 
+function homeImportPayloadShape(roomImports: { legacyKey: string | null; name: string; include: boolean; plantIds: string[] }[]) {
+  return {
+    roomImportCount: roomImports.length,
+    includedRoomCount: roomImports.filter((room) => room.include).length,
+    excludedRoomCount: roomImports.filter((room) => !room.include).length,
+    selectedPlantCount: roomImports.reduce((count, room) => count + room.plantIds.length, 0),
+    emptyRoomCount: roomImports.filter((room) => room.plantIds.length === 0).length,
+    usesPlantIds: roomImports.some((room) => room.plantIds.length > 0)
+  };
+}
+
 function assertNoError(error: { message: string } | null) {
   if (error) {
     throw new Error(error.message);
@@ -751,8 +762,8 @@ export class HomeRepository {
     if (error) {
       logSupabaseStageError("home_import_rpc_failed", "create_first_home_with_legacy_import", error, {
         authenticatedUserIdSuffix: idSuffix(this.user.id),
-        roomImportCount: roomImports.length,
-        selectedPlantCount: roomImports.reduce((count, room) => count + room.plantIds.length, 0)
+        rpcName: "create_first_home_with_legacy_import",
+        payloadShape: homeImportPayloadShape(roomImports)
       });
       throw error;
     }
@@ -770,8 +781,8 @@ export class HomeRepository {
       logSupabaseStageError("home_import_rpc_failed", "import_legacy_plants_to_home", error, {
         authenticatedUserIdSuffix: idSuffix(this.user.id),
         targetHomeIdSuffix: idSuffix(homeId),
-        roomImportCount: roomImports.length,
-        selectedPlantCount: roomImports.reduce((count, room) => count + room.plantIds.length, 0)
+        rpcName: "import_legacy_plants_to_home",
+        payloadShape: homeImportPayloadShape(roomImports)
       });
       throw error;
     }

@@ -98,7 +98,7 @@
   "homeContext.addAnotherRoom": "Добавить ещё комнату",
   "homeContext.plantsWithoutRoom": "{count} растений без комнаты будут добавлены в этот дом.",
   "homeContext.unassignedPlants": "{count} растений пока без дома.",
-  "homeContext.noHomeGroup": "Без дома",
+  "homeContext.noHomeGroup": "Не распределены",
   "homeContext.showHome": "Показать {home}",
   "homeContext.editHome": "Изменить дом",
   "homeContext.editRoom": "Изменить комнату",

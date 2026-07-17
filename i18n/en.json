@@ -98,7 +98,7 @@
   "homeContext.addAnotherRoom": "Add another room",
   "homeContext.plantsWithoutRoom": "{count} plants without a room will be added to this home.",
   "homeContext.unassignedPlants": "{count} plants are not assigned to a home yet.",
-  "homeContext.noHomeGroup": "No home",
+  "homeContext.noHomeGroup": "Unassigned",
   "homeContext.showHome": "Show {home}",
   "homeContext.editHome": "Edit home",
   "homeContext.editRoom": "Edit room",

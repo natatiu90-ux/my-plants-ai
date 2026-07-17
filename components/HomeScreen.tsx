@@ -256,16 +256,6 @@ export function HomeScreen() {
           </label>
         </section>
       ) : null}
-      {isReady && homes.length === 1 && selectedScope === noHomeSelectionId && unassignedPlants.length ? (
-        <section className="px-5 pt-4">
-          <div className="rounded-[22px] bg-[#fffaf3] p-3 shadow-soft">
-            <p className="text-xs font-extrabold uppercase tracking-[0.08em] text-[#9a9286]">{t("homeContext.noHomeGroup")}</p>
-            <button type="button" onClick={() => chooseHome(homes[0].id)} className="mt-2 min-h-10 w-full rounded-[16px] bg-white/75 px-4 text-sm font-extrabold text-[#2d7a4f]">
-              {t("homeContext.showHome").replace("{home}", homes[0].name)}
-            </button>
-          </div>
-        </section>
-      ) : null}
       {isReady && plants.length > 0 ? <AttentionBanner count={attentionCount} onActivate={focusAttentionPlant} /> : null}
       <div className="pb-[144px]">
         {status === "loading" ? <HomeSkeleton /> : null}
