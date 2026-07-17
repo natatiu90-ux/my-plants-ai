@@ -51,11 +51,14 @@ export function PlantCard({
   milestones: PlantMilestone[];
   coverPhotoUrl: string;
 }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const healthStatus = derivePlantHealthStatus({ plant, analysis, milestones, careActionState: careAction });
   const styles = cardStyles[healthStatus.status];
   const displayName = plantDisplayName(plant, t("plants.unknownName"));
   const commonName = plantCommonName(plant);
+  const primaryAction = analysis?.rawResult?.primaryAction?.[locale] || analysis?.rawResult?.primaryAction?.en || analysis?.rawResult?.primaryAction?.ru || "";
+  const actionTimeframe = analysis?.rawResult?.actionTimeframe?.[locale] || analysis?.rawResult?.actionTimeframe?.en || analysis?.rawResult?.actionTimeframe?.ru || "";
+  const highSeverityMessage = primaryAction && actionTimeframe ? `${primaryAction} ${actionTimeframe}` : primaryAction;
   const cardMessageKey = careAction.isActionable ? careAction.cardMessageKey : healthStatus.messageKey;
   const cardMessageParams = careAction.isActionable ? careAction.cardMessageParams : undefined;
 
@@ -91,7 +94,7 @@ export function PlantCard({
           </h2>
           {commonName ? <p className="mt-0.5 text-[13px] italic leading-5 text-[#9a9aa3]">{commonName}</p> : null}
           <p className="mt-2 line-clamp-3 text-[14.5px] leading-[1.55] text-[#4a4a54]">
-            {t(cardMessageKey, cardMessageParams)}
+            {!careAction.isActionable && (healthStatus.status === "needs_attention" || healthStatus.status === "action_needed") && highSeverityMessage ? highSeverityMessage : t(cardMessageKey, cardMessageParams)}
           </p>
         </div>
       </article>

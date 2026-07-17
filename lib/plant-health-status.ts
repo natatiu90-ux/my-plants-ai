@@ -40,6 +40,14 @@ function rawPlantStatus(analysis?: PlantAnalysisRecord): PlantHealthStatus | nul
   return null;
 }
 
+function rawUrgency(analysis?: PlantAnalysisRecord) {
+  const value = analysis?.rawResult?.urgency;
+  if (value === "none" || value === "observe" || value === "soon" || value === "today") {
+    return value;
+  }
+  return null;
+}
+
 function analysisText(analysis?: PlantAnalysisRecord) {
   if (!analysis) return "";
   const raw = analysis.rawResult;
@@ -48,10 +56,101 @@ function analysisText(analysis?: PlantAnalysisRecord) {
     ...analysis.recommendations.map((item) => [item.en, item.ru].filter(Boolean).join(" ")),
     ...(raw?.visibleObservations ?? []).map(localized),
     ...(raw?.careRightNow ?? []).map((item) => [localized(item.action), localized(item.reason)].join(" ")),
+    localized(raw?.primaryAction),
+    localized(raw?.actionTimeframe),
+    localized(raw?.statusReason),
     localized(raw?.reasoning?.currentSituation),
     localized(raw?.reasoning?.diagnosisLogic),
     localized(raw?.reasoning?.whyThisMatters)
   ].join(" ");
+}
+
+function hasConcreteAction(analysis?: PlantAnalysisRecord) {
+  const raw = analysis?.rawResult;
+  const primaryAction = localized(raw?.primaryAction);
+  const careActions = raw?.careRightNow?.map((item) => localized(item.action)).filter(Boolean) ?? [];
+  const actions = [primaryAction, ...careActions].join(" ");
+  if (!actions.trim()) return false;
+
+  return includesAny(actions, [
+    "water",
+    "move",
+    "check",
+    "inspect",
+    "isolate",
+    "remove",
+    "adjust",
+    "перестав",
+    "полей",
+    "полить",
+    "проверь",
+    "осмотр",
+    "изол",
+    "убери",
+    "сдвин"
+  ]);
+}
+
+function isPassiveActionOnly(analysis?: PlantAnalysisRecord) {
+  const text = analysisText(analysis);
+  const hasPassive = includesAny(text, [
+    "watch new growth",
+    "keep observing",
+    "nothing urgent",
+    "no urgent",
+    "wait for the soil to dry",
+    "observe for",
+    "наблюдай",
+    "наблюдать",
+    "ничего срочного",
+    "не спеши",
+    "подожди",
+    "дождись"
+  ]);
+  const hasImmediateIntervention = includesAny(text, [
+    "today",
+    "now",
+    "within 24",
+    "immediately",
+    "water now",
+    "move",
+    "isolate",
+    "remove",
+    "сегодня",
+    "сейчас",
+    "немедленно",
+    "полей",
+    "перестав",
+    "изол",
+    "убери"
+  ]);
+  return hasPassive && !hasImmediateIntervention;
+}
+
+export function alignPlantHealthStatusWithUrgency(status: PlantHealthStatus, analysis?: PlantAnalysisRecord): PlantHealthStatus {
+  const urgency = rawUrgency(analysis);
+  const concreteAction = hasConcreteAction(analysis);
+  const passiveOnly = isPassiveActionOnly(analysis);
+
+  if (status === "action_needed" && (urgency !== "today" || !concreteAction || passiveOnly)) {
+    if (urgency === "soon" && concreteAction) return "needs_attention";
+    if (passiveOnly || urgency === "observe") return "watch";
+    return "needs_attention";
+  }
+
+  if (status === "needs_attention" && (!concreteAction || urgency === "none" || urgency === "observe")) {
+    return passiveOnly || urgency === "observe" ? "watch" : "healthy";
+  }
+
+  if (status === "healthy" && urgency === "today" && concreteAction) {
+    return "action_needed";
+  }
+
+  if (status === "healthy" && urgency === "soon" && concreteAction) {
+    return "needs_attention";
+  }
+
+  return status;
 }
 
 function meaningfulConcern(analysis?: PlantAnalysisRecord) {
@@ -135,7 +234,7 @@ export function derivePlantHealthStatus(input: {
   }
 
   if (aiStatus) {
-    return healthMeta(aiStatus, "analysis_plant_status");
+    return healthMeta(alignPlantHealthStatusWithUrgency(aiStatus, analysis), "analysis_plant_status");
   }
 
   if (analysis?.condition === "needs_attention") {

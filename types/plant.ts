@@ -115,6 +115,10 @@ export interface PlantAnalysisRecord {
   }[];
   rawResult?: {
     plantStatus?: "healthy" | "adapting" | "watch" | "needs_attention" | "action_needed";
+    urgency?: "none" | "observe" | "soon" | "today";
+    primaryAction?: { en?: string | null; ru?: string | null };
+    actionTimeframe?: { en?: string | null; ru?: string | null };
+    statusReason?: { en?: string | null; ru?: string | null };
     visibleObservations?: { en?: string; ru?: string }[];
     uncertainties?: { en?: string; ru?: string }[];
     careRightNow?: {
