@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, ChevronDown, Loader2 } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { formatRelativeDate } from "@/lib/date-format";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
 import type { Plant, PlantAnalysisRecord, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone } from "@/types/plant";
+import { AnswerChips } from "./AnswerChips";
 
 type HypothesisView = {
   id: PlantHypothesis | "recent_repotting_context";
@@ -550,25 +551,14 @@ export function PlantAnalysisSection({
           <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
             <p className="text-sm font-extrabold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{view.followUp.question}</p>
             <p className="mt-1 text-xs font-bold leading-4 text-[#8a8378] [overflow-wrap:anywhere]">{view.followUp.reason}</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {view.followUp.options.map((option) => {
-                const answerKey = `${view.followUp!.hypothesis}:${option.result}`;
-                const isSavingAnswer = savingAnswerKey === answerKey;
-                return (
-                  <button
-                    key={option.result}
-                    type="button"
-                    onClick={() => void saveFollowUp(view.followUp!.hypothesis, option.status, option.result)}
-                    disabled={Boolean(savingAnswerKey)}
-                    aria-busy={isSavingAnswer}
-                    className="flex min-h-10 items-center gap-2 rounded-[16px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f] disabled:opacity-60"
-                  >
-                    {isSavingAnswer ? <Loader2 aria-hidden="true" size={14} className="animate-spin" /> : null}
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
+            <AnswerChips
+              options={view.followUp.options}
+              getKey={(option) => `${view.followUp!.hypothesis}:${option.result}`}
+              labelFor={(option) => option.label}
+              loadingKey={savingAnswerKey}
+              disabled={Boolean(savingAnswerKey)}
+              onSelect={(option) => void saveFollowUp(view.followUp!.hypothesis, option.status, option.result)}
+            />
             {savingAnswerKey ? <p className="mt-3 text-xs font-bold text-[#8a8378]">{t("plantAnalysis.updatingRecommendations")}</p> : null}
             {answerError ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{answerError}</p> : null}
           </div>

@@ -5,6 +5,9 @@ import type {
   PlantAction,
   PlantCareEvent,
   PlantCareEventType,
+  PlantRecommendationRevision,
+  RecommendationImpactLevel,
+  RecommendationRevisionReasonType,
   CareScheduleStatus,
   PlantHypothesis,
   PlantHypothesisResolution,
@@ -41,6 +44,7 @@ export type PlantRow = {
   last_notification_sent_at?: string | null;
   notification_due_cycle_key?: string | null;
   created_at: string;
+  updated_at?: string | null;
 };
 
 export type PlantPhotoRow = {
@@ -65,6 +69,7 @@ export type RoomRow = {
   has_air_conditioning?: Room["hasAirConditioning"] | null;
   notes?: string | null;
   created_at: string;
+  updated_at?: string | null;
 };
 
 export type HomeRow = {
@@ -78,6 +83,7 @@ export type HomeRow = {
   has_air_conditioning?: boolean | null;
   notes?: string | null;
   created_at: string;
+  updated_at?: string | null;
 };
 
 export type MilestoneRow = {
@@ -111,6 +117,27 @@ export type PlantAnalysisRow = {
   model: string | null;
   created_at: string;
   resolved_at?: string | null;
+};
+
+export type PlantRecommendationRevisionRow = {
+  id: string;
+  plant_id: string;
+  analysis_id: string;
+  recommendations: unknown;
+  structured_result: unknown;
+  reason: string | null;
+  reason_type?: string | null;
+  reason_text?: string | null;
+  changed_context: unknown;
+  context_snapshot: unknown;
+  prompt_version?: string | null;
+  recommendation_version?: number | null;
+  model_version?: string | null;
+  impact_level?: string | null;
+  change_summary?: unknown;
+  is_current: boolean;
+  created_at: string;
+  updated_at?: string | null;
 };
 
 export type PlantHypothesisResolutionRow = {
@@ -173,7 +200,8 @@ export function mapPlant(row: PlantRow): Plant {
     notificationDueCycleKey: row.notification_due_cycle_key ?? undefined,
     roomKey: row.room_key ?? row.room_id ?? undefined,
     lightConditionKey: "light.mediumIndirect",
-    notes: row.notes ?? undefined
+    notes: row.notes ?? undefined,
+    updatedAt: row.updated_at ?? undefined
   };
 }
 
@@ -203,7 +231,8 @@ export function mapRoom(row: RoomRow): Room {
     temperatureRelative: row.temperature_relative ?? undefined,
     hasAirConditioning: row.has_air_conditioning ?? undefined,
     notes: row.notes ?? undefined,
-    createdAt: toDateKey(row.created_at) ?? row.created_at
+    createdAt: toDateKey(row.created_at) ?? row.created_at,
+    updatedAt: row.updated_at ?? undefined
   };
 }
 
@@ -217,7 +246,8 @@ export function mapHome(row: HomeRow): HomeContext {
     humidityLevel: row.humidity_level ?? undefined,
     hasAirConditioning: row.has_air_conditioning ?? undefined,
     notes: row.notes ?? undefined,
-    createdAt: toDateKey(row.created_at) ?? row.created_at
+    createdAt: toDateKey(row.created_at) ?? row.created_at,
+    updatedAt: row.updated_at ?? undefined
   };
 }
 
@@ -226,7 +256,7 @@ export function mapMilestone(row: MilestoneRow): PlantMilestone {
     id: row.id,
     plantId: row.plant_id,
     type: row.type,
-    createdAt: toDateKey(row.created_at) ?? row.created_at,
+    createdAt: row.created_at,
     eventDate: row.event_date,
     note: row.note ?? undefined,
     photoId: row.photo_id ?? undefined,
@@ -256,6 +286,36 @@ function isRawAnalysis(value: unknown): PlantAnalysisRecord["rawResult"] {
   return value && typeof value === "object" ? (value as PlantAnalysisRecord["rawResult"]) : undefined;
 }
 
+function isRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function isRecommendationReasonType(value: unknown): value is RecommendationRevisionReasonType {
+  return (
+    value === "room_changed" ||
+    value === "home_changed" ||
+    value === "plant_location_changed" ||
+    value === "light_changed" ||
+    value === "direct_sun_changed" ||
+    value === "temperature_changed" ||
+    value === "humidity_changed" ||
+    value === "air_conditioning_changed" ||
+    value === "soil_changed" ||
+    value === "watering_changed" ||
+    value === "repotting_changed" ||
+    value === "care_history_changed" ||
+    value === "prompt_updated" ||
+    value === "model_updated" ||
+    value === "manual_refresh" ||
+    value === "mixed_context_changes" ||
+    value === "unknown_legacy"
+  );
+}
+
+function isRecommendationImpactLevel(value: unknown): value is RecommendationImpactLevel {
+  return value === "none" || value === "minor" || value === "moderate" || value === "major";
+}
+
 export function mapAnalysis(row: PlantAnalysisRow): PlantAnalysisRecord {
   return {
     id: row.id,
@@ -271,6 +331,28 @@ export function mapAnalysis(row: PlantAnalysisRow): PlantAnalysisRecord {
     model: row.model ?? undefined,
     createdAt: toDateKey(row.created_at) ?? row.created_at,
     resolvedAt: toDateKey(row.resolved_at) ?? undefined
+  };
+}
+
+export function mapRecommendationRevision(row: PlantRecommendationRevisionRow): PlantRecommendationRevision {
+  return {
+    id: row.id,
+    plantId: row.plant_id,
+    analysisId: row.analysis_id,
+    recommendations: isRecommendationList(row.recommendations),
+    structuredResult: isRawAnalysis(row.structured_result),
+    reasonType: isRecommendationReasonType(row.reason_type) ? row.reason_type : undefined,
+    reasonText: row.reason_text ?? row.reason ?? undefined,
+    changedContext: isRecord(row.changed_context),
+    contextSnapshot: isRecord(row.context_snapshot),
+    promptVersion: row.prompt_version ?? undefined,
+    recommendationVersion: row.recommendation_version ?? undefined,
+    modelVersion: row.model_version ?? undefined,
+    impactLevel: isRecommendationImpactLevel(row.impact_level) ? row.impact_level : undefined,
+    changeSummary: isRecord(row.change_summary) as PlantRecommendationRevision["changeSummary"],
+    isCurrent: row.is_current,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at ?? undefined
   };
 }
 

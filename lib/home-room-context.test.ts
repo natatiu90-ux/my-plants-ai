@@ -71,6 +71,15 @@ assert.equal(context?.home?.city, "Limassol");
 assert.equal(context?.room?.lightLevel, "bright_indirect");
 assert.equal(context?.plantPosition, "near_window");
 
+const strovolosHome: HomeContext = { ...home, id: "home-strovolos", name: "Home", city: "Strovolos", country: "Cyprus", humidityLevel: "dry" };
+const lowLightRoom: Room = { ...room, id: "room-low", homeId: strovolosHome.id, name: "Kids room", lightLevel: "low", directSun: "morning" };
+const portulacaria: Plant = { ...plant, id: "portulacaria", homeId: strovolosHome.id, roomId: lowLightRoom.id, scientificName: "Portulacaria afra" };
+const strovolosContext = buildPlantEnvironmentContext({ plant: portulacaria, homes: [strovolosHome], rooms: [lowLightRoom] });
+assert.equal(strovolosContext?.home?.city, "Strovolos");
+assert.equal(strovolosContext?.home?.country, "Cyprus");
+assert.equal(strovolosContext?.room?.lightLevel, "low");
+assert.equal(strovolosContext?.room?.directSun, "morning");
+
 const legacyContext = buildPlantEnvironmentContext({
   plant: { ...plant, homeId: undefined, roomId: undefined, roomKey: "rooms.kitchen" },
   homes: [],

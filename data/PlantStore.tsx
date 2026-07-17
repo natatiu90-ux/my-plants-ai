@@ -6,9 +6,11 @@ import { addDays, toDateKey } from "@/lib/date-format";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/client";
 import { createRepositories } from "@/lib/repositories/supabase-repositories";
 import { commonNameFromScientificName } from "@/lib/plant-display";
+import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION } from "@/lib/recommendation-version";
+import { recommendationRevisionIsUnchanged, type RecommendationChangedContext, type RecommendationContextSnapshot, type RecommendationRevisionSaveResult } from "@/lib/recommendation-refresh";
 import { PlantCreationError, plantCreationDiagnosticFromError, plantCreationError, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { calculateSoilCheckCareResolution } from "@/lib/soil-care";
-import type { HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
+import type { HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, PlantRecommendationRevision, Room, SoilCheckResult } from "@/types/plant";
 import type { LegacyRoomImportGroup } from "@/lib/home-room-context";
 
 type PlantState = {
@@ -17,6 +19,7 @@ type PlantState = {
   careEvents: PlantCareEvent[];
   milestones: PlantMilestone[];
   analyses: PlantAnalysisRecord[];
+  recommendationRevisions: PlantRecommendationRevision[];
   hypothesisResolutions: PlantHypothesisResolution[];
   homes: HomeContext[];
   rooms: Room[];
@@ -63,6 +66,7 @@ type PlantStoreValue = PlantState & {
   getPlantCareEvents: (plantId: string) => PlantCareEvent[];
   getPlantMilestones: (plantId: string) => PlantMilestone[];
   getPlantAnalysis: (plantId: string) => PlantAnalysisRecord | undefined;
+  getCurrentRecommendationRevision: (plantId: string) => PlantRecommendationRevision | undefined;
   getPlantHypothesisResolutions: (plantId: string) => PlantHypothesisResolution[];
   ensureFullPhotoUrl: (photoId: string) => Promise<string | undefined>;
   addPlant: (input: AddPlantInput) => Promise<string>;
@@ -108,6 +112,23 @@ type PlantStoreValue = PlantState & {
       model?: string | null;
     }
   ) => Promise<void>;
+  saveRecommendationRevision: (
+    plantId: string,
+    input: {
+      analysisId: string;
+      recommendations: PlantAnalysisRecord["recommendations"];
+      structuredResult?: PlantAnalysisRecord["rawResult"];
+      reasonType?: PlantRecommendationRevision["reasonType"];
+      reasonText?: string;
+      changedContext?: RecommendationChangedContext;
+      contextSnapshot: RecommendationContextSnapshot;
+      promptVersion?: string;
+      recommendationVersion?: number;
+      modelVersion?: string;
+      impactLevel?: PlantRecommendationRevision["impactLevel"];
+      changeSummary?: PlantRecommendationRevision["changeSummary"];
+    }
+  ) => Promise<RecommendationRevisionSaveResult>;
   resolvePlantHypothesis: (plantId: string, hypothesis: PlantHypothesis, status: PlantHypothesisStatus, userResult: string) => Promise<void>;
   updatePlantNotification: (plantId: string, enabled: boolean) => Promise<void>;
   updatePlantNextCheck: (plantId: string, nextCheckAt?: string) => Promise<void>;
@@ -124,6 +145,7 @@ const emptyState: PlantState = {
   careEvents: [],
   milestones: [],
   analyses: [],
+  recommendationRevisions: [],
   hypothesisResolutions: [],
   homes: [],
   rooms: [],
@@ -192,10 +214,11 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       nextRepositories.milestones.listMilestones(),
       nextRepositories.careEvents.listCareEvents(),
       nextRepositories.analyses.listAnalyses(),
+      nextRepositories.recommendationRevisions.listRevisions(),
       nextRepositories.hypothesisResolutions.listResolutions()
     ])
-      .then(([milestones, careEvents, analyses, hypothesisResolutions]) => {
-        setState((current) => ({ ...current, milestones, careEvents, analyses, hypothesisResolutions, secondaryDataReady: true }));
+      .then(([milestones, careEvents, analyses, recommendationRevisions, hypothesisResolutions]) => {
+        setState((current) => ({ ...current, milestones, careEvents, analyses, recommendationRevisions, hypothesisResolutions, secondaryDataReady: true }));
       })
       .catch((nextError) => {
         console.error("secondary_plant_data_load_failed", {
@@ -322,6 +345,13 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
   const getPlantAnalysis = useCallback(
     (plantId: string) => state.analyses.find((analysis) => analysis.plantId === plantId && !analysis.resolvedAt) ?? state.analyses.find((analysis) => analysis.plantId === plantId),
     [state.analyses]
+  );
+
+  const getCurrentRecommendationRevision = useCallback(
+    (plantId: string) =>
+      state.recommendationRevisions.find((revision) => revision.plantId === plantId && revision.isCurrent) ??
+      state.recommendationRevisions.find((revision) => revision.plantId === plantId),
+    [state.recommendationRevisions]
   );
 
   const getPlantHypothesisResolutions = useCallback(
@@ -750,7 +780,8 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
                 roomId: input.roomId || (input.roomKey && !input.roomKey.startsWith("rooms.") ? input.roomKey : undefined),
                 roomKey: input.roomKey,
                 positionInRoom: input.positionInRoom,
-                notes: input.notes
+                notes: input.notes,
+                updatedAt: new Date().toISOString()
               }
             : plant
         )
@@ -1055,7 +1086,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         recommendations: Array.isArray(input.recommendations) ? (input.recommendations as PlantAnalysisRecord["recommendations"]) : [],
         rawResult: input.rawResult as PlantAnalysisRecord["rawResult"],
         model: input.model ?? undefined,
-        createdAt: toDateKey(new Date())
+        createdAt: new Date().toISOString()
       };
 
       setState((current) => ({
@@ -1076,6 +1107,133 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       }));
     },
     [repositories, state.plants]
+  );
+
+  const saveRecommendationRevision = useCallback(
+    async (
+      plantId: string,
+      input: {
+        analysisId: string;
+        recommendations: PlantAnalysisRecord["recommendations"];
+        structuredResult?: PlantAnalysisRecord["rawResult"];
+        reasonType?: PlantRecommendationRevision["reasonType"];
+        reasonText?: string;
+        changedContext?: RecommendationChangedContext;
+        contextSnapshot: RecommendationContextSnapshot;
+        promptVersion?: string;
+        recommendationVersion?: number;
+        modelVersion?: string;
+        impactLevel?: PlantRecommendationRevision["impactLevel"];
+        changeSummary?: PlantRecommendationRevision["changeSummary"];
+      }
+    ) => {
+      if (!repositories) {
+        throw new Error("Plant collection is not ready.");
+      }
+
+      const currentRevision =
+        state.recommendationRevisions.find((revision) => revision.plantId === plantId && revision.isCurrent) ??
+        state.recommendationRevisions.find((revision) => revision.plantId === plantId);
+      if (
+        currentRevision &&
+        recommendationRevisionIsUnchanged({
+          currentRevision,
+          contextSnapshot: input.contextSnapshot,
+          changedContext: input.changedContext ?? {
+            home: { city: false, country: false, type: false, humidity: false, airConditioning: false },
+            room: { assignment: false, lightLevel: false, directSun: false, temperature: false, airConditioning: false },
+            plant: { positionInRoom: false, lightCondition: false },
+            care: { watering: false, repotting: false, soilCondition: false, history: false },
+            system: { promptVersion: false, modelVersion: false }
+          },
+          recommendations: input.recommendations,
+          structuredResult: input.structuredResult,
+          promptVersion: input.promptVersion ?? RECOMMENDATION_PROMPT_VERSION,
+          recommendationVersion: input.recommendationVersion ?? RECOMMENDATION_VERSION,
+          modelVersion: input.modelVersion
+        })
+      ) {
+        return { created: false, unchanged: true, revisionId: currentRevision.id };
+      }
+
+      const revisionResult = await repositories.recommendationRevisions.createRevision({
+        plantId,
+        analysisId: input.analysisId,
+        recommendations: input.recommendations,
+        structuredResult: input.structuredResult,
+        reasonType: input.reasonType ?? "manual_refresh",
+        reasonText: input.reasonText,
+        changedContext: input.changedContext,
+        contextSnapshot: input.contextSnapshot,
+        promptVersion: input.promptVersion ?? RECOMMENDATION_PROMPT_VERSION,
+        recommendationVersion: input.recommendationVersion ?? RECOMMENDATION_VERSION,
+        modelVersion: input.modelVersion,
+        impactLevel: input.impactLevel,
+        changeSummary: input.changeSummary
+      });
+      const revisionId = revisionResult.revisionId;
+
+      const raw = input.structuredResult ?? {};
+      const condition = typeof raw.condition === "string" ? (raw.condition as Plant["status"]) : undefined;
+      const nextAction = typeof raw.nextAction === "string" && raw.nextAction !== "none" ? (raw.nextAction as Plant["nextAction"]) : raw.nextAction === "none" ? null : undefined;
+      const nextCheckInDays = typeof raw.nextCheckInDays === "number" ? raw.nextCheckInDays : undefined;
+      const summary = raw.summary && typeof raw.summary === "object" ? (raw.summary as PlantAnalysisRecord["summary"]) : undefined;
+      const nextCheckAt = nextCheckInDays != null ? toDateKey(addDays(new Date(), nextCheckInDays)) : undefined;
+
+      if (condition || nextAction !== undefined || nextCheckAt) {
+        await repositories.plants.updateRecommendationState(plantId, {
+          status: condition ?? state.plants.find((plant) => plant.id === plantId)?.status ?? "unknown",
+          nextAction: nextAction ?? null,
+          nextCheckAt: nextCheckAt ?? state.plants.find((plant) => plant.id === plantId)?.nextCheckAt ?? null,
+          careScheduleStatus: nextCheckAt ? "active" : state.plants.find((plant) => plant.id === plantId)?.careScheduleStatus,
+          notificationDueCycleKey: null
+        });
+      }
+
+      const now = new Date().toISOString();
+      const revision: PlantRecommendationRevision = {
+        id: revisionId,
+        plantId,
+        analysisId: input.analysisId,
+        recommendations: input.recommendations,
+        structuredResult: input.structuredResult,
+        reasonType: input.reasonType ?? "manual_refresh",
+        reasonText: input.reasonText,
+        changedContext: input.changedContext,
+        contextSnapshot: input.contextSnapshot,
+        promptVersion: input.promptVersion ?? RECOMMENDATION_PROMPT_VERSION,
+        recommendationVersion: input.recommendationVersion ?? RECOMMENDATION_VERSION,
+        modelVersion: input.modelVersion,
+        impactLevel: input.impactLevel,
+        changeSummary: input.changeSummary,
+        isCurrent: true,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      setState((current) => ({
+        ...current,
+        plants: current.plants.map((plant) =>
+          plant.id === plantId
+            ? {
+                ...plant,
+                status: condition ?? plant.status,
+                nextAction: nextAction ?? null,
+                nextCheckAt: nextCheckAt ?? plant.nextCheckAt,
+                careScheduleStatus: nextCheckAt ? "active" : plant.careScheduleStatus,
+                notificationDueCycleKey: undefined,
+                updatedAt: now
+              }
+            : plant
+        ),
+        recommendationRevisions: [
+          revision,
+          ...current.recommendationRevisions.map((item) => (item.plantId === plantId ? { ...item, isCurrent: false } : item))
+        ]
+      }));
+      return revisionResult;
+    },
+    [repositories, state.plants, state.recommendationRevisions]
   );
 
   const resolvePlantHypothesis = useCallback(
@@ -1157,6 +1315,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         careEvents: current.careEvents.filter((event) => event.plantId !== plantId),
         milestones: current.milestones.filter((milestone) => milestone.plantId !== plantId),
         analyses: current.analyses.filter((analysis) => analysis.plantId !== plantId),
+        recommendationRevisions: current.recommendationRevisions.filter((revision) => revision.plantId !== plantId),
         hypothesisResolutions: current.hypothesisResolutions.filter((resolution) => resolution.plantId !== plantId),
         homes: current.homes,
         rooms: current.rooms,
@@ -1181,6 +1340,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       getPlantCareEvents,
       getPlantMilestones,
       getPlantAnalysis,
+      getCurrentRecommendationRevision,
       getPlantHypothesisResolutions,
       ensureFullPhotoUrl,
       addPlant,
@@ -1206,6 +1366,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       recordSoilChecked,
       saveBaselineHistory,
       savePlantAnalysis,
+      saveRecommendationRevision,
       resolvePlantHypothesis,
       updatePlantNotification,
       updatePlantNextCheck,
@@ -1228,6 +1389,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       error,
       ensureFullPhotoUrl,
       getCoverPhoto,
+      getCurrentRecommendationRevision,
       getPlant,
       getPlantAnalysis,
       getPlantHypothesisResolutions,
@@ -1238,6 +1400,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       importLegacyPlantsToHome,
       saveBaselineHistory,
       savePlantAnalysis,
+      saveRecommendationRevision,
       resolvePlantHypothesis,
       roomExists,
       setCoverPhoto,

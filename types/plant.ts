@@ -60,6 +60,7 @@ export interface Plant {
   roomKey?: string;
   lightConditionKey?: TranslationKey;
   notes?: string;
+  updatedAt?: string;
 }
 
 export interface Room {
@@ -73,6 +74,7 @@ export interface Room {
   hasAirConditioning?: RoomAirConditioning;
   notes?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface HomeContext {
@@ -85,6 +87,7 @@ export interface HomeContext {
   hasAirConditioning?: boolean;
   notes?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface PlantCareEvent {
@@ -196,6 +199,50 @@ export interface PlantAnalysisRecord {
   createdAt: string;
   resolvedAt?: string;
 }
+
+export interface PlantRecommendationRevision {
+  id: string;
+  plantId: string;
+  analysisId: string;
+  recommendations: PlantAnalysisRecord["recommendations"];
+  structuredResult?: PlantAnalysisRecord["rawResult"];
+  reasonType?: RecommendationRevisionReasonType;
+  reasonText?: string;
+  changedContext?: Record<string, unknown>;
+  contextSnapshot?: Record<string, unknown>;
+  promptVersion?: string;
+  recommendationVersion?: number;
+  modelVersion?: string;
+  impactLevel?: RecommendationImpactLevel;
+  changeSummary?: {
+    en?: string | null;
+    ru?: string | null;
+  };
+  isCurrent: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export type RecommendationRevisionReasonType =
+  | "room_changed"
+  | "home_changed"
+  | "plant_location_changed"
+  | "light_changed"
+  | "direct_sun_changed"
+  | "temperature_changed"
+  | "humidity_changed"
+  | "air_conditioning_changed"
+  | "soil_changed"
+  | "watering_changed"
+  | "repotting_changed"
+  | "care_history_changed"
+  | "prompt_updated"
+  | "model_updated"
+  | "manual_refresh"
+  | "mixed_context_changes"
+  | "unknown_legacy";
+
+export type RecommendationImpactLevel = "none" | "minor" | "moderate" | "major";
 
 export interface PlantHypothesisResolution {
   id: string;

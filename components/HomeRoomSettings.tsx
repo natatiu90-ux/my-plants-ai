@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, Home, MapPin, Plus, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Home, MapPin, Plus, Trash2 } from "lucide-react";
 import type { HomeContext, Room } from "@/types/plant";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
 import { buildLegacyRoomImportGroups, dedupeImportGroups, shouldOfferExistingHomeImport, type LegacyRoomImportGroup } from "@/lib/home-room-context";
 import { detectCityFromCoordinates, getBrowserPosition, searchCities, type CitySuggestion } from "@/lib/location-service";
+import { AnswerChips } from "./AnswerChips";
 
 const lightOptions: NonNullable<Room["lightLevel"]>[] = ["low", "medium_indirect", "bright_indirect", "direct_sun", "unknown"];
 const sunOptions: NonNullable<Room["directSun"]>[] = ["none", "morning", "afternoon", "all_day", "unknown"];
@@ -73,6 +74,60 @@ function roomToDraft(room: Room): RoomDraft {
     hasAirConditioning: room.hasAirConditioning ?? "inherit",
     notes: room.notes ?? ""
   };
+}
+
+function roomDraftEqualsRoom(draft: RoomDraft, room: Room | null) {
+  if (!room) {
+    return Boolean(draft.name.trim());
+  }
+  return (
+    draft.name.trim() === room.name &&
+    (draft.lightLevel || "") === (room.lightLevel ?? "") &&
+    (draft.directSun || "") === (room.directSun ?? "") &&
+    (draft.temperatureRelative || "") === (room.temperatureRelative ?? "") &&
+    (draft.hasAirConditioning || "inherit") === (room.hasAirConditioning ?? "inherit") &&
+    draft.notes.trim() === (room.notes ?? "")
+  );
+}
+
+function RoomOptionGroup<T extends string>({
+  title,
+  value,
+  options,
+  onChange,
+  labelFor
+}: {
+  title: string;
+  value: string;
+  options: readonly T[];
+  onChange: (value: string) => void;
+  labelFor: (value: T) => string;
+}) {
+  return (
+    <div className="rounded-[18px] bg-white/70 p-3">
+      <p className="text-sm font-extrabold text-[#4f4940]">{title}</p>
+      <AnswerChips
+        options={options}
+        getKey={(option) => option}
+        labelFor={labelFor}
+        selectedKey={value}
+        variant="neutral"
+        onSelect={(option) => onChange(value === option ? "" : option)}
+      />
+    </div>
+  );
+}
+
+function roomSummary(room: Room, plantCount: number, t: (key: never) => string) {
+  const parts = [
+    room.lightLevel ? t(`homeContext.light.${room.lightLevel}` as never) : "",
+    room.directSun ? t(`homeContext.sun.${room.directSun}` as never) : ""
+  ].filter(Boolean);
+  const count = t("rooms.plantCount" as never).replace("{count}", String(plantCount));
+  if (!parts.length) {
+    return `${t("homeContext.roomLightNotSet" as never)} • ${count}`;
+  }
+  return `${parts.join(" • ")} • ${count}`;
 }
 
 function homeInputFromDraft(draft: Draft, defaultName: string): Omit<HomeContext, "id" | "createdAt"> {
@@ -426,6 +481,8 @@ export function HomeRoomSettings({
   }
 
   if (mode === "edit_room" && selectedHome) {
+    const originalRoom = roomDraft.id ? rooms.find((room) => room.id === roomDraft.id) ?? null : null;
+    const hasRoomChanges = !roomDraftEqualsRoom(roomDraft, originalRoom);
     return (
       <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
         <button type="button" onClick={() => setMode("home")} className="mb-3 flex min-h-10 items-center gap-2 rounded-[16px] bg-white/75 px-3 text-sm font-extrabold text-[#6f675c]">
@@ -434,25 +491,44 @@ export function HomeRoomSettings({
         </button>
         <h2 className="font-rounded text-xl font-extrabold text-ink">{roomDraft.id ? t("homeContext.editRoom") : t("homeContext.addRoom")}</h2>
         <div className="mt-4 grid gap-2 rounded-[22px] bg-white/70 p-3">
-          <input value={roomDraft.name} onChange={(event) => setRoomDraft((draft) => ({ ...draft, name: event.target.value }))} placeholder={t("rooms.roomName")} className="min-h-11 rounded-[16px] bg-white px-3 text-base outline-none" />
-          <select value={roomDraft.lightLevel} onChange={(event) => setRoomDraft((draft) => ({ ...draft, lightLevel: event.target.value }))} className="min-h-11 rounded-[16px] bg-white px-3 text-base outline-none">
-            <option value="">{t("homeContext.lightLevel")}</option>
-            {lightOptions.map((option) => <option key={option} value={option}>{t(`homeContext.light.${option}` as never)}</option>)}
-          </select>
-          <select value={roomDraft.directSun} onChange={(event) => setRoomDraft((draft) => ({ ...draft, directSun: event.target.value }))} className="min-h-11 rounded-[16px] bg-white px-3 text-base outline-none">
-            <option value="">{t("homeContext.directSun")}</option>
-            {sunOptions.map((option) => <option key={option} value={option}>{t(`homeContext.sun.${option}` as never)}</option>)}
-          </select>
-          <select value={roomDraft.temperatureRelative} onChange={(event) => setRoomDraft((draft) => ({ ...draft, temperatureRelative: event.target.value }))} className="min-h-11 rounded-[16px] bg-white px-3 text-base outline-none">
-            <option value="">{t("homeContext.temperature")}</option>
-            {tempOptions.map((option) => <option key={option} value={option}>{t(`homeContext.temperature.${option}` as never)}</option>)}
-          </select>
-          <select value={roomDraft.hasAirConditioning} onChange={(event) => setRoomDraft((draft) => ({ ...draft, hasAirConditioning: event.target.value }))} className="min-h-11 rounded-[16px] bg-white px-3 text-base outline-none">
-            {acOptions.map((option) => <option key={option} value={option}>{t(`homeContext.ac.${option}` as never)}</option>)}
-          </select>
-          <textarea value={roomDraft.notes} onChange={(event) => setRoomDraft((draft) => ({ ...draft, notes: event.target.value }))} placeholder={t("homeContext.roomNotes")} className="min-h-20 rounded-[16px] bg-white px-3 py-3 text-base outline-none" />
+          <label className="block rounded-[18px] bg-white/70 p-3">
+            <span className="text-sm font-extrabold text-[#4f4940]">{t("rooms.roomName")}</span>
+            <input value={roomDraft.name} onChange={(event) => setRoomDraft((draft) => ({ ...draft, name: event.target.value }))} placeholder={t("rooms.roomName")} className="mt-2 min-h-11 w-full rounded-[16px] bg-[#fffaf3] px-3 text-base font-bold outline-none" />
+          </label>
+          <RoomOptionGroup
+            title={t("homeContext.lightLevel")}
+            value={roomDraft.lightLevel}
+            options={lightOptions}
+            onChange={(value) => setRoomDraft((draft) => ({ ...draft, lightLevel: value }))}
+            labelFor={(option) => t(`homeContext.light.${option}` as never)}
+          />
+          <RoomOptionGroup
+            title={t("homeContext.directSun")}
+            value={roomDraft.directSun}
+            options={sunOptions}
+            onChange={(value) => setRoomDraft((draft) => ({ ...draft, directSun: value }))}
+            labelFor={(option) => t(`homeContext.sun.${option}` as never)}
+          />
+          <RoomOptionGroup
+            title={t("homeContext.temperature")}
+            value={roomDraft.temperatureRelative}
+            options={tempOptions}
+            onChange={(value) => setRoomDraft((draft) => ({ ...draft, temperatureRelative: value }))}
+            labelFor={(option) => t(`homeContext.temperature.${option}` as never)}
+          />
+          <RoomOptionGroup
+            title={t("homeContext.airConditioning")}
+            value={roomDraft.hasAirConditioning}
+            options={acOptions}
+            onChange={(value) => setRoomDraft((draft) => ({ ...draft, hasAirConditioning: value || "inherit" }))}
+            labelFor={(option) => t(`homeContext.ac.${option}` as never)}
+          />
+          <label className="block rounded-[18px] bg-white/70 p-3">
+            <span className="text-sm font-extrabold text-[#4f4940]">{t("homeContext.roomNotes")}</span>
+            <textarea value={roomDraft.notes} onChange={(event) => setRoomDraft((draft) => ({ ...draft, notes: event.target.value }))} placeholder={t("homeContext.roomNotes")} className="mt-2 min-h-20 w-full rounded-[16px] bg-[#fffaf3] px-3 py-3 text-base outline-none" />
+          </label>
         </div>
-        <button type="button" onClick={() => void saveRoom()} disabled={isSaving || !roomDraft.name.trim()} className="mt-4 min-h-12 w-full rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f] disabled:opacity-60">
+        <button type="button" onClick={() => void saveRoom()} disabled={isSaving || !roomDraft.name.trim() || !hasRoomChanges} className="mt-4 min-h-12 w-full rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f] disabled:opacity-60">
           {roomDraft.id ? t("homeContext.saveRoom") : t("homeContext.addRoom")}
         </button>
       </section>
@@ -488,12 +564,15 @@ export function HomeRoomSettings({
           {selectedRooms.map((room) => {
             const count = plants.filter((plant) => plant.roomId === room.id || plant.roomKey === room.id).length;
             return (
-              <div key={room.id} className="flex items-center justify-between gap-2 rounded-[20px] bg-white/70 p-3">
-                <button type="button" onClick={() => { setRoomDraft(roomToDraft(room)); setMode("edit_room"); }} className="min-w-0 flex-1 text-left">
+              <div key={room.id} className="flex items-center gap-2 rounded-[20px] bg-white/70 p-3">
+                <button type="button" onClick={() => { setRoomDraft(roomToDraft(room)); setMode("edit_room"); }} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                  <span className="min-w-0 flex-1">
                   <p className="truncate font-bold text-[#565149]">{room.name}</p>
-                  <p className="text-xs font-bold text-[#9a9286]">{t("rooms.plantCount").replace("{count}", String(count))}</p>
+                    <p className="mt-0.5 text-xs font-bold leading-4 text-[#9a9286]">{roomSummary(room, count, t as (key: never) => string)}</p>
+                  </span>
+                  <ChevronRight aria-hidden="true" size={17} className="shrink-0 text-[#b0a89a]" />
                 </button>
-                <button type="button" onClick={() => void deleteRoom(room.id)} aria-label={t("rooms.deleteRoom")} className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-[#fdeaf0] text-[#9b2c3e]">
+                <button type="button" onClick={() => void deleteRoom(room.id)} aria-label={t("rooms.deleteRoom")} className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-white/80 text-[#9b2c3e]">
                   <Trash2 aria-hidden="true" size={17} />
                 </button>
               </div>

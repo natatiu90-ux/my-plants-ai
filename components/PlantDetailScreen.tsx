@@ -10,6 +10,8 @@ import { plantDisplayName } from "@/lib/plant-display";
 import { deriveCareActionState } from "@/lib/plant-action-eligibility";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
+import { buildRecommendationContextSnapshot, changedContextSince, impactLabelKey, isRecommendationStale, isVisualEvidenceStale, reasonTypeFromChangedContext, sourceAnalysisAgeDays, staleReasonKeys, type RecommendationChangedContext, type RecommendationContextSnapshot } from "@/lib/recommendation-refresh";
+import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION } from "@/lib/recommendation-version";
 import { CareHistory } from "./CareHistory";
 import { CareSummary } from "./CareSummary";
 import { CheckSoilSheet } from "./CheckSoilSheet";
@@ -24,7 +26,7 @@ import { PlantNotificationControls } from "./PlantNotificationControls";
 import { PlantStatusSection } from "./PlantStatusSection";
 import { PrimaryCareAction } from "./PrimaryCareAction";
 import { Toast } from "./Toast";
-import type { PlantPhoto, SoilCheckResult } from "@/types/plant";
+import type { PlantAnalysisRecord, PlantPhoto, PlantRecommendationRevision, SoilCheckResult } from "@/types/plant";
 import type { PendingPhotoUpload } from "./photo-upload-types";
 
 type Sheet = "check_soil" | "add_photo" | "add_event" | null;
@@ -56,15 +58,130 @@ function photoAssessmentChanges(condition: string | undefined, locale: "en" | "r
     : ["I folded the new photos into the current recommendations.", "I’m not claiming improvement or worsening without a reliable comparison."];
 }
 
+function analysisWithRecommendationRevision(analysis: PlantAnalysisRecord | undefined, revision: PlantRecommendationRevision | undefined): PlantAnalysisRecord | undefined {
+  if (!analysis || !revision) {
+    return analysis;
+  }
+
+  const structured = revision.structuredResult ?? {};
+  return {
+    ...analysis,
+    condition: typeof structured.condition === "string" ? (structured.condition as PlantAnalysisRecord["condition"]) : analysis.condition,
+    nextAction: typeof structured.nextAction === "string" ? (structured.nextAction === "none" ? null : (structured.nextAction as PlantAnalysisRecord["nextAction"])) : analysis.nextAction,
+    summary: structured.summary && typeof structured.summary === "object" ? (structured.summary as PlantAnalysisRecord["summary"]) : analysis.summary,
+    recommendations: revision.recommendations.length ? revision.recommendations : analysis.recommendations,
+    rawResult: {
+      ...structured,
+      visibleObservations: analysis.rawResult?.visibleObservations ?? structured.visibleObservations,
+      photoComparison: analysis.rawResult?.photoComparison ?? structured.photoComparison,
+      recommendationRevision: {
+        id: revision.id,
+        reasonType: revision.reasonType,
+        reasonText: revision.reasonText,
+        changedContext: revision.changedContext,
+        promptVersion: revision.promptVersion,
+        recommendationVersion: revision.recommendationVersion,
+        impactLevel: revision.impactLevel,
+        changeSummary: revision.changeSummary,
+        refreshedAt: revision.createdAt
+      }
+    }
+  };
+}
+
+function compactPreviousRecommendation(
+  analysis: PlantAnalysisRecord | undefined,
+  input: { previousContextSnapshot?: Record<string, unknown>; changedContext?: RecommendationChangedContext; reasonType?: string } = {}
+) {
+  return {
+    status: analysis?.condition ?? null,
+    keyConcerns: Array.isArray(analysis?.rawResult?.hypotheses)
+      ? analysis.rawResult?.hypotheses?.slice(0, 3).map((item) => ({
+          type: item.type,
+          status: item.status,
+          confidence: item.confidence
+        }))
+      : [],
+    previousActions: analysis?.recommendations.slice(0, 4).map((item) => ({
+      type: item.type,
+      priority: item.priority,
+      en: item.en,
+      ru: item.ru
+    })) ?? [],
+    whatNotToDo: Array.isArray(analysis?.rawResult?.whatNotToDo) ? analysis.rawResult.whatNotToDo : [],
+    confidence: typeof analysis?.rawResult?.confidence === "number" ? analysis.rawResult.confidence : null,
+    sourceAnalysis: analysis ? { id: analysis.id, createdAt: analysis.createdAt } : null,
+    previousContextSnapshot: input.previousContextSnapshot ?? null,
+    changedContext: input.changedContext ?? null,
+    reasonType: input.reasonType ?? null
+  };
+}
+
+function recommendationRefreshReason(
+  changedContext: RecommendationChangedContext,
+  currentSnapshot: RecommendationContextSnapshot,
+  locale: "en" | "ru",
+  t: (key: never) => string
+) {
+  if (changedContext.room.lightLevel && currentSnapshot.room?.lightLevel) {
+    const light = t(`homeContext.light.${currentSnapshot.room.lightLevel}` as never);
+    return locale === "ru"
+      ? `Я обновила рекомендации, потому что теперь знаю, что растение стоит в комнате с освещением: ${light}.`
+      : `I updated recommendations because I now know this plant is in a room with ${light}.`;
+  }
+
+  if (changedContext.room.directSun && currentSnapshot.room?.directSun) {
+    const sun = t(`homeContext.sun.${currentSnapshot.room.directSun}` as never);
+    return locale === "ru"
+      ? `Я обновила рекомендации с учётом прямого солнца в этой комнате: ${sun}.`
+      : `I updated recommendations using the direct-sun context for this room: ${sun}.`;
+  }
+
+  if (changedContext.home.humidity && currentSnapshot.home?.humidityLevel) {
+    const humidity = t(`homeContext.humidity.${currentSnapshot.home.humidityLevel}` as never);
+    return locale === "ru"
+      ? `Я обновила рекомендации, потому что теперь учитываю влажность дома: ${humidity}.`
+      : `I updated recommendations because I now know the home humidity: ${humidity}.`;
+  }
+
+  if (changedContext.room.assignment && currentSnapshot.room?.name) {
+    return locale === "ru"
+      ? `Я обновила рекомендации с учётом комнаты: ${currentSnapshot.room.name}.`
+      : `I updated recommendations using the room context: ${currentSnapshot.room.name}.`;
+  }
+
+  if (changedContext.care.soilCondition) {
+    return locale === "ru" ? "Рекомендации обновлены с учётом новой проверки почвы." : "I updated recommendations using the latest soil check.";
+  }
+
+  if (changedContext.care.watering || changedContext.care.repotting || changedContext.care.history) {
+    return locale === "ru" ? "Я обновила рекомендации с учётом последней истории ухода." : "I updated recommendations using the latest care history.";
+  }
+
+  if (changedContext.system.promptVersion || changedContext.system.modelVersion) {
+    return locale === "ru" ? "Рекомендации обновлены с учётом новой логики анализа." : "I updated recommendations using the latest analysis logic.";
+  }
+
+  return locale === "ru"
+    ? "Рекомендации уже были актуальны, я проверила их ещё раз."
+    : "Recommendations were already current, so I checked them again.";
+}
+
+function staleReasonMessage(reasonKey: string, t: (key: never) => string) {
+  return t(`plantAnalysis.staleReason.${reasonKey}` as never);
+}
+
 export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useI18n();
-  const { addMilestone, addPlantPhotos, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getPlant, getPlantAnalysis, getPlantHypothesisResolutions, getPlantMilestones, getPlantPhotos, homes, recordSoilChecked, resolvePlantHypothesis, rooms, saveBaselineHistory, savePlantAnalysis, secondaryDataReady, waterPlant } =
+  const { addMilestone, addPlantPhotos, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getCurrentRecommendationRevision, getPlant, getPlantAnalysis, getPlantCareEvents, getPlantHypothesisResolutions, getPlantMilestones, getPlantPhotos, homes, recordSoilChecked, resolvePlantHypothesis, rooms, saveBaselineHistory, savePlantAnalysis, saveRecommendationRevision, secondaryDataReady, waterPlant } =
     usePlantStore();
   const { locale } = useI18n();
   const plant = getPlant(plantId);
   const analysis = getPlantAnalysis(plantId);
+  const currentRecommendationRevision = getCurrentRecommendationRevision(plantId);
+  const displayAnalysis = analysisWithRecommendationRevision(analysis, currentRecommendationRevision);
   const coverPhoto = getCoverPhoto(plantId);
   const photos = getPlantPhotos(plantId);
   const milestones = useMemo(
@@ -72,6 +189,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     [getPlantMilestones, plantId]
   );
   const hypothesisResolutions = getPlantHypothesisResolutions(plantId);
+  const careEvents = getPlantCareEvents(plantId);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [sheet, setSheet] = useState<Sheet>(null);
@@ -81,6 +199,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const [baselineSaving, setBaselineSaving] = useState(false);
   const [baselineDate, setBaselineDate] = useState("");
   const [photoAssessment, setPhotoAssessment] = useState<PhotoAssessmentState>({ status: "idle" });
+  const [isUpdatingRecommendations, setIsUpdatingRecommendations] = useState(false);
+  const [recommendationUpdateError, setRecommendationUpdateError] = useState<string | null>(null);
   const loggedEvents = useRef(new Set<string>());
   const openedActionRef = useRef<string | null>(null);
   const baselineDateInputRef = useRef<HTMLInputElement | null>(null);
@@ -170,6 +290,40 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const hasRepottingBaseline = milestones.some((milestone) => milestone.type === "repotted" || milestone.type === "repotting_unknown");
   const baselineQuestion = !hasWateringBaseline ? "watering" : !hasRepottingBaseline ? "repotting" : null;
   const formattedBaselineDate = baselineDate ? formatLongDate(baselineDate, locale) : t("baseline.chooseDate");
+  const recommendationContextSnapshot = buildRecommendationContextSnapshot({
+    plant,
+    homes,
+    rooms,
+    milestones,
+    careEvents,
+    hypothesisResolutions
+  });
+  const currentChangedContext = changedContextSince(currentRecommendationRevision?.contextSnapshot, recommendationContextSnapshot, {
+    previousPromptVersion: currentRecommendationRevision?.promptVersion,
+    currentPromptVersion: RECOMMENDATION_PROMPT_VERSION,
+    previousModelVersion: currentRecommendationRevision?.modelVersion
+  });
+  const staleReasons = currentRecommendationRevision
+    ? staleReasonKeys({
+        changedContext: currentChangedContext,
+        currentRevision: currentRecommendationRevision
+      })
+    : ["no_revision"];
+  const recommendationsAreStale = analysis
+    ? !currentRecommendationRevision ||
+      isRecommendationStale({
+          plant,
+          analysis,
+          currentRevision: currentRecommendationRevision,
+          homes,
+          rooms,
+          milestones,
+          careEvents,
+          hypothesisResolutions
+        })
+    : false;
+  const visualEvidenceAge = sourceAnalysisAgeDays(analysis);
+  const visualEvidenceIsStale = isVisualEvidenceStale(analysis);
 
   const completeWatering = async () => {
     if (isCompletingAction) {
@@ -312,6 +466,111 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     }
   };
 
+  const updateRecommendations = async () => {
+    if (isUpdatingRecommendations || !photos.length || !analysis) {
+      return;
+    }
+
+    setIsUpdatingRecommendations(true);
+    setRecommendationUpdateError(null);
+    const startedAt = Date.now();
+    try {
+      const photosForAnalysis = [coverPhoto, ...photos.filter((photo) => photo.id !== coverPhoto?.id)].filter(Boolean).slice(0, 5) as PlantPhoto[];
+      const formData = new FormData();
+      for (const photo of photosForAnalysis) {
+        const url = (await ensureFullPhotoUrl(photo.id)) ?? photo.url ?? photo.thumbnailUrl;
+        if (!url) {
+          continue;
+        }
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error("saved_photo_fetch_failed");
+        }
+        const blob = await response.blob();
+        formData.append("photos", new File([blob], `${photo.id}.jpg`, { type: blob.type || "image/jpeg" }));
+        formData.append("photoTypes", photo.type);
+        formData.append("photoSources", "saved");
+        formData.append("clientFileNames", `${photo.id}.jpg`);
+        formData.append("clientMimeTypes", blob.type || "image/jpeg");
+        formData.append("clientExtensions", "jpg");
+        formData.append("clientByteSizes", String(blob.size));
+        formData.append("clientDecodeSucceeded", "true");
+        formData.append("clientWidths", "");
+        formData.append("clientHeights", "");
+        formData.append("clientExifOrientations", "");
+        formData.append("clientPhysicallyRotated", "true");
+        formData.append("clientOrientationSources", "saved_normalized_photo");
+        formData.append("clientDebugIds", photo.id);
+      }
+
+      formData.append("locale", locale);
+      formData.append("analysisMode", "recommendation_refresh");
+      formData.append("currentCommonName", plant.speciesName ?? "");
+      formData.append("currentScientificName", plant.scientificName ?? "");
+      formData.append("currentDetectedSpecies", [plant.speciesName, plant.scientificName].filter(Boolean).join(" "));
+      formData.append("currentLightCondition", plant.lightConditionKey ? t(plant.lightConditionKey) : "");
+      formData.append("environmentContext", formatEnvironmentContextForPrompt(buildPlantEnvironmentContext({ plant, homes, rooms })));
+      const changedContext = changedContextSince(currentRecommendationRevision?.contextSnapshot, recommendationContextSnapshot, {
+        previousPromptVersion: currentRecommendationRevision?.promptVersion,
+        currentPromptVersion: RECOMMENDATION_PROMPT_VERSION,
+        previousModelVersion: currentRecommendationRevision?.modelVersion
+      });
+      const reasonType = reasonTypeFromChangedContext(changedContext);
+      const refreshReason = recommendationRefreshReason(changedContext, recommendationContextSnapshot, locale, t);
+      formData.append(
+        "previousAnalysis",
+        JSON.stringify({
+          ...compactPreviousRecommendation(displayAnalysis, {
+            previousContextSnapshot: currentRecommendationRevision?.contextSnapshot,
+            changedContext,
+            reasonType
+          })
+        })
+      );
+
+      const response = await fetch("/api/analyze-plant", { method: "POST", body: formData });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok || !payload.analysis) {
+        throw new Error(typeof payload?.error === "string" ? payload.error : "recommendation_refresh_failed");
+      }
+
+      const revisionResult = await saveRecommendationRevision(plant.id, {
+        analysisId: analysis.id,
+        recommendations: Array.isArray(payload.analysis.recommendations) ? payload.analysis.recommendations : [],
+        structuredResult: {
+          ...payload.analysis,
+          recommendationRefresh: {
+            refreshedAt: new Date().toISOString(),
+            reason: refreshReason,
+            sourceAnalysisId: analysis.id,
+            sourcePhotoIds: photosForAnalysis.map((photo) => photo.id),
+            changedContext
+          }
+        },
+        reasonType,
+        reasonText: refreshReason,
+        changedContext,
+        contextSnapshot: recommendationContextSnapshot,
+        promptVersion: RECOMMENDATION_PROMPT_VERSION,
+        recommendationVersion: RECOMMENDATION_VERSION,
+        modelVersion: typeof payload.model === "string" ? payload.model : undefined,
+        impactLevel: payload.analysis.recommendationImpact?.impactLevel,
+        changeSummary: payload.analysis.recommendationImpact?.changeSummary
+      });
+      console.info("recommendation_refresh_completed", { plantId: plant.id, photoCount: photosForAnalysis.length, durationMs: Date.now() - startedAt });
+      setToast(revisionResult.unchanged ? t("plantAnalysis.alreadyCurrent") : t("plantAnalysis.updateSuccess"));
+    } catch (error) {
+      console.warn("recommendation_refresh_failed", {
+        plantId: plant.id,
+        message: error instanceof Error ? error.message : "Unknown error",
+        durationMs: Date.now() - startedAt
+      });
+      setRecommendationUpdateError(t("plantAnalysis.updateFailed"));
+    } finally {
+      setIsUpdatingRecommendations(false);
+    }
+  };
+
   return (
     <main className={`mx-auto min-h-screen w-full max-w-[430px] bg-cream px-5 ${careActionState?.isActionable ? "pb-[calc(9rem+env(safe-area-inset-bottom))]" : "pb-10"}`}>
       <PlantDetailHeader
@@ -335,7 +594,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           logNavigationEvent("detail", plant.id, fullCoverUrl ? "cover_full_image_ready" : "cover_thumbnail_ready");
         }}
       />
-      <PlantStatusSection plant={plant} careActionState={careActionState} analysis={analysis} />
+      <PlantStatusSection plant={plant} careActionState={careActionState} analysis={displayAnalysis} />
       {baselineQuestion ? (
         <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
           <p className="text-xs font-bold uppercase text-[#a09a90]">{baselineQuestion === "watering" ? t("baseline.welcome") : t("baseline.thanks")}</p>
@@ -408,12 +667,54 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         </section>
       ) : null}
       <PlantAnalysisSection
-        analysis={analysis}
+        analysis={displayAnalysis}
         plant={plant}
         milestones={milestones}
         hypothesisResolutions={hypothesisResolutions}
         onResolveHypothesis={(hypothesis, status, result) => resolvePlantHypothesis(plant.id, hypothesis, status, result)}
       />
+      {currentRecommendationRevision?.reasonText ? (
+        <section className="mt-4 rounded-[24px] bg-[#eef5e8] p-4 shadow-soft">
+          <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.revisionNoteTitle")}</p>
+          <p className="mt-1 text-sm font-extrabold leading-5 text-[#355f3d]">{currentRecommendationRevision.reasonText}</p>
+          {currentRecommendationRevision.impactLevel ? (
+            <p className="mt-3 inline-flex rounded-full bg-white/75 px-3 py-1 text-xs font-extrabold text-[#355f3d]">
+              {t(impactLabelKey(currentRecommendationRevision.impactLevel) as never)}
+            </p>
+          ) : null}
+          {localized(currentRecommendationRevision.changeSummary, locale) ? (
+            <p className="mt-2 text-sm font-bold leading-5 text-[#4f6946]">{localized(currentRecommendationRevision.changeSummary, locale)}</p>
+          ) : null}
+        </section>
+      ) : null}
+      {visualEvidenceIsStale && visualEvidenceAge != null ? (
+        <section className="mt-4 rounded-[24px] bg-white/75 p-4 shadow-soft">
+          <p className="text-sm font-extrabold leading-5 text-ink">{t("plantAnalysis.visualEvidenceOldTitle")}</p>
+          <p className="mt-1 text-sm font-bold leading-5 text-[#7a7166]">{t("plantAnalysis.visualEvidenceOldBody").replace("{days}", String(visualEvidenceAge))}</p>
+        </section>
+      ) : null}
+      {recommendationsAreStale ? (
+        <section className="mt-4 rounded-[24px] bg-[#fffaf3] p-4 shadow-soft">
+          <p className="text-sm font-extrabold leading-5 text-ink">{t("plantAnalysis.staleTitle")}</p>
+          <p className="mt-1 text-sm font-bold leading-5 text-[#7a7166]">{t("plantAnalysis.staleBody")}</p>
+          {staleReasons.length ? (
+            <ul className="mt-3 grid gap-1.5 text-sm font-bold leading-5 text-[#6f675c]">
+              {staleReasons.slice(0, 3).map((reason) => (
+                <li key={reason}>• {staleReasonMessage(reason, t)}</li>
+              ))}
+            </ul>
+          ) : null}
+          {recommendationUpdateError ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{recommendationUpdateError}</p> : null}
+          <button
+            type="button"
+            onClick={() => void updateRecommendations()}
+            disabled={isUpdatingRecommendations || !photos.length}
+            className="mt-3 min-h-11 w-full rounded-[18px] bg-[#2d7a4f] px-4 text-sm font-extrabold text-white disabled:opacity-60"
+          >
+            {isUpdatingRecommendations ? t("plantAnalysis.updatingRecommendations") : t("plantAnalysis.updateRecommendations")}
+          </button>
+        </section>
+      ) : null}
       <button
         type="button"
         onClick={() => setSheet("add_photo")}

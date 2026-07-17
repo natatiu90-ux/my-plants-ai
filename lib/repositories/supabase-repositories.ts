@@ -5,8 +5,10 @@ import { inspectImageDisplay, readJpegExifOrientation } from "@/lib/client-image
 import { PhotoStorageRepository } from "@/lib/photo-storage";
 import { plantCreationError } from "@/lib/plant-save-diagnostics";
 import { temporaryPhotoStorageIdFromUrl } from "@/lib/temporary-photo-url";
-import type { CareScheduleStatus, HomeContext, PhotoType, Plant, PlantCareEvent, PlantHypothesis, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
-import { mapAnalysis, mapCareEvent, mapHome, mapHypothesisResolution, mapMilestone, mapPhoto, mapPlant, mapRoom, type PlantPhotoRow } from "./mappers";
+import type { CareScheduleStatus, HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
+import type { RecommendationImpactLevel, RecommendationRevisionReasonType } from "@/types/plant";
+import type { RecommendationChangedContext, RecommendationRevisionSaveResult } from "@/lib/recommendation-refresh";
+import { mapAnalysis, mapCareEvent, mapHome, mapHypothesisResolution, mapMilestone, mapPhoto, mapPlant, mapRecommendationRevision, mapRoom, type PlantPhotoRow } from "./mappers";
 
 const photoBucket = "plant-photos";
 const signedUrlTtlSeconds = 60 * 60;
@@ -1107,6 +1109,77 @@ export class AnalysisRepository {
   }
 }
 
+export class RecommendationRevisionRepository {
+  constructor(private supabase: SupabaseClient, private user: User) {}
+
+  async listRevisions() {
+    const { data, error } = await this.supabase
+      .from("plant_recommendation_revisions")
+      .select("*")
+      .eq("user_id", this.user.id)
+      .order("created_at", { ascending: false });
+
+    assertNoError(error);
+    return (data ?? []).map(mapRecommendationRevision);
+  }
+
+  async createRevision(input: {
+    plantId: string;
+    analysisId: string;
+    recommendations: PlantAnalysisRecord["recommendations"];
+    structuredResult?: PlantAnalysisRecord["rawResult"];
+    reasonType: RecommendationRevisionReasonType;
+    reasonText?: string;
+    changedContext?: RecommendationChangedContext;
+    contextSnapshot?: Record<string, unknown>;
+    promptVersion: string;
+    recommendationVersion: number;
+    modelVersion?: string;
+    impactLevel?: RecommendationImpactLevel;
+    changeSummary?: { en?: string | null; ru?: string | null };
+  }): Promise<RecommendationRevisionSaveResult> {
+    const { data, error } = await this.supabase.rpc("create_plant_recommendation_revision", {
+      target_plant_id: input.plantId,
+      source_analysis_id: input.analysisId,
+      recommendations_input: input.recommendations,
+      structured_result_input: input.structuredResult ?? {},
+      reason_type_input: input.reasonType,
+      reason_text_input: input.reasonText ?? null,
+      changed_context_input: input.changedContext ?? {},
+      context_snapshot_input: input.contextSnapshot ?? {},
+      prompt_version_input: input.promptVersion,
+      recommendation_version_input: input.recommendationVersion,
+      model_version_input: input.modelVersion ?? null,
+      impact_level_input: input.impactLevel ?? "none",
+      change_summary_input: input.changeSummary ?? {}
+    });
+
+    if (error) {
+      logSupabaseStageError("recommendation_revision_supabase_error", "save_analysis", error, {
+        plantId: input.plantId,
+        authenticatedUserIdSuffix: idSuffix(this.user.id),
+        insertedOwnerIdSuffix: idSuffix(this.user.id)
+      });
+      throw error;
+    }
+
+    if (!data || typeof data !== "object") {
+      throw new Error("recommendation_revision_id_missing");
+    }
+
+    const result = data as { created?: unknown; unchanged?: unknown; revision_id?: unknown };
+    if (typeof result.revision_id !== "string") {
+      throw new Error("recommendation_revision_id_missing");
+    }
+
+    return {
+      created: result.created === true,
+      unchanged: result.unchanged === true,
+      revisionId: result.revision_id
+    };
+  }
+}
+
 export class HypothesisResolutionRepository {
   constructor(private supabase: SupabaseClient, private user: User) {}
 
@@ -1209,6 +1282,7 @@ export async function createRepositories(supabase: SupabaseClient, user: User) {
     milestones: new MilestoneRepository(supabase, user),
     careEvents: new CareEventRepository(supabase, user),
     analyses: new AnalysisRepository(supabase, user),
+    recommendationRevisions: new RecommendationRevisionRepository(supabase, user),
     hypothesisResolutions: new HypothesisResolutionRepository(supabase, user)
   };
 }

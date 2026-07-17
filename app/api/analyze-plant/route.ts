@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import convertHeic from "heic-convert";
 import sharp from "sharp";
 import { selectSpeciesCareProfile, speciesProfilesPromptContext, speciesTraitsForAnalysis } from "@/lib/species-profiles";
+import { RECOMMENDATION_PROMPT_VERSION } from "@/lib/recommendation-version";
 
 export const runtime = "nodejs";
 
@@ -75,6 +76,10 @@ type AnalysisPayload = {
   alternativeCauses?: unknown[];
   hypotheses?: AnalysisHypothesisPayload[];
   speciesReasoning?: unknown;
+  recommendationImpact?: {
+    impactLevel?: "none" | "minor" | "moderate" | "major";
+    changeSummary?: { en?: string | null; ru?: string | null };
+  };
 };
 
 const localizedStringSchema = {
@@ -264,6 +269,15 @@ const schema = {
         },
         required: ["currentSituation", "speciesTraitsApplied", "diagnosisLogic", "whyThisMatters"]
       },
+      recommendationImpact: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          impactLevel: { type: "string", enum: ["none", "minor", "moderate", "major"] },
+          changeSummary: localizedNullableStringSchema
+        },
+        required: ["impactLevel", "changeSummary"]
+      },
       alternativeCauses: {
         type: "array",
         maxItems: 3,
@@ -358,6 +372,7 @@ const schema = {
       "aboutSpecies",
       "clarificationQuestions",
       "reasoning",
+      "recommendationImpact",
       "alternativeCauses",
       "hypotheses",
       "uncertainties"
@@ -596,6 +611,8 @@ export async function POST(request: Request) {
   const currentDetectedSpecies = String(formData.get("currentDetectedSpecies") ?? "");
   const currentLightCondition = String(formData.get("currentLightCondition") ?? "");
   const environmentContext = String(formData.get("environmentContext") ?? "");
+  const analysisMode = String(formData.get("analysisMode") ?? "initial_or_photo_analysis");
+  const previousAnalysis = String(formData.get("previousAnalysis") ?? "");
   const photoTypes = formData.getAll("photoTypes").map(String);
   const photoSources = formData.getAll("photoSources").map(String);
   const clientFileNames = formData.getAll("clientFileNames").map(String);
@@ -643,6 +660,7 @@ export async function POST(request: Request) {
   traceEvent(trace, "request_payload_parsed", {
     imageCount: files.length,
     locale,
+    analysisMode,
     hasCurrentPlantContext: Boolean(currentCommonName || currentScientificName || currentDetectedSpecies),
     hasEnvironmentContext: Boolean(environmentContext),
     photoTypes,
@@ -772,6 +790,7 @@ export async function POST(request: Request) {
           "Use the structured species profiles below as decision support. They are not encyclopedia text for the user; use them to rank hypotheses, choose actions, and decide which questions are worth asking.",
           "Never output generic plant encyclopedia facts. Every species fact shown to the user must connect to this plant's current photos, current diagnosis, current action, or previous user answers.",
           "Return the new recommendation model as independent sections: careRightNow, aboutSpecies, clarificationQuestions, reasoning, and alternativeCauses.",
+          `Recommendation prompt version: ${RECOMMENDATION_PROMPT_VERSION}.`,
           "careRightNow is only for what the user should do now in the current state. Maximum 3 short actionable items. Do not include generic species facts there.",
           "aboutSpecies is not a general species profile. It is a compact set of contextual teaching points for this exact plant. Include up to 6 concise bullets, and each bullet must help the owner make a decision about this plant now.",
           "Bad aboutSpecies bullet: 'Monstera likes indirect light.' Good: 'Because your Monstera already shows slightly dry edges, avoid direct afternoon sun.'",
@@ -793,6 +812,11 @@ export async function POST(request: Request) {
           "Light recommendations must be operational. Compare advice to the current light context when provided: if the current place is acceptable, say to keep it unless new symptoms appear; if a change is needed, say exactly what to change, such as moving farther from direct rays without putting the plant in shade.",
           "Use structured home and room context when provided. Treat user-entered home/room data as stronger evidence than photo guesses about permanent light, humidity, air conditioning, and location.",
           "Priority of context: user-entered home/room environment first, then plant history and answers, then photo evidence, then AI inference.",
+          "When room or home settings are explicit, never overwrite them with photo inference. If the room says low light, do not claim the plant already receives bright indirect light unless photo evidence strongly contradicts the stored setting; explain the uncertainty instead.",
+          "When refreshing recommendations after environment changes, do not ask baseline questions again. Use stored watering, repotting, soil, room, location, and home data as facts.",
+          "For recommendation refreshes, explain how the updated environment changes the care advice. If the photos are too old or insufficient for current visual condition, say that new photos would help rather than pretending the visual state changed.",
+          "For recommendation refreshes, classify semantic recommendation impact as none, minor, moderate, or major. Compare the meaning of current actions, urgency, and care direction, not prose wording.",
+          "recommendationImpact.changeSummary should be one short localized explanation of what changed or why recommendations remain the same.",
           "Do not invent rooms, cities, humidity, air conditioning, direct sun, or plant position. If environment data conflicts with photo evidence, mention the uncertainty and ask at most one high-impact clarification.",
           "Compare the detected species needs to the stored room conditions. If the room conditions already fit the plant, say to keep them unchanged instead of giving generic light advice.",
           "For Haworthia and similar succulents, wet soil and abrupt direct sun are usually more important risks than short-term dry soil; old damaged leaves may remain marked while new growth shows recovery.",
@@ -811,8 +835,10 @@ export async function POST(request: Request) {
           "Do not claim measured soil moisture, root health when roots are not visible, pests that are not clearly visible, or exact disease diagnoses without sufficient visual evidence.",
           "For watering, prefer nextAction check_soil over water unless dry soil is directly visible or user-provided context confirms dryness.",
           `User locale: ${locale}. Photo types in order: ${photoTypes.join(", ") || "unknown"}.`,
+          `Analysis mode: ${analysisMode}.`,
           `Current plant context, if this is a follow-up photo analysis: commonName="${currentCommonName || "unknown"}", scientificName="${currentScientificName || "unknown"}", detectedSpecies="${currentDetectedSpecies || "unknown"}", light="${currentLightCondition || "unknown"}".`,
           `Structured home and room context: ${environmentContext || "No structured home or room context was provided."}`,
+          `Previous analysis, if available: ${previousAnalysis || "No previous analysis was provided."}`,
           `Species care profiles: ${speciesProfilesPromptContext()}`
         ].join("\n")
       },
