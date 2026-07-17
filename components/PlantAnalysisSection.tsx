@@ -514,6 +514,9 @@ export function PlantAnalysisSection({
         {recommendationRefreshState?.status === "success" ? (
           <span className="rounded-full bg-[#eef5e8] px-3 py-1 text-xs font-extrabold text-[#355f3d]">{t("plantAnalysis.refreshSuccessBadge")}</span>
         ) : null}
+        {recommendationRefreshState?.status === "unchanged" ? (
+          <span className="rounded-full bg-[#eef5e8] px-3 py-1 text-xs font-extrabold text-[#355f3d]">{t("plantAnalysis.refreshUnchangedBadge")}</span>
+        ) : null}
       </div>
       {recommendationRefreshState?.status === "error" ? (
         <p className="mx-1 mt-2 rounded-[16px] bg-[#fff0e6] p-3 text-sm font-bold leading-5 text-[#8a5b24]">{recommendationRefreshState.error ?? t("plantAnalysis.refreshFailedInline")}</p>

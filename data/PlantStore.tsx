@@ -11,6 +11,7 @@ import { recommendationRevisionIsUnchanged, type RecommendationChangedContext, t
 import { PlantCreationError, plantCreationDiagnosticFromError, plantCreationError, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { calculateSoilCheckCareResolution } from "@/lib/soil-care";
 import { baselineMilestoneType, findExistingBaselineMilestone } from "@/lib/care-baseline";
+import { soilCheckActionKey } from "@/lib/care-action-idempotency";
 import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
 import type { HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, PlantRecommendationRevision, Room, SoilCheckResult } from "@/types/plant";
 import type { LegacyRoomImportGroup } from "@/lib/home-room-context";
@@ -97,7 +98,7 @@ type PlantStoreValue = PlantState & {
   ) => Promise<void>;
   deleteMilestone: (milestoneId: string) => Promise<void>;
   waterPlant: (plantId: string) => Promise<void>;
-  recordSoilChecked: (plantId: string, result: SoilCheckResult, note?: string) => Promise<void>;
+  recordSoilChecked: (plantId: string, result: SoilCheckResult, note?: string, actionSessionId?: string) => Promise<{ reused: boolean }>;
   saveBaselineHistory: (plantId: string, input: { kind: "watering" | "repotting"; eventDate?: string; unknown?: boolean }) => Promise<void>;
   savePlantAnalysis: (
     plantId: string,
@@ -168,6 +169,8 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
   const [user, setUser] = useState<User | null>(null);
   const [repositories, setRepositories] = useState<Repositories | null>(null);
   const attemptedLegacyClaimForUser = useRef<string | null>(null);
+  const soilCheckInFlightRef = useRef(new Map<string, Promise<{ reused: boolean }>>());
+  const completedSoilCheckKeysRef = useRef(new Set<string>());
 
   const resetToUnauthenticated = useCallback(() => {
     setState(emptyState);
@@ -909,11 +912,25 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
   );
 
   const recordSoilChecked = useCallback(
-    async (plantId: string, result: SoilCheckResult, note?: string) => {
+    async (plantId: string, result: SoilCheckResult, note?: string, actionSessionId?: string) => {
       if (!repositories) {
-        return;
+        throw new Error("Plant collection is not ready.");
       }
 
+      const actionKey = soilCheckActionKey({ plantId, result, actionSessionId });
+      if (completedSoilCheckKeysRef.current.has(actionKey)) {
+        console.info("care_action_idempotent_reuse", { plantId, action: "soil_checked", result, actionSessionId });
+        return { reused: true };
+      }
+
+      const inFlight = soilCheckInFlightRef.current.get(actionKey);
+      if (inFlight) {
+        console.info("care_action_in_flight_reuse", { plantId, action: "soil_checked", result, actionSessionId });
+        return inFlight;
+      }
+
+      const saveStartedAt = Date.now();
+      const savePromise = (async () => {
       const currentPlant = state.plants.find((plant) => plant.id === plantId);
       if (!currentPlant) {
         throw new Error("Plant not found.");
@@ -951,6 +968,14 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         type: "soil_checked",
         eventDate: toDateKey(new Date()),
         note
+      });
+      console.info("care_save_completed", {
+        plantId,
+        action: "soil_checked",
+        result,
+        actionSessionId,
+        durationMs: Date.now() - saveStartedAt,
+        reused: false
       });
       setState((current) => ({
         ...current,
@@ -990,6 +1015,26 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
             ]
           : current.hypothesisResolutions
       }));
+      completedSoilCheckKeysRef.current.add(actionKey);
+      return { reused: false };
+      })();
+
+      soilCheckInFlightRef.current.set(actionKey, savePromise);
+      try {
+        return await savePromise;
+      } catch (error) {
+        console.warn("care_save_failed", {
+          plantId,
+          action: "soil_checked",
+          result,
+          actionSessionId,
+          durationMs: Date.now() - saveStartedAt,
+          message: error instanceof Error ? error.message : "Unknown error"
+        });
+        throw error;
+      } finally {
+        soilCheckInFlightRef.current.delete(actionKey);
+      }
     },
     [repositories, state.hypothesisResolutions, state.milestones, state.plants]
   );

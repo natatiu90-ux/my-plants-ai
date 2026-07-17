@@ -47,19 +47,19 @@ function localized(value: { en?: string | null; ru?: string | null } | undefined
 function photoAssessmentChanges(condition: string | undefined, locale: "en" | "ru") {
   if (condition === "needs_attention") {
     return locale === "ru"
-      ? ["Появились признаки, которые стоит проверить.", "Я обновила ближайшие действия."]
-      : ["I found signs worth checking.", "I updated the next actions."];
+      ? ["На новых фото есть признаки, которые стоит проверить."]
+      : ["The new photos show signs worth checking."];
   }
 
   if (condition === "healthy") {
     return locale === "ru"
-      ? ["Срочных проблем на новых фото не видно.", "Эти фото станут базой для будущего сравнения."]
-      : ["No urgent issues are visible in the new photos.", "These photos will help future comparisons."];
+      ? ["Срочных проблем на новых фото не видно."]
+      : ["No urgent issues are visible in the new photos."];
   }
 
   return locale === "ru"
-    ? ["Я учла новые фото в текущих рекомендациях.", "Пока не заявляю улучшение или ухудшение без надёжного сравнения."]
-    : ["I folded the new photos into the current recommendations.", "I’m not claiming improvement or worsening without a reliable comparison."];
+    ? ["Фото сохранены. Для уверенного сравнения нужен похожий ракурс."]
+    : ["Photos saved. A similar angle would help compare changes with confidence."];
 }
 
 function analysisWithRecommendationRevision(analysis: PlantAnalysisRecord | undefined, revision: PlantRecommendationRevision | undefined): PlantAnalysisRecord | undefined {
@@ -732,7 +732,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         onResolveHypothesis={(hypothesis, status, result) => resolvePlantHypothesis(plant.id, hypothesis, status, result)}
         recommendationRefreshState={recommendationRefreshState}
       />
-      {currentRecommendationRevision?.reasonText && !recommendationsAreStale ? (
+      {currentRecommendationRevision?.reasonText && !recommendationsAreStale && recommendationRefreshState.status === "success" && currentRecommendationRevision.impactLevel && currentRecommendationRevision.impactLevel !== "none" ? (
         <section className="mt-4 rounded-[24px] bg-[#eef5e8] p-4 shadow-soft">
           <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.revisionNoteTitle")}</p>
           <p className="mt-1 text-sm font-extrabold leading-5 text-[#355f3d]">{currentRecommendationRevision.reasonText}</p>
@@ -773,18 +773,36 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           plant={plant}
           milestones={milestones}
           hypothesisResolutions={hypothesisResolutions}
-          onSoilChecked={async (result: SoilCheckResult, note) => {
+          onSoilChecked={async (result: SoilCheckResult, note, actionSessionId) => {
             if (isCompletingAction) {
               return;
             }
 
+            const startedAt = Date.now();
             setIsCompletingAction(true);
             try {
-              await recordSoilChecked(plant.id, result, note);
+              await recordSoilChecked(plant.id, result, note, actionSessionId);
+              console.info("care_action_saved", {
+                plantId: plant.id,
+                action: "soil_checked",
+                result,
+                durationMs: Date.now() - startedAt
+              });
+              setSheet(null);
+              setToast(t("checkSoil.saved"));
+            } catch (error) {
+              console.warn("care_action_save_failed", {
+                plantId: plant.id,
+                action: "soil_checked",
+                result,
+                message: error instanceof Error ? error.message : "Unknown error",
+                durationMs: Date.now() - startedAt
+              });
+              setToast(t("checkSoil.saveFailed"));
+              throw error;
             } finally {
               setIsCompletingAction(false);
             }
-            setToast(t("toast.soilChecked"));
           }}
         />
       ) : null}

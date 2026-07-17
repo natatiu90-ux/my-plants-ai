@@ -24,7 +24,7 @@ export function CheckSoilSheet({
 }: {
   onClose: () => void;
   onWatered: () => void;
-  onSoilChecked: (result: SoilCheckResult, note: string) => Promise<void>;
+  onSoilChecked: (result: SoilCheckResult, note: string, actionSessionId: string) => Promise<void>;
   isSaving?: boolean;
   plant: Plant;
   milestones: PlantMilestone[];
@@ -32,7 +32,9 @@ export function CheckSoilSheet({
 }) {
   const { locale, t } = useI18n();
   const [choice, setChoice] = useState<SoilCheckResult | null>(null);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const closeRef = useRef<HTMLButtonElement>(null);
+  const actionSessionIdRef = useRef(`soil-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -53,12 +55,20 @@ export function CheckSoilSheet({
   };
 
   const choose = async (nextChoice: SoilCheckResult) => {
-    if (isSaving) {
+    if (isSaving || saveState !== "idle") {
       return;
     }
     setChoice(nextChoice);
-    await onSoilChecked(nextChoice, messageForChoice(nextChoice));
+    setSaveState("saving");
+    try {
+      await onSoilChecked(nextChoice, messageForChoice(nextChoice), actionSessionIdRef.current);
+      setSaveState("saved");
+    } catch (error) {
+      setSaveState("idle");
+      throw error;
+    }
   };
+  const controlsDisabled = isSaving || saveState !== "idle";
 
   return (
     <div className="fixed inset-0 z-30 flex items-end justify-center bg-[#1c1c1e]/20 px-4 pb-4 backdrop-blur-[2px] sm:items-center sm:pb-0">
@@ -73,7 +83,7 @@ export function CheckSoilSheet({
             <button
               type="button"
               onClick={() => setChoice(null)}
-              disabled={isSaving}
+              disabled={controlsDisabled}
               aria-label={t("settings.back")}
               className="flex size-11 items-center justify-center rounded-2xl bg-white text-[#7d776b] shadow-[0_1px_8px_rgba(0,0,0,0.06)] disabled:opacity-50"
             >
@@ -89,7 +99,7 @@ export function CheckSoilSheet({
             ref={closeRef}
             type="button"
             onClick={onClose}
-            disabled={isSaving}
+            disabled={controlsDisabled}
             aria-label={t("settings.close")}
             className="flex size-11 items-center justify-center rounded-2xl bg-white text-[#7d776b] shadow-[0_1px_8px_rgba(0,0,0,0.06)] disabled:opacity-50"
           >
@@ -104,7 +114,7 @@ export function CheckSoilSheet({
                 key={option.value}
                 type="button"
                 onClick={() => choose(option.value)}
-                disabled={isSaving}
+                disabled={controlsDisabled}
                 className="min-h-[56px] rounded-[20px] bg-white/75 px-4 text-left text-[15px] font-extrabold text-[#4f4940] shadow-[0_1px_6px_rgba(0,0,0,0.04)] disabled:opacity-60"
               >
                 {t(option.labelKey)}
@@ -123,12 +133,12 @@ export function CheckSoilSheet({
                 <button
                   type="button"
                   onClick={onWatered}
-                  disabled={isSaving}
+                  disabled={controlsDisabled}
                   className="min-h-12 rounded-[18px] bg-gradient-to-br from-[#92cc90] to-[#6ba369] px-4 text-sm font-extrabold text-white shadow-fab disabled:opacity-60"
                 >
                   {t("checkSoil.iWatered")}
                 </button>
-                <button type="button" onClick={onClose} disabled={isSaving} className="min-h-12 rounded-[18px] px-4 text-sm font-extrabold text-[#777167] disabled:opacity-50">
+                <button type="button" onClick={onClose} disabled={controlsDisabled} className="min-h-12 rounded-[18px] px-4 text-sm font-extrabold text-[#777167] disabled:opacity-50">
                   {t("checkSoil.notNow")}
                 </button>
               </div>
@@ -136,7 +146,7 @@ export function CheckSoilSheet({
               <button
                 type="button"
                 onClick={onClose}
-                disabled={isSaving}
+                disabled={controlsDisabled}
                 className="mt-4 min-h-12 w-full rounded-[18px] bg-white px-4 text-sm font-extrabold text-[#5f594f] shadow-[0_1px_8px_rgba(0,0,0,0.06)] disabled:opacity-50"
               >
                 {t("checkSoil.gotIt")}
@@ -146,7 +156,7 @@ export function CheckSoilSheet({
         ) : null}
 
         {choice === "slightly_damp" ? (
-          <ResultMessage message={resolution?.message[locale] ?? ""} buttonLabel={t("checkSoil.gotIt")} onClose={onClose} disabled={isSaving} />
+          <ResultMessage message={resolution?.message[locale] ?? ""} buttonLabel={saveState === "saving" ? t("checkSoil.saving") : saveState === "saved" ? t("checkSoil.saved") : t("checkSoil.gotIt")} onClose={onClose} disabled={controlsDisabled} />
         ) : null}
 
         {choice === "very_wet" ? (
@@ -155,7 +165,7 @@ export function CheckSoilSheet({
             <button
               type="button"
               onClick={onClose}
-              disabled={isSaving}
+              disabled={controlsDisabled}
               className="mt-4 min-h-12 w-full rounded-[18px] bg-white px-4 text-sm font-extrabold text-[#5f594f] shadow-[0_1px_8px_rgba(0,0,0,0.06)] disabled:opacity-50"
             >
               {t("checkSoil.gotIt")}
@@ -164,7 +174,7 @@ export function CheckSoilSheet({
         ) : null}
 
         {choice === "not_sure" ? (
-          <ResultMessage message={resolution?.message[locale] ?? ""} buttonLabel={t("checkSoil.backToOptions")} onClose={() => setChoice(null)} disabled={isSaving} />
+          <ResultMessage message={resolution?.message[locale] ?? ""} buttonLabel={saveState === "saving" ? t("checkSoil.saving") : saveState === "saved" ? t("checkSoil.saved") : t("checkSoil.backToOptions")} onClose={() => setChoice(null)} disabled={controlsDisabled} />
         ) : null}
       </div>
     </div>
