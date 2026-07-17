@@ -1,10 +1,14 @@
 "use client";
 
 import { supabase } from "@/lib/supabase/client";
+import { derivePushReminderState, type PushReminderState } from "@/lib/push-state";
 
-type NotificationSupport =
-  | { supported: true; permission: NotificationPermission; subscribed: boolean }
-  | { supported: false; permission: "unsupported"; subscribed: false };
+type NotificationSupport = {
+  supported: boolean;
+  permission: NotificationPermission | "unsupported";
+  subscribed: boolean;
+  state: PushReminderState;
+};
 
 export type PushSetupStep =
   | "idle"
@@ -21,12 +25,20 @@ export type PushSetupStep =
 
 export type PushDiagnostics = {
   isStandalone: boolean;
+  isLikelyIos: boolean;
+  isSecureContext: boolean;
   serviceWorkerSupported: boolean;
   serviceWorkerState: string;
+  serviceWorkerReady: boolean;
   notificationApiSupported: boolean;
   notificationPermission: NotificationPermission | "unsupported";
   pushManagerSupported: boolean;
   vapidPublicKeyPresent: boolean;
+  missingConfig: string[];
+  browserSubscriptionExists: boolean;
+  subscriptionPersisted: boolean;
+  careNotificationsEnabled: boolean;
+  reminderState: PushReminderState;
   currentStep: PushSetupStep;
   errorName?: string;
   errorMessage?: string;
@@ -42,7 +54,8 @@ export class PushSetupError extends Error {
       | "vapid_public_key_missing"
       | "notification_permission_denied"
       | "push_subscription_failed"
-      | "subscription_save_failed",
+      | "subscription_save_failed"
+      | "test_notification_failed",
     message: string,
     public step: PushSetupStep,
     public apiStatus?: number
@@ -58,27 +71,89 @@ export function isStandalonePwa() {
   return window.matchMedia("(display-mode: standalone)").matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
 }
 
-function isLikelyIos() {
+export function isLikelyIosPushBrowser() {
   return /iPad|iPhone|iPod/.test(navigator.userAgent) || navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+}
+
+function endpointSuffix(endpoint?: string | null) {
+  if (!endpoint) return null;
+  return endpoint.slice(-12);
+}
+
+async function serviceWorkerReadyWithin(timeoutMs: number) {
+  if (!("serviceWorker" in navigator)) {
+    return null;
+  }
+  return Promise.race<ServiceWorkerRegistration | null>([
+    navigator.serviceWorker.ready,
+    new Promise<ServiceWorkerRegistration | null>((resolve) => window.setTimeout(() => resolve(null), timeoutMs))
+  ]).catch(() => null);
 }
 
 export async function collectPushDiagnostics(currentStep: PushSetupStep = "idle", latestApiStatus?: number): Promise<PushDiagnostics> {
   const serviceWorkerSupported = "serviceWorker" in navigator;
   const registration = serviceWorkerSupported ? await navigator.serviceWorker.getRegistration().catch(() => undefined) : undefined;
+  const readyRegistration = serviceWorkerSupported ? await serviceWorkerReadyWithin(1500) : null;
+  const subscription = await (readyRegistration ?? registration)?.pushManager.getSubscription().catch(() => null);
   const publicKeyStatus = await fetch("/api/push/vapid-public-key")
-    .then(async (response) => ({ status: response.status, payload: await response.json().catch(() => ({})) as { publicKey?: string } }))
-    .catch(() => ({ status: undefined, payload: {} as { publicKey?: string } }));
+    .then(async (response) => ({
+      status: response.status,
+      payload: await response.json().catch(() => ({})) as { publicKey?: string; missingConfig?: string[] }
+    }))
+    .catch(() => ({ status: undefined, payload: {} as { publicKey?: string; missingConfig?: string[] } }));
+  const persistedStatus = subscription
+    ? await getPersistedPushStatus(subscription.endpoint).catch(() => ({
+      response: null,
+      subscriptionPersisted: false,
+      careNotificationsEnabled: false,
+      missingConfig: [] as string[]
+    }))
+    : {
+      response: null,
+      subscriptionPersisted: false,
+      careNotificationsEnabled: false,
+      missingConfig: [] as string[]
+    };
+  const missingConfig = Array.from(new Set([
+    ...(Array.isArray(publicKeyStatus.payload.missingConfig) ? publicKeyStatus.payload.missingConfig : []),
+    ...persistedStatus.missingConfig
+  ]));
+  const notificationPermission = "Notification" in window ? Notification.permission : "unsupported";
+  const browserSubscriptionExists = Boolean(subscription);
+  const subscriptionPersisted = Boolean(persistedStatus.subscriptionPersisted);
+  const reminderState = derivePushReminderState({
+    isSecureContext: window.isSecureContext,
+    serviceWorkerSupported,
+    notificationApiSupported: "Notification" in window,
+    pushManagerSupported: "PushManager" in window,
+    isLikelyIos: isLikelyIosPushBrowser(),
+    isStandalone: isStandalonePwa(),
+    permission: notificationPermission,
+    serviceWorkerReady: Boolean(readyRegistration),
+    browserSubscriptionExists,
+    subscriptionPersisted,
+    vapidPublicKeyPresent: Boolean(publicKeyStatus.payload.publicKey),
+    deliveryConfigReady: missingConfig.length === 0
+  });
 
   return {
     isStandalone: isStandalonePwa(),
+    isLikelyIos: isLikelyIosPushBrowser(),
+    isSecureContext: window.isSecureContext,
     serviceWorkerSupported,
-    serviceWorkerState: registration?.active?.state ?? registration?.installing?.state ?? registration?.waiting?.state ?? "none",
+    serviceWorkerState: readyRegistration?.active?.state ?? registration?.active?.state ?? registration?.installing?.state ?? registration?.waiting?.state ?? "none",
+    serviceWorkerReady: Boolean(readyRegistration),
     notificationApiSupported: "Notification" in window,
-    notificationPermission: "Notification" in window ? Notification.permission : "unsupported",
+    notificationPermission,
     pushManagerSupported: "PushManager" in window,
     vapidPublicKeyPresent: Boolean(publicKeyStatus.payload.publicKey),
+    missingConfig,
+    browserSubscriptionExists,
+    subscriptionPersisted,
+    careNotificationsEnabled: Boolean(persistedStatus.careNotificationsEnabled),
+    reminderState,
     currentStep,
-    latestApiStatus: latestApiStatus ?? publicKeyStatus.status
+    latestApiStatus: latestApiStatus ?? persistedStatus.response?.status ?? publicKeyStatus.status
   };
 }
 
@@ -105,6 +180,29 @@ async function getSessionToken() {
   return data.session.access_token;
 }
 
+async function getPersistedPushStatus(endpoint?: string | null) {
+  const token = await getSessionToken();
+  const response = await fetch("/api/push/status", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ endpoint: endpoint ?? null })
+  });
+  const payload = await response.json().catch(() => ({})) as {
+    subscriptionPersisted?: boolean;
+    careNotificationsEnabled?: boolean;
+    missingConfig?: string[];
+  };
+  return {
+    response,
+    subscriptionPersisted: Boolean(payload.subscriptionPersisted),
+    careNotificationsEnabled: Boolean(payload.careNotificationsEnabled),
+    missingConfig: Array.isArray(payload.missingConfig) ? payload.missingConfig : []
+  };
+}
+
 async function getServiceWorkerRegistration(onDiagnostics?: DiagnosticsListener) {
   if (!("serviceWorker" in navigator)) {
     throw new PushSetupError("notifications_not_supported", "Service workers are not supported.", "service_worker_registration");
@@ -121,29 +219,73 @@ async function getServiceWorkerRegistration(onDiagnostics?: DiagnosticsListener)
 }
 
 export async function getNotificationSupport(): Promise<NotificationSupport> {
-  if (!("Notification" in window) || !("PushManager" in window) || !("serviceWorker" in navigator)) {
-    return { supported: false, permission: "unsupported", subscribed: false };
+  const base = {
+    isSecureContext: window.isSecureContext,
+    serviceWorkerSupported: "serviceWorker" in navigator,
+    notificationApiSupported: "Notification" in window,
+    pushManagerSupported: "PushManager" in window,
+    isLikelyIos: isLikelyIosPushBrowser(),
+    isStandalone: isStandalonePwa()
+  };
+
+  if (!base.isSecureContext || !base.notificationApiSupported || !base.pushManagerSupported || !base.serviceWorkerSupported) {
+    return { supported: false, permission: "unsupported", subscribed: false, state: "unsupported" };
   }
 
-  const registration = await navigator.serviceWorker.ready.catch(() => null);
+  if (base.isLikelyIos && !base.isStandalone) {
+    return { supported: false, permission: Notification.permission, subscribed: false, state: "requires_install" };
+  }
+
+  const registration = await navigator.serviceWorker.getRegistration().catch(() => null);
   const subscription = await registration?.pushManager.getSubscription();
-  return { supported: true, permission: Notification.permission, subscribed: Boolean(subscription) };
+  const persistedStatus = subscription
+    ? await getPersistedPushStatus(subscription.endpoint).catch(() => ({
+      subscriptionPersisted: false,
+      careNotificationsEnabled: false
+    }))
+    : { subscriptionPersisted: false, careNotificationsEnabled: false };
+  const publicKeyResponse = await fetch("/api/push/vapid-public-key").catch(() => null);
+  const publicKeyPayload = await publicKeyResponse?.json().catch(() => ({})) as { publicKey?: string; missingConfig?: string[] } | undefined;
+  const missingConfig = Array.isArray(publicKeyPayload?.missingConfig) ? publicKeyPayload.missingConfig : [];
+  const state = derivePushReminderState({
+    ...base,
+    permission: Notification.permission,
+    serviceWorkerReady: Boolean(registration?.active),
+    browserSubscriptionExists: Boolean(subscription),
+    subscriptionPersisted: Boolean(persistedStatus.subscriptionPersisted && persistedStatus.careNotificationsEnabled),
+    vapidPublicKeyPresent: Boolean(publicKeyPayload?.publicKey),
+    deliveryConfigReady: missingConfig.length === 0
+  });
+  return {
+    supported: true,
+    permission: Notification.permission,
+    subscribed: state === "enabled",
+    state
+  };
 }
 
 export async function subscribeToCarePush(locale: string, onDiagnostics?: DiagnosticsListener) {
   notifyDiagnostics(onDiagnostics, await collectPushDiagnostics("standalone_check"));
-  if (isLikelyIos() && !isStandalonePwa()) {
+  console.info("push_support_check", {
+    isSecureContext: window.isSecureContext,
+    serviceWorkerSupported: "serviceWorker" in navigator,
+    notificationApiSupported: "Notification" in window,
+    pushManagerSupported: "PushManager" in window,
+    isLikelyIos: isLikelyIosPushBrowser(),
+    isStandalone: isStandalonePwa()
+  });
+  if (isLikelyIosPushBrowser() && !isStandalonePwa()) {
     throw new PushSetupError("open_installed_pwa", "Open the installed Home Screen app.", "standalone_check");
   }
 
-  if (!("Notification" in window) || !("PushManager" in window)) {
+  if (!window.isSecureContext || !("Notification" in window) || !("PushManager" in window) || !("serviceWorker" in navigator)) {
     throw new PushSetupError("notifications_not_supported", "Notifications are not supported.", "standalone_check");
   }
 
-  console.info("notification_opt_in_shown");
+  console.info("notification_permission_before", { permission: Notification.permission });
   notifyDiagnostics(onDiagnostics, await collectPushDiagnostics("notification_permission"));
   const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
-  console.info("notification_permission_result", { permission });
+  console.info("notification_permission_after", { permission });
   notifyDiagnostics(onDiagnostics, await collectPushDiagnostics("notification_permission"));
   if (permission !== "granted") {
     throw new PushSetupError("notification_permission_denied", "Permission was denied.", "notification_permission");
@@ -154,14 +296,17 @@ export async function subscribeToCarePush(locale: string, onDiagnostics?: Diagno
     getSessionToken(),
     getServiceWorkerRegistration(onDiagnostics)
   ]);
-  const { publicKey } = await publicKeyResponse.json().catch(() => ({})) as { publicKey?: string };
+  const publicKeyPayload = await publicKeyResponse.json().catch(() => ({})) as { publicKey?: string; missingConfig?: string[] };
+  const { publicKey } = publicKeyPayload;
   notifyDiagnostics(onDiagnostics, await collectPushDiagnostics("vapid_public_key", publicKeyResponse.status));
-  if (!publicKey) {
+  if (!publicKey || !publicKeyResponse.ok) {
+    console.info("push_config_missing", { missing: publicKeyPayload.missingConfig ?? ["NEXT_PUBLIC_VAPID_PUBLIC_KEY"] });
     throw new PushSetupError("vapid_public_key_missing", "Public notification key is missing.", "vapid_public_key", publicKeyResponse.status);
   }
 
   const existingSubscription = await registration.pushManager.getSubscription();
   let subscription = existingSubscription;
+  console.info("push_existing_subscription_checked", { exists: Boolean(existingSubscription), endpointSuffix: endpointSuffix(existingSubscription?.endpoint) });
   if (!subscription) {
     try {
       notifyDiagnostics(onDiagnostics, await collectPushDiagnostics("push_subscribe"));
@@ -169,7 +314,13 @@ export async function subscribeToCarePush(locale: string, onDiagnostics?: Diagno
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(publicKey)
       });
+      console.info("push_subscription_created", { endpointSuffix: endpointSuffix(subscription.endpoint) });
     } catch (error) {
+      console.info("push_subscription_failed", {
+        stage: "push_subscribe",
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        errorMessage: error instanceof Error ? error.message : "Unknown error"
+      });
       throw new PushSetupError("push_subscription_failed", error instanceof Error ? error.message : "Push subscription failed.", "push_subscribe");
     }
   }
@@ -187,12 +338,17 @@ export async function subscribeToCarePush(locale: string, onDiagnostics?: Diagno
     })
   });
   notifyDiagnostics(onDiagnostics, await collectPushDiagnostics("post_subscription", response.status));
+  const savePayload = await response.json().catch(() => ({})) as { subscriptionPersisted?: boolean; missingConfig?: string[]; error?: string };
   if (!response.ok) {
-    console.info("push_subscription_failed", { status: response.status });
+    console.info("push_subscription_failed", { stage: "post_subscription", status: response.status, error: savePayload.error, missingConfig: savePayload.missingConfig });
+    throw new PushSetupError("subscription_save_failed", "Subscription could not be saved.", "post_subscription", response.status);
+  }
+  if (!savePayload.subscriptionPersisted) {
+    console.info("push_subscription_failed", { stage: "post_subscription", status: response.status, error: "subscription_not_persisted" });
     throw new PushSetupError("subscription_save_failed", "Subscription could not be saved.", "post_subscription", response.status);
   }
 
-  console.info("push_subscription_created");
+  console.info("push_subscription_persisted", { endpointSuffix: endpointSuffix(subscription.endpoint) });
   notifyDiagnostics(onDiagnostics, await collectPushDiagnostics("completed", response.status));
   return subscription;
 }
@@ -252,7 +408,9 @@ export async function sendTestCareNotification(locale: string) {
     },
     body: JSON.stringify({ locale })
   });
+  const payload = await response.json().catch(() => ({})) as { error?: string; missingConfig?: string[] };
   if (!response.ok) {
-    throw new Error("push_test_failed");
+    console.info("push_test_failed", { status: response.status, error: payload.error, missingConfig: payload.missingConfig });
+    throw new PushSetupError("test_notification_failed", payload.error ?? "push_test_failed", "completed", response.status);
   }
 }

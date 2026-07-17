@@ -13,6 +13,29 @@ export function getVapidPublicKey() {
   return process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? process.env.VAPID_PUBLIC_KEY ?? "";
 }
 
+export function getPushConfigDiagnostics() {
+  const missing: string[] = [];
+  if (!getVapidPublicKey()) {
+    missing.push("NEXT_PUBLIC_VAPID_PUBLIC_KEY");
+  }
+  if (!process.env.VAPID_PRIVATE_KEY) {
+    missing.push("VAPID_PRIVATE_KEY");
+  }
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    missing.push("NEXT_PUBLIC_SUPABASE_URL");
+  }
+  if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    missing.push("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  }
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  }
+  return {
+    ok: missing.length === 0,
+    missing
+  };
+}
+
 export function configureWebPush() {
   if (configured) {
     return;

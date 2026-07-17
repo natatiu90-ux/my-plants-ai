@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { sendCarePush, pushErrorCode, isPermanentPushError } from "@/lib/push-server";
+import { getPushConfigDiagnostics, sendCarePush, pushErrorCode, isPermanentPushError } from "@/lib/push-server";
 import { createSupabaseAdminClient, getUserFromRequest } from "@/lib/supabase/server";
 
 type PushSubscriptionRow = {
@@ -15,6 +15,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
+  const config = getPushConfigDiagnostics();
+  if (!config.ok) {
+    console.info("push_config_missing", { missing: config.missing });
+    return NextResponse.json({ ok: false, error: "push_config_missing", missingConfig: config.missing }, { status: 503 });
+  }
+
   const body = await request.json().catch(() => null) as { locale?: string } | null;
   const supabase = createSupabaseAdminClient();
   const { data: subscriptions, error } = await supabase
@@ -25,6 +31,10 @@ export async function POST(request: Request) {
 
   if (error) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  }
+  if (!subscriptions?.length) {
+    console.info("push_test_rejected", { userId: user.id, reason: "no_active_subscription" });
+    return NextResponse.json({ ok: false, error: "no_active_subscription" }, { status: 409 });
   }
 
   const locale = body?.locale?.startsWith("ru") ? "ru" : "en";
@@ -56,5 +66,12 @@ export async function POST(request: Request) {
     })
   );
 
-  return NextResponse.json({ ok: true, sent: results.filter((result) => result.status === "fulfilled").length });
+  const sent = results.filter((result) => result.status === "fulfilled").length;
+  const failed = results.length - sent;
+  if (sent === 0) {
+    console.info("push_test_rejected", { userId: user.id, reason: "delivery_failed", failed });
+    return NextResponse.json({ ok: false, error: "delivery_failed", sent, failed }, { status: 502 });
+  }
+
+  return NextResponse.json({ ok: true, sent, failed });
 }

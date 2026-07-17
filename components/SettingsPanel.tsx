@@ -16,6 +16,7 @@ import {
   unsubscribeFromCarePush,
   type PushDiagnostics
 } from "@/lib/push-client";
+import type { PushReminderState } from "@/lib/push-state";
 import { AuthInput } from "./AuthInput";
 import { HomeRoomSettings } from "./HomeRoomSettings";
 import { LanguageSwitcher } from "./LanguageSwitcher";
@@ -26,6 +27,7 @@ export function SettingsPanel() {
   const [isPushSupported, setIsPushSupported] = useState(true);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("default");
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [pushState, setPushState] = useState<PushReminderState>("not_requested");
   const [preferredTime, setPreferredTime] = useState("09:00");
   const [quietHoursStart, setQuietHoursStart] = useState("22:00");
   const [quietHoursEnd, setQuietHoursEnd] = useState("08:00");
@@ -41,6 +43,8 @@ export function SettingsPanel() {
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
   const isPermissionGranted = notificationPermission === "granted";
   const isPermissionDenied = notificationPermission === "denied";
+  const isInstallRequired = pushState === "requires_install";
+  const isUnsupported = pushState === "unsupported";
   const showPushDiagnostics = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_SHOW_PUSH_DIAGNOSTICS === "true";
   const permissionLabel = {
     default: t("notifications.permission.default"),
@@ -51,9 +55,10 @@ export function SettingsPanel() {
 
   const refreshNotificationSupport = async () => {
     const support = await getNotificationSupport();
-    setIsPushSupported(support.supported);
+    setIsPushSupported(support.supported || support.state === "requires_install");
     setNotificationPermission(support.permission);
     setNotificationsEnabled(support.subscribed);
+    setPushState(support.state);
     setPushDiagnostics(await collectPushDiagnostics());
   };
 
@@ -70,7 +75,8 @@ export function SettingsPanel() {
         vapid_public_key_missing: "notifications.error.publicKey",
         notification_permission_denied: "notifications.error.permissionDenied",
         push_subscription_failed: "notifications.error.pushSubscribe",
-        subscription_save_failed: "notifications.error.subscriptionSave"
+        subscription_save_failed: "notifications.error.subscriptionSave",
+        test_notification_failed: "notifications.error.testFailed"
       }[error.code] as Parameters<typeof t>[0];
       return t(key);
     }
@@ -81,6 +87,7 @@ export function SettingsPanel() {
     if (isNotificationSaving) return;
     setIsNotificationSaving(true);
     setNotificationMessage(null);
+    setPushState("requesting");
     try {
       setPushDiagnostics(await collectPushDiagnostics("button_click"));
       await subscribeToCarePush(locale, setPushDiagnostics);
@@ -97,6 +104,7 @@ export function SettingsPanel() {
       };
       console.info("push_subscription_failed", safeError);
       setPushDiagnostics((current) => current ? { ...current, ...safeError } : null);
+      setPushState(error instanceof PushSetupError && error.code === "open_installed_pwa" ? "requires_install" : error instanceof PushSetupError && error.code === "notification_permission_denied" ? "denied" : "error");
       setNotificationMessage(notificationErrorMessage(error));
     } finally {
       setIsNotificationSaving(false);
@@ -110,6 +118,7 @@ export function SettingsPanel() {
     try {
       await unsubscribeFromCarePush();
       await refreshNotificationSupport();
+      setPushState("not_requested");
       setNotificationMessage(t("notifications.disabledMessage"));
     } catch (error) {
       console.info("push_unsubscribe_failed", { message: error instanceof Error ? error.message : "Unknown error" });
@@ -142,12 +151,28 @@ export function SettingsPanel() {
       await sendTestCareNotification(locale);
       setNotificationMessage(t("notifications.testSent"));
     } catch (error) {
-      console.info("push_test_failed", { message: error instanceof Error ? error.message : "Unknown error" });
-      setNotificationMessage(t("notifications.failedMessage"));
+      console.info("push_test_failed", {
+        message: error instanceof Error ? error.message : "Unknown error",
+        status: error instanceof PushSetupError ? error.apiStatus : undefined
+      });
+      setNotificationMessage(notificationErrorMessage(error));
     } finally {
       setIsNotificationSaving(false);
     }
   };
+
+  const notificationButtonLabel = (() => {
+    if (!isNotificationSaving) {
+      return notificationsEnabled ? t("notifications.disable") : t("notifications.enable");
+    }
+    const step = pushDiagnostics?.currentStep;
+    if (step === "standalone_check") return t("notifications.progress.support");
+    if (step === "notification_permission") return t("notifications.progress.permission");
+    if (step === "service_worker_registration" || step === "service_worker_ready") return t("notifications.progress.serviceWorker");
+    if (step === "push_subscribe" || step === "post_subscription") return t("notifications.progress.subscribe");
+    if (step === "save_preferences") return t("notifications.progress.save");
+    return t("notifications.progress.support");
+  })();
 
   const savePassword = async () => {
     if (isPasswordSaving) return;
@@ -286,8 +311,13 @@ export function SettingsPanel() {
           </div>
         </div>
 
-        {!isPushSupported ? (
+        {isUnsupported || !isPushSupported ? (
           <p className="mt-4 rounded-[20px] bg-white/75 p-3 text-sm font-bold leading-5 text-[#7a7166]">{t("notifications.unsupported")}</p>
+        ) : isInstallRequired ? (
+          <div className="mt-4 rounded-[20px] bg-white/75 p-3 text-sm font-bold leading-5 text-[#7a7166]">
+            <p>{t("notifications.requiresInstallTitle")}</p>
+            <p className="mt-2 text-[#4f4940]">{t("notifications.requiresInstallBody")}</p>
+          </div>
         ) : isPermissionDenied ? (
           <div className="mt-4 rounded-[20px] bg-white/75 p-3 text-sm font-bold leading-5 text-[#7a7166]">
             <p>{t("notifications.deniedMessage")}</p>
@@ -350,18 +380,16 @@ export function SettingsPanel() {
                   : "min-h-12 rounded-[20px] bg-[#2d7a4f] px-4 text-sm font-extrabold text-white shadow-[0_10px_24px_rgba(45,122,79,0.18)] disabled:opacity-60"
               }
             >
-              {notificationsEnabled ? t("notifications.disable") : t("notifications.enable")}
+              {notificationButtonLabel}
             </button>
-            {process.env.NODE_ENV !== "production" ? (
-              <button
-                type="button"
-                onClick={() => void sendTest()}
-                disabled={isNotificationSaving || !notificationsEnabled}
-                className="min-h-11 rounded-[18px] bg-white/75 px-4 text-sm font-extrabold text-[#7d776b] disabled:opacity-60"
-              >
-                {t("notifications.sendTest")}
-              </button>
-            ) : null}
+            <button
+              type="button"
+              onClick={() => void sendTest()}
+              disabled={isNotificationSaving || !notificationsEnabled}
+              className="min-h-11 rounded-[18px] bg-white/75 px-4 text-sm font-extrabold text-[#7d776b] disabled:opacity-60"
+            >
+              {t("notifications.sendTest")}
+            </button>
             {notificationMessage ? <p className="text-sm font-bold leading-5 text-[#6f675c]">{notificationMessage}</p> : null}
             {showPushDiagnostics && pushDiagnostics ? (
               <div className="rounded-[20px] bg-white/70 p-3 text-left">
@@ -369,10 +397,16 @@ export function SettingsPanel() {
                 <dl className="mt-2 grid grid-cols-[1.2fr_1fr] gap-x-3 gap-y-1 text-[11px] font-bold leading-4 text-[#6f675c]">
                   <dt>isStandalone</dt>
                   <dd>{String(pushDiagnostics.isStandalone)}</dd>
+                  <dt>isLikelyIos</dt>
+                  <dd>{String(pushDiagnostics.isLikelyIos)}</dd>
+                  <dt>isSecureContext</dt>
+                  <dd>{String(pushDiagnostics.isSecureContext)}</dd>
                   <dt>serviceWorkerSupported</dt>
                   <dd>{String(pushDiagnostics.serviceWorkerSupported)}</dd>
                   <dt>serviceWorkerState</dt>
                   <dd>{pushDiagnostics.serviceWorkerState}</dd>
+                  <dt>serviceWorkerReady</dt>
+                  <dd>{String(pushDiagnostics.serviceWorkerReady)}</dd>
                   <dt>notificationApiSupported</dt>
                   <dd>{String(pushDiagnostics.notificationApiSupported)}</dd>
                   <dt>Notification.permission</dt>
@@ -381,6 +415,16 @@ export function SettingsPanel() {
                   <dd>{String(pushDiagnostics.pushManagerSupported)}</dd>
                   <dt>vapidPublicKeyPresent</dt>
                   <dd>{String(pushDiagnostics.vapidPublicKeyPresent)}</dd>
+                  <dt>browserSubscriptionExists</dt>
+                  <dd>{String(pushDiagnostics.browserSubscriptionExists)}</dd>
+                  <dt>subscriptionPersisted</dt>
+                  <dd>{String(pushDiagnostics.subscriptionPersisted)}</dd>
+                  <dt>careNotificationsEnabled</dt>
+                  <dd>{String(pushDiagnostics.careNotificationsEnabled)}</dd>
+                  <dt>reminderState</dt>
+                  <dd>{pushDiagnostics.reminderState}</dd>
+                  <dt>missingConfig</dt>
+                  <dd className="break-words">{pushDiagnostics.missingConfig.join(", ") || "-"}</dd>
                   <dt>currentStep</dt>
                   <dd>{pushDiagnostics.currentStep}</dd>
                   <dt>errorName</dt>
