@@ -202,6 +202,7 @@ export class PlantRepository {
     lastWateredAt?: string;
     nextCheckAt?: string;
     careScheduleStatus?: CareScheduleStatus;
+    notificationEnabled?: boolean;
   }) {
     await this.assertCurrentAuthenticatedUser("create_plant");
     const { data, error } = await this.supabase
@@ -220,7 +221,8 @@ export class PlantRepository {
         next_action: normalizeAction(input.nextAction),
         last_watered_at: input.lastWateredAt ? `${input.lastWateredAt}T12:00:00.000Z` : null,
         next_check_at: input.nextCheckAt ? `${input.nextCheckAt}T12:00:00.000Z` : null,
-        care_schedule_status: input.careScheduleStatus ?? "active"
+        care_schedule_status: input.careScheduleStatus ?? "active",
+        notification_enabled: input.notificationEnabled ?? false
       })
       .select("*")
       .single();

@@ -7,6 +7,7 @@ type NotificationSupport = {
   supported: boolean;
   permission: NotificationPermission | "unsupported";
   subscribed: boolean;
+  careNotificationsEnabled: boolean;
   state: PushReminderState;
 };
 
@@ -229,11 +230,11 @@ export async function getNotificationSupport(): Promise<NotificationSupport> {
   };
 
   if (!base.isSecureContext || !base.notificationApiSupported || !base.pushManagerSupported || !base.serviceWorkerSupported) {
-    return { supported: false, permission: "unsupported", subscribed: false, state: "unsupported" };
+    return { supported: false, permission: "unsupported", subscribed: false, careNotificationsEnabled: false, state: "unsupported" };
   }
 
   if (base.isLikelyIos && !base.isStandalone) {
-    return { supported: false, permission: Notification.permission, subscribed: false, state: "requires_install" };
+    return { supported: false, permission: Notification.permission, subscribed: false, careNotificationsEnabled: false, state: "requires_install" };
   }
 
   const registration = await navigator.serviceWorker.getRegistration().catch(() => null);
@@ -260,6 +261,7 @@ export async function getNotificationSupport(): Promise<NotificationSupport> {
     supported: true,
     permission: Notification.permission,
     subscribed: state === "enabled",
+    careNotificationsEnabled: Boolean(persistedStatus.careNotificationsEnabled),
     state
   };
 }

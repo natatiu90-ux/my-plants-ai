@@ -13,6 +13,8 @@ import { calculateSoilCheckCareResolution } from "@/lib/soil-care";
 import { baselineMilestoneType, findExistingBaselineMilestone } from "@/lib/care-baseline";
 import { soilCheckActionKey } from "@/lib/care-action-idempotency";
 import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
+import { shouldEnableRemindersForNewPlant } from "@/lib/new-plant-reminders";
+import { getNotificationSupport } from "@/lib/push-client";
 import type { HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, PlantRecommendationRevision, Room, SoilCheckResult } from "@/types/plant";
 import type { LegacyRoomImportGroup } from "@/lib/home-room-context";
 
@@ -618,6 +620,18 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           : input.lastWateredAt
             ? toDateKey(addDays(reminderStartDate, 4))
             : undefined;
+      const shouldEnablePlantReminders = await getNotificationSupport()
+        .then((support) =>
+          shouldEnableRemindersForNewPlant(support.state, {
+            careNotificationsEnabled: support.careNotificationsEnabled
+          })
+        )
+        .catch((reminderError) => {
+          console.info("new_plant_reminder_default_check_failed", {
+            message: reminderError instanceof Error ? reminderError.message : "Unknown error"
+          });
+          return false;
+        });
       let plant: Plant;
       try {
         plant = await repositories.plants.createPlant({
@@ -633,7 +647,8 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           nextAction: input.analysis?.nextAction ?? null,
           lastWateredAt: input.lastWateredAt,
           nextCheckAt,
-          careScheduleStatus: input.lastWateredAt ? "active" : "needs_first_check"
+          careScheduleStatus: input.lastWateredAt ? "active" : "needs_first_check",
+          notificationEnabled: false
         });
       } catch (error) {
         throw plantCreationError(error, { stage: "create_plant" });
@@ -694,6 +709,25 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
             rawResult: analysis.rawResult,
             model: analysis.model
           }));
+        }
+
+        if (shouldEnablePlantReminders) {
+          await repositories.plants.updateRecommendationState(plant.id, {
+            status: plant.status,
+            nextAction: plant.nextAction ?? null,
+            nextCheckAt: plant.nextCheckAt ?? null,
+            notificationEnabled: true
+          })
+            .then(() => {
+              plant = { ...plant, notificationEnabled: true };
+              console.info("new_plant_reminders_enabled", { plantId: plant.id });
+            })
+            .catch((reminderError) => {
+              console.info("new_plant_reminders_enable_failed", {
+                plantId: plant.id,
+                message: reminderError instanceof Error ? reminderError.message : "Unknown error"
+              });
+            });
         }
 
         const analysisRecord: PlantAnalysisRecord | null = input.analysis

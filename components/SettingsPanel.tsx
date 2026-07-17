@@ -66,6 +66,14 @@ export function SettingsPanel() {
     void refreshNotificationSupport();
   }, []);
 
+  useEffect(() => {
+    if (notificationMessage !== t("notifications.testSent")) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => setNotificationMessage(null), 3500);
+    return () => window.clearTimeout(timeoutId);
+  }, [notificationMessage, t]);
+
   const notificationErrorMessage = (error: unknown) => {
     if (error instanceof PushSetupError) {
       const key = {
@@ -334,63 +342,78 @@ export function SettingsPanel() {
 
             {notificationsEnabled && isPermissionGranted ? (
               <>
-                <label className="block min-w-0 text-sm font-extrabold text-[#4f4940]">
-                  {t("notifications.preferredTime")}
-                <input
-                  type="time"
-                  value={preferredTime}
-                  onChange={(event) => setPreferredTime(event.target.value)}
-                  onBlur={() => void saveNotificationSettings()}
-                  className="app-time-input mt-2 outline-none focus:ring-2 focus:ring-[#b7d8a8]"
-                />
-              </label>
+                <label className="block min-w-0 rounded-[20px] bg-white/70 p-3 shadow-[inset_0_0_0_1px_rgba(76,64,48,0.05)] focus-within:ring-2 focus-within:ring-[#b7d8a8]">
+                  <span className="block text-xs font-extrabold uppercase tracking-[0.08em] text-[#9a9286]">
+                    {t("notifications.preferredTime")}
+                  </span>
+                  <input
+                    type="time"
+                    value={preferredTime}
+                    onChange={(event) => setPreferredTime(event.target.value)}
+                    onBlur={() => void saveNotificationSettings()}
+                    className="mt-1 block min-h-9 w-full min-w-0 bg-transparent p-0 text-left text-lg font-extrabold leading-6 text-[#3f3b35] outline-none"
+                  />
+                </label>
 
                 <div className="grid min-w-0 grid-cols-[repeat(2,minmax(0,1fr))] gap-2">
-                  <label className="block min-w-0 text-sm font-extrabold text-[#4f4940]">
+                  <label className="block min-w-0 rounded-[20px] bg-white/70 p-3 shadow-[inset_0_0_0_1px_rgba(76,64,48,0.05)] focus-within:ring-2 focus-within:ring-[#b7d8a8]">
+                    <span className="block text-xs font-extrabold uppercase tracking-[0.08em] text-[#9a9286]">
                     {t("notifications.quietStart")}
+                    </span>
                     <input
                       type="time"
                       value={quietHoursStart}
                       onChange={(event) => setQuietHoursStart(event.target.value)}
                       onBlur={() => void saveNotificationSettings()}
-                      className="app-time-input mt-2 outline-none focus:ring-2 focus:ring-[#b7d8a8]"
+                      className="mt-1 block min-h-9 w-full min-w-0 bg-transparent p-0 text-left text-lg font-extrabold leading-6 text-[#3f3b35] outline-none"
                     />
                   </label>
-                  <label className="block min-w-0 text-sm font-extrabold text-[#4f4940]">
+                  <label className="block min-w-0 rounded-[20px] bg-white/70 p-3 shadow-[inset_0_0_0_1px_rgba(76,64,48,0.05)] focus-within:ring-2 focus-within:ring-[#b7d8a8]">
+                    <span className="block text-xs font-extrabold uppercase tracking-[0.08em] text-[#9a9286]">
                     {t("notifications.quietEnd")}
+                    </span>
                     <input
                       type="time"
                       value={quietHoursEnd}
                       onChange={(event) => setQuietHoursEnd(event.target.value)}
                       onBlur={() => void saveNotificationSettings()}
-                      className="app-time-input mt-2 outline-none focus:ring-2 focus:ring-[#b7d8a8]"
+                      className="mt-1 block min-h-9 w-full min-w-0 bg-transparent p-0 text-left text-lg font-extrabold leading-6 text-[#3f3b35] outline-none"
                     />
                   </label>
                 </div>
               </>
             ) : null}
 
-            <button
-              type="button"
-              onClick={() => void (notificationsEnabled ? disableNotifications() : enableNotifications())}
-              disabled={isNotificationSaving}
-              className={
-                notificationsEnabled
-                  ? "min-h-12 rounded-[20px] bg-white/75 px-4 text-sm font-extrabold text-[#7d776b] disabled:opacity-60"
-                  : "min-h-12 rounded-[20px] bg-[#2d7a4f] px-4 text-sm font-extrabold text-white shadow-[0_10px_24px_rgba(45,122,79,0.18)] disabled:opacity-60"
-              }
-            >
-              {notificationButtonLabel}
-            </button>
-            <button
-              type="button"
-              onClick={() => void sendTest()}
-              disabled={isNotificationSaving || !notificationsEnabled}
-              className="min-h-11 rounded-[18px] bg-white/75 px-4 text-sm font-extrabold text-[#7d776b] disabled:opacity-60"
-            >
-              {t("notifications.sendTest")}
-            </button>
-            {notificationMessage ? <p className="text-sm font-bold leading-5 text-[#6f675c]">{notificationMessage}</p> : null}
+            {notificationsEnabled ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void sendTest()}
+                  disabled={isNotificationSaving}
+                  className="min-h-12 rounded-[20px] bg-[#2d7a4f] px-4 text-sm font-extrabold text-white shadow-[0_10px_24px_rgba(45,122,79,0.18)] disabled:opacity-60"
+                >
+                  {t("notifications.sendTest")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void disableNotifications()}
+                  disabled={isNotificationSaving}
+                  className="min-h-11 rounded-[18px] bg-transparent px-4 text-sm font-extrabold text-[#9a5d4f] disabled:opacity-60"
+                >
+                  {isNotificationSaving ? notificationButtonLabel : t("notifications.disable")}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void enableNotifications()}
+                disabled={isNotificationSaving}
+                className="min-h-12 rounded-[20px] bg-[#2d7a4f] px-4 text-sm font-extrabold text-white shadow-[0_10px_24px_rgba(45,122,79,0.18)] disabled:opacity-60"
+              >
+                {notificationButtonLabel}
+              </button>
+            )}
+            {notificationMessage ? <p className="rounded-[16px] bg-white/70 px-3 py-2 text-sm font-bold leading-5 text-[#6f675c]">{notificationMessage}</p> : null}
             {showPushDiagnostics && pushDiagnostics ? (
               <div className="rounded-[20px] bg-white/70 p-3 text-left">
                 <p className="text-xs font-extrabold uppercase tracking-[0.08em] text-[#9a9286]">{t("notifications.diagnostics")}</p>
