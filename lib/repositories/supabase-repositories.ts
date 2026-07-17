@@ -734,7 +734,7 @@ export class HomeRepository {
     return mapHome(data);
   }
 
-  async createFirstHomeWithLegacyImport(input: Omit<HomeContext, "id" | "createdAt">, roomImports: { legacyKey: string | null; name: string; include: boolean }[]) {
+  async createFirstHomeWithLegacyImport(input: Omit<HomeContext, "id" | "createdAt">, roomImports: { legacyKey: string | null; name: string; include: boolean; plantIds: string[] }[]) {
     const { data, error } = await this.supabase.rpc("create_first_home_with_legacy_import", {
       home_input: {
         name: input.name,
@@ -748,18 +748,33 @@ export class HomeRepository {
       room_imports: roomImports
     });
 
-    assertNoError(error);
+    if (error) {
+      logSupabaseStageError("home_import_rpc_failed", "create_first_home_with_legacy_import", error, {
+        authenticatedUserIdSuffix: idSuffix(this.user.id),
+        roomImportCount: roomImports.length,
+        selectedPlantCount: roomImports.reduce((count, room) => count + room.plantIds.length, 0)
+      });
+      throw error;
+    }
     return String(data);
   }
 
-  async importLegacyPlantsToHome(homeId: string, roomImports: { legacyKey: string | null; name: string; include: boolean }[]) {
+  async importLegacyPlantsToHome(homeId: string, roomImports: { legacyKey: string | null; name: string; include: boolean; plantIds: string[] }[]) {
     const { data, error } = await this.supabase.rpc("import_legacy_plants_to_home", {
       target_home_id: homeId,
       home_input: {},
       room_imports: roomImports
     });
 
-    assertNoError(error);
+    if (error) {
+      logSupabaseStageError("home_import_rpc_failed", "import_legacy_plants_to_home", error, {
+        authenticatedUserIdSuffix: idSuffix(this.user.id),
+        targetHomeIdSuffix: idSuffix(homeId),
+        roomImportCount: roomImports.length,
+        selectedPlantCount: roomImports.reduce((count, room) => count + room.plantIds.length, 0)
+      });
+      throw error;
+    }
     return String(data);
   }
 

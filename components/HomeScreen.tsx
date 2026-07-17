@@ -1,19 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Leaf, Sprout } from "lucide-react";
+import { Leaf, Sprout, X } from "lucide-react";
 import Link from "next/link";
 import { AttentionBanner } from "./AttentionBanner";
 import { FloatingAddButton } from "./FloatingAddButton";
 import { HomeHeader } from "./HomeHeader";
+import { HomeRoomSettings } from "./HomeRoomSettings";
 import { PlantList } from "./PlantList";
 import { AddPlantWizard } from "./AddPlantWizard";
+import { Toast } from "./Toast";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
 import { hasUnfinishedAddPlantDraft } from "@/lib/add-plant-draft";
-import { noHomeSelectionId, plantsForHomeScope, resolveSelectedHomeId } from "@/lib/home-room-context";
+import { buildLegacyRoomImportGroups, noHomeSelectionId, plantsForHomeScope, resolveSelectedHomeId, shouldOfferExistingHomeImport } from "@/lib/home-room-context";
 import { deriveCareActionState, isDueCareActionState, type DerivedCareActionState } from "@/lib/plant-action-eligibility";
-import type { Plant } from "@/types/plant";
+import type { HomeContext, Plant } from "@/types/plant";
 
 const homeSetupDismissedKey = "my_plants_home_setup_dismissed_until";
 const selectedHomeStoragePrefix = "my_plants_selected_home_";
@@ -101,17 +103,68 @@ function HomeSetupCard({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
+function HomeMigrationCard({
+  onOpen,
+  plantCount,
+  roomCount
+}: {
+  onOpen: () => void;
+  plantCount: number;
+  roomCount: number;
+}) {
+  const { t } = useI18n();
+  return (
+    <section className="px-5 pt-5">
+      <div className="rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
+        <h2 className="font-rounded text-xl font-extrabold text-ink">{t("homeContext.finishSetupTitle")}</h2>
+        <p className="mt-2 text-sm font-bold leading-5 text-[#7a7166]">
+          {t("homeContext.finishSetupBody")
+            .replace("{plantCount}", String(plantCount))
+            .replace("{roomCount}", String(roomCount))}
+        </p>
+        <button
+          type="button"
+          onClick={onOpen}
+          className="mt-4 min-h-11 w-full rounded-[16px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]"
+        >
+          {t("homeContext.finishSetupAction")}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export function HomeScreen() {
   const { t } = useI18n();
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isHomeImportOpen, setIsHomeImportOpen] = useState(false);
+  const [homeImportMessage, setHomeImportMessage] = useState<string | null>(null);
   const [isHomeSetupDismissed, setIsHomeSetupDismissed] = useState(false);
   const [selectedHomeId, setSelectedHomeId] = useState<string | null>(null);
-  const { getPlantHypothesisResolutions, homes, plants: storedPlants, retry, secondaryDataReady, status, userId } = usePlantStore();
+  const { getPlantHypothesisResolutions, homes, plants: storedPlants, retry, rooms, secondaryDataReady, status, userId } = usePlantStore();
   const unassignedPlants = useMemo(() => storedPlants.filter((plant) => !plant.homeId), [storedPlants]);
+  const singleHomePlantCount = homes.length === 1 ? storedPlants.filter((plant) => plant.homeId === homes[0].id).length : 0;
+  const shouldPreferUnassignedScope = homes.length === 1 && singleHomePlantCount === 0 && unassignedPlants.length > 0;
+  const shouldShowMigrationCard = isReadyHomeImportCandidate({ homes, plants: storedPlants, homeId: homes[0]?.id });
+  const importSummary = useMemo(() => {
+    if (!unassignedPlants.length) {
+      return { rooms: [], plantsWithoutRoom: [] };
+    }
+    return buildLegacyRoomImportGroups({
+      plants: unassignedPlants,
+      rooms,
+      translateRoomKey: (roomKey) => t(roomKey as never)
+    });
+  }, [rooms, t, unassignedPlants]);
   const selectedScope = useMemo(() => {
     if (!homes.length) return null;
-    return resolveSelectedHomeId({ storedHomeId: selectedHomeId, homes, hasUnassignedPlants: Boolean(unassignedPlants.length) });
-  }, [homes, selectedHomeId, unassignedPlants.length]);
+    return resolveSelectedHomeId({
+      storedHomeId: selectedHomeId,
+      homes,
+      hasUnassignedPlants: Boolean(unassignedPlants.length),
+      shouldPreferUnassigned: shouldPreferUnassignedScope
+    });
+  }, [homes, selectedHomeId, shouldPreferUnassignedScope, unassignedPlants.length]);
   const scopedPlants = useMemo(() => {
     return plantsForHomeScope(storedPlants, selectedScope);
   }, [selectedScope, storedPlants]);
@@ -151,8 +204,15 @@ export function HomeScreen() {
     if (!userId || !homes.length) return;
     const key = `${selectedHomeStoragePrefix}${userId}`;
     const stored = window.localStorage.getItem(key);
-    setSelectedHomeId(resolveSelectedHomeId({ storedHomeId: stored, homes, hasUnassignedPlants: Boolean(unassignedPlants.length) }));
-  }, [homes, unassignedPlants.length, userId]);
+    setSelectedHomeId(
+      resolveSelectedHomeId({
+        storedHomeId: stored,
+        homes,
+        hasUnassignedPlants: Boolean(unassignedPlants.length),
+        shouldPreferUnassigned: shouldPreferUnassignedScope
+      })
+    );
+  }, [homes, shouldPreferUnassignedScope, unassignedPlants.length, userId]);
   const chooseHome = (homeId: string) => {
     setSelectedHomeId(homeId);
     if (userId) {
@@ -172,9 +232,17 @@ export function HomeScreen() {
     document.getElementById(`plant-card-${firstDuePlantId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
+  const completeHomeImport = (homeId: string) => {
+    chooseHome(homeId);
+    setIsHomeImportOpen(false);
+    setHomeImportMessage(t("homeContext.importSuccess"));
+    window.setTimeout(() => setHomeImportMessage(null), 2600);
+  };
+
   return (
     <main className="mx-auto min-h-screen w-full max-w-[430px] bg-cream">
       <HomeHeader />
+      {homeImportMessage ? <Toast message={homeImportMessage} /> : null}
       {isReady && homes.length > 1 ? (
         <section className="px-5 pt-4">
           <label className="block rounded-[22px] bg-[#fffaf3] p-3 shadow-soft">
@@ -190,9 +258,12 @@ export function HomeScreen() {
       ) : null}
       {isReady && homes.length === 1 && selectedScope === noHomeSelectionId && unassignedPlants.length ? (
         <section className="px-5 pt-4">
-          <button type="button" onClick={() => chooseHome(homes[0].id)} className="min-h-11 w-full rounded-[18px] bg-[#fffaf3] px-4 text-sm font-extrabold text-[#2d7a4f] shadow-soft">
-            {t("homeContext.showHome").replace("{home}", homes[0].name)}
-          </button>
+          <div className="rounded-[22px] bg-[#fffaf3] p-3 shadow-soft">
+            <p className="text-xs font-extrabold uppercase tracking-[0.08em] text-[#9a9286]">{t("homeContext.noHomeGroup")}</p>
+            <button type="button" onClick={() => chooseHome(homes[0].id)} className="mt-2 min-h-10 w-full rounded-[16px] bg-white/75 px-4 text-sm font-extrabold text-[#2d7a4f]">
+              {t("homeContext.showHome").replace("{home}", homes[0].name)}
+            </button>
+          </div>
         </section>
       ) : null}
       {isReady && plants.length > 0 ? <AttentionBanner count={attentionCount} onActivate={focusAttentionPlant} /> : null}
@@ -200,11 +271,42 @@ export function HomeScreen() {
         {status === "loading" ? <HomeSkeleton /> : null}
         {status === "error" ? <HomeErrorState onRetry={() => void retry()} /> : null}
         {isReady && !homes.length && !isHomeSetupDismissed ? <HomeSetupCard onDismiss={dismissHomeSetup} /> : null}
-        {isReady && plants.length === 0 ? <HomeEmptyState onAddPlant={() => setIsAddOpen(true)} /> : null}
+        {isReady && shouldShowMigrationCard ? (
+          <HomeMigrationCard
+            plantCount={unassignedPlants.length}
+            roomCount={importSummary.rooms.length}
+            onOpen={() => setIsHomeImportOpen(true)}
+          />
+        ) : null}
+        {isReady && plants.length === 0 && unassignedPlants.length === 0 ? <HomeEmptyState onAddPlant={() => setIsAddOpen(true)} /> : null}
         {isReady && plants.length > 0 ? <PlantList plants={plants} careActionByPlantId={careActionByPlantId} /> : null}
       </div>
       <FloatingAddButton onClick={() => setIsAddOpen(true)} />
       {isAddOpen ? <AddPlantWizard onClose={() => setIsAddOpen(false)} /> : null}
+      {isHomeImportOpen && homes[0] ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#1c1c1e]/20 px-4 pb-4 backdrop-blur-[2px] sm:items-center sm:pb-0">
+          <div role="dialog" aria-modal="true" className="max-h-[calc(100dvh-24px)] w-full max-w-[430px] overflow-y-auto rounded-[30px] bg-cream p-4 shadow-[0_20px_60px_rgba(0,0,0,0.18)]">
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsHomeImportOpen(false)}
+                aria-label={t("plantDetail.cancel")}
+                className="flex size-10 items-center justify-center rounded-2xl bg-white/85 text-[#6f675c]"
+              >
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <HomeRoomSettings
+              initialImportHomeId={homes[0].id}
+              onImported={completeHomeImport}
+            />
+          </div>
+        </div>
+      ) : null}
     </main>
   );
+}
+
+function isReadyHomeImportCandidate(input: { homes: HomeContext[]; plants: Plant[]; homeId: string | undefined }) {
+  return shouldOfferExistingHomeImport(input);
 }

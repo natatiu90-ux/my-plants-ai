@@ -16,6 +16,8 @@ declare
   created_room_id uuid;
   legacy_key text;
   room_name text;
+  plant_ids uuid[];
+  invalid_plant_count integer;
 begin
   if current_user_id is null then
     raise exception 'Authentication is required to import plants.'
@@ -70,6 +72,24 @@ begin
 
   for room_item in select * from jsonb_array_elements(coalesce(room_imports, '[]'::jsonb))
   loop
+    select coalesce(array_agg(value::uuid), array[]::uuid[]) into plant_ids
+    from jsonb_array_elements_text(coalesce(room_item->'plantIds', '[]'::jsonb)) as plant_id_values(value);
+
+    if cardinality(plant_ids) > 0 then
+      select count(*) into invalid_plant_count
+      from unnest(plant_ids) as requested_plant_id(id)
+      left join public.plants p
+        on p.id = requested_plant_id.id
+       and p.user_id = current_user_id
+       and p.home_id is null
+      where p.id is null;
+
+      if invalid_plant_count > 0 then
+        raise exception 'One or more selected plants are not eligible for import.'
+          using errcode = '42501';
+      end if;
+    end if;
+
     if coalesce((room_item->>'include')::boolean, true) then
       legacy_key := nullif(room_item->>'legacyKey', '');
       room_name := nullif(btrim(room_item->>'name'), '');
@@ -92,7 +112,15 @@ begin
         returning id into created_room_id;
       end if;
 
-      if legacy_key is not null then
+      if cardinality(plant_ids) > 0 then
+        update public.plants
+        set home_id = import_home_id,
+            room_id = created_room_id,
+            room_key = null
+        where user_id = current_user_id
+          and home_id is null
+          and id = any(plant_ids);
+      elsif legacy_key is not null then
         update public.plants
         set home_id = import_home_id,
             room_id = created_room_id,
@@ -126,3 +154,9 @@ set search_path = public
 as $$
   select public.import_legacy_plants_to_home(null, home_input, room_imports);
 $$;
+
+revoke all on function public.import_legacy_plants_to_home(uuid, jsonb, jsonb) from public;
+grant execute on function public.import_legacy_plants_to_home(uuid, jsonb, jsonb) to authenticated;
+
+revoke all on function public.create_first_home_with_legacy_import(jsonb, jsonb) from public;
+grant execute on function public.create_first_home_with_legacy_import(jsonb, jsonb) to authenticated;

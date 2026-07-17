@@ -74,7 +74,13 @@ function homeInputFromDraft(draft: Draft, defaultName: string): Omit<HomeContext
   };
 }
 
-export function HomeRoomSettings() {
+export function HomeRoomSettings({
+  initialImportHomeId,
+  onImported
+}: {
+  initialImportHomeId?: string;
+  onImported?: (homeId: string) => void;
+} = {}) {
   const { t } = useI18n();
   const { addHome, addRoom, createFirstHomeWithLegacyImport, deleteHome, deleteRoom, homes, importLegacyPlantsToHome, plants, rooms, updateHome, updateRoom } = usePlantStore();
   const [selectedHomeId, setSelectedHomeId] = useState<string | null>(null);
@@ -86,6 +92,9 @@ export function HomeRoomSettings() {
   const [locationQuery, setLocationQuery] = useState("");
   const [locationSuggestions, setLocationSuggestions] = useState<CitySuggestion[]>([]);
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [initialImportStarted, setInitialImportStarted] = useState(false);
   const selectedHome = selectedHomeId ? homes.find((home) => home.id === selectedHomeId) : null;
   const selectedRooms = selectedHome ? rooms.filter((room) => room.homeId === selectedHome.id) : [];
   const unassignedPlants = plants.filter((plant) => !plant.homeId);
@@ -108,7 +117,28 @@ export function HomeRoomSettings() {
     };
   }, [homeDraft.city, homeDraft.country, locationQuery]);
 
+  useEffect(() => {
+    if (!initialImportHomeId || initialImportStarted) {
+      return;
+    }
+    const home = homes.find((item) => item.id === initialImportHomeId);
+    if (!home) {
+      return;
+    }
+    const inferred = buildLegacyRoomImportGroups({
+      plants: unassignedPlants,
+      rooms,
+      translateRoomKey: (roomKey) => t(roomKey as never)
+    });
+    setSelectedHomeId(home.id);
+    setImportGroups(inferred.rooms);
+    setMode("import_existing");
+    setInitialImportStarted(true);
+  }, [homes, initialImportHomeId, initialImportStarted, rooms, t, unassignedPlants]);
+
   const startCreateHome = () => {
+    setSaveError(null);
+    setSuccessMessage(null);
     setHomeDraft(emptyHomeDraft);
     if (!homes.length && plants.length) {
       const inferred = buildLegacyRoomImportGroups({
@@ -125,6 +155,8 @@ export function HomeRoomSettings() {
 
   const startExistingHomeImport = () => {
     if (!selectedHome) return;
+    setSaveError(null);
+    setSuccessMessage(null);
     const inferred = buildLegacyRoomImportGroups({
       plants: unassignedPlants,
       rooms,
@@ -149,6 +181,8 @@ export function HomeRoomSettings() {
 
   const saveHome = async () => {
     if (isSaving) return;
+    setSaveError(null);
+    setSuccessMessage(null);
     setIsSaving(true);
     try {
       const input = homeInputFromDraft(homeDraft, t("homeContext.defaultHomeName"));
@@ -156,10 +190,13 @@ export function HomeRoomSettings() {
         const homeId = await createFirstHomeWithLegacyImport(input, dedupeImportGroups(importGroups));
         setSelectedHomeId(homeId);
         setMode("home");
+        onImported?.(homeId);
       } else if (mode === "import_existing" && selectedHome) {
         const homeId = await importLegacyPlantsToHome(selectedHome.id, dedupeImportGroups(importGroups));
         setSelectedHomeId(homeId);
         setMode("home");
+        setSuccessMessage(t("homeContext.importSuccess"));
+        onImported?.(homeId);
       } else if (selectedHome) {
         const home = await updateHome(selectedHome.id, input);
         setSelectedHomeId(home.id);
@@ -171,6 +208,21 @@ export function HomeRoomSettings() {
       }
       setHomeDraft(emptyHomeDraft);
       setLocationQuery("");
+    } catch (error) {
+      if (process.env.NODE_ENV !== "production") {
+        console.error("home_import_save_failed", {
+          mode,
+          targetHomeId: selectedHome?.id ?? null,
+          roomImports: dedupeImportGroups(importGroups).map((room) => ({
+            legacyKey: room.legacyKey,
+            name: room.name,
+            include: room.include,
+            plantCount: room.plantIds.length
+          })),
+          message: error instanceof Error ? error.message : "Unknown error"
+        });
+      }
+      setSaveError(t("homeContext.importFailed"));
     } finally {
       setIsSaving(false);
     }
@@ -266,8 +318,13 @@ export function HomeRoomSettings() {
           </button>
           <p className="rounded-[18px] bg-white/70 p-3 text-sm font-bold text-[#6f675c]">{t("homeContext.plantsWithoutRoom").replace("{count}", String(plantsWithoutRoom))}</p>
         </div>
+        {saveError ? <p className="mt-4 rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{saveError}</p> : null}
         <button type="button" onClick={() => void saveHome()} disabled={isSaving} className="mt-4 min-h-12 w-full rounded-[18px] bg-[#2d7a4f] px-4 text-sm font-extrabold text-white disabled:opacity-60">
-          {isExistingImport ? t("homeContext.importIntoExistingHome") : t("homeContext.createAndImport")}
+          {isSaving
+            ? t("homeContext.importingPlants")
+            : isExistingImport
+              ? t("homeContext.importIntoExistingHome")
+              : t("homeContext.createAndImport")}
         </button>
       </section>
     );
@@ -403,6 +460,7 @@ export function HomeRoomSettings() {
       {unassignedPlants.length > 0 && homes.length > 0 ? (
         <p className="mt-3 rounded-[18px] bg-white/70 p-3 text-sm font-bold text-[#6f675c]">{t("homeContext.unassignedPlants").replace("{count}", String(unassignedPlants.length))}</p>
       ) : null}
+      {successMessage ? <p className="mt-3 rounded-[18px] bg-[#ddf2dc] p-3 text-sm font-extrabold text-[#2d7a4f]">{successMessage}</p> : null}
       <button type="button" onClick={startCreateHome} disabled={isSaving} className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-[16px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f] disabled:opacity-60">
         <Plus aria-hidden="true" size={17} />
         {t("homeContext.addHome")}

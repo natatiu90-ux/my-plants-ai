@@ -376,7 +376,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
 
       const homeId = await repositories.homes.createFirstHomeWithLegacyImport(
         input,
-        roomImports.map((room) => ({ legacyKey: room.legacyKey, name: room.name, include: room.include }))
+        roomImports.map((room) => ({ legacyKey: room.legacyKey, name: room.name, include: room.include, plantIds: room.plantIds }))
       );
       const [plants, homes, rooms] = await Promise.all([
         repositories.plants.listPlants(),
@@ -397,7 +397,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
 
       const importedHomeId = await repositories.homes.importLegacyPlantsToHome(
         homeId,
-        roomImports.map((room) => ({ legacyKey: room.legacyKey, name: room.name, include: room.include }))
+        roomImports.map((room) => ({ legacyKey: room.legacyKey, name: room.name, include: room.include, plantIds: room.plantIds }))
       );
       const [plants, homes, rooms] = await Promise.all([
         repositories.plants.listPlants(),

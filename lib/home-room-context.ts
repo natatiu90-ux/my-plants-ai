@@ -79,8 +79,12 @@ export function resolveSelectedHomeId(input: {
   storedHomeId: string | null | undefined;
   homes: HomeContext[];
   hasUnassignedPlants: boolean;
+  shouldPreferUnassigned?: boolean;
 }) {
   if (input.storedHomeId === noHomeSelectionId && input.hasUnassignedPlants) {
+    return noHomeSelectionId;
+  }
+  if (!input.storedHomeId && input.shouldPreferUnassigned && input.hasUnassignedPlants) {
     return noHomeSelectionId;
   }
   if (input.storedHomeId && input.homes.some((home) => home.id === input.storedHomeId)) {
