@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { ArrowLeft, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -41,6 +40,9 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [deletingPhotoId, setDeletingPhotoId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const didSaveRef = useRef(false);
   const didLogEditDataReady = useRef(false);
 
   useEffect(() => {
@@ -63,17 +65,51 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
     );
   }
 
-  const save = () => {
-    updatePlant(plant.id, {
-      homeId,
-      homeName,
-      speciesName,
-      scientificName: cleanScientificName(scientificName),
-      roomId,
-      roomKey: roomId ?? roomKey,
-      positionInRoom
-    });
-    setToast(t("edit.saved"));
+  const hasChanges =
+    homeName !== (plant.homeName ?? "") ||
+    speciesName !== plantCommonName(plant) ||
+    cleanScientificName(scientificName) !== (plant.scientificName ?? "") ||
+    homeId !== plant.homeId ||
+    roomId !== (plant.roomId ?? (plant.roomKey?.startsWith("rooms.") ? undefined : plant.roomKey)) ||
+    positionInRoom !== plant.positionInRoom;
+
+  const goBack = () => {
+    if (!didSaveRef.current && hasChanges && !window.confirm(t("edit.discardChangesConfirm"))) {
+      return;
+    }
+    router.push(`/plants/${plant.id}`);
+  };
+
+  const save = async () => {
+    if (isSaving || !hasChanges) {
+      return;
+    }
+    setSaveError(null);
+    setIsSaving(true);
+    try {
+      await updatePlant(plant.id, {
+        homeId,
+        homeName,
+        speciesName,
+        scientificName: cleanScientificName(scientificName),
+        roomId,
+        roomKey: roomId ?? roomKey,
+        positionInRoom
+      });
+      didSaveRef.current = true;
+      setToast(t("edit.saved"));
+      window.setTimeout(() => router.push(`/plants/${plant.id}`), 500);
+    } catch (error) {
+      if (process.env.NODE_ENV !== "production") {
+        console.error("plant_edit_save_failed", {
+          plantId: plant.id,
+          message: error instanceof Error ? error.message : "Unknown error"
+        });
+      }
+      setSaveError(t("edit.saveFailed"));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const confirmDelete = () => {
@@ -96,9 +132,9 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
   return (
     <main className="mx-auto min-h-screen w-full max-w-[430px] overflow-x-hidden bg-cream px-5 pb-10 pt-12">
       <header className="mb-5 flex min-w-0 items-center justify-between gap-2">
-        <Link href={`/plants/${plant.id}`} aria-label={t("settings.back")} className="flex size-11 shrink-0 items-center justify-center rounded-[15px] bg-white/85 text-[#7d776b] shadow-[0_1px_8px_rgba(0,0,0,0.07)]">
+        <button type="button" onClick={goBack} aria-label={t("settings.back")} className="flex size-11 shrink-0 items-center justify-center rounded-[15px] bg-white/85 text-[#7d776b] shadow-[0_1px_8px_rgba(0,0,0,0.07)]">
           <ArrowLeft aria-hidden="true" size={20} />
-        </Link>
+        </button>
         <h1 className="min-w-0 flex-1 truncate px-1 text-center font-rounded text-[28px] font-black leading-none text-ink">{t("edit.title")}</h1>
         <div aria-hidden="true" className="size-11 shrink-0" />
       </header>
@@ -155,8 +191,10 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
         ) : null}
       </section>
 
-      <button type="button" onClick={save} className="mt-5 min-h-12 w-full rounded-[18px] bg-gradient-to-br from-[#92cc90] to-[#6ba369] px-4 text-sm font-extrabold text-white shadow-fab">
-        {t("edit.save")}
+      {saveError ? <p className="mt-4 rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{saveError}</p> : null}
+      {!hasChanges ? <p className="mt-4 text-center text-xs font-bold text-[#8a8378]">{t("edit.noChanges")}</p> : null}
+      <button type="button" onClick={() => void save()} disabled={isSaving || !hasChanges} className="mt-5 min-h-12 w-full rounded-[18px] bg-gradient-to-br from-[#92cc90] to-[#6ba369] px-4 text-sm font-extrabold text-white shadow-fab disabled:opacity-60">
+        {isSaving ? t("edit.saving") : t("edit.save")}
       </button>
 
       <button type="button" onClick={() => setIsDeleteOpen(true)} className="mt-6 min-h-12 w-full rounded-[18px] bg-[#f4d7dc] px-4 text-sm font-extrabold text-[#a13445]">

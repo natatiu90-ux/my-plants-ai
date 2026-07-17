@@ -8,6 +8,7 @@ import { usePlantStore } from "@/data/PlantStore";
 import { buildLegacyRoomImportGroups, dedupeImportGroups, shouldOfferExistingHomeImport, type LegacyRoomImportGroup } from "@/lib/home-room-context";
 import { detectCityFromCoordinates, getBrowserPosition, searchCities, type CitySuggestion } from "@/lib/location-service";
 import { AnswerChips } from "./AnswerChips";
+import { FormTextField } from "./FormTextField";
 
 const lightOptions: NonNullable<Room["lightLevel"]>[] = ["low", "medium_indirect", "bright_indirect", "direct_sun", "unknown"];
 const sunOptions: NonNullable<Room["directSun"]>[] = ["none", "morning", "midday", "evening", "most_of_day", "unsure"];
@@ -76,7 +77,7 @@ function roomToDraft(room: Room): RoomDraft {
 
 function roomDraftEqualsRoom(draft: RoomDraft, room: Room | null) {
   if (!room) {
-    return Boolean(draft.name.trim());
+    return !draft.name.trim() && !draft.lightLevel && !draft.directSun && !draft.temperatureRelative && (draft.hasAirConditioning || "inherit") === "inherit";
   }
   return (
     draft.name.trim() === room.name &&
@@ -84,6 +85,21 @@ function roomDraftEqualsRoom(draft: RoomDraft, room: Room | null) {
     (draft.directSun || "") === (room.directSun ?? "") &&
     (draft.temperatureRelative || "") === (room.temperatureRelative ?? "") &&
     (draft.hasAirConditioning || "inherit") === (room.hasAirConditioning ?? "inherit")
+  );
+}
+
+function homeDraftEqualsHome(draft: Draft, home: HomeContext | null) {
+  if (!home) {
+    return !draft.name.trim() && !draft.city.trim() && !draft.country.trim() && !draft.type && !draft.humidityLevel && !draft.hasAirConditioning && !draft.notes.trim();
+  }
+  return (
+    draft.name.trim() === home.name &&
+    draft.city.trim() === (home.city ?? "") &&
+    draft.country.trim() === (home.country ?? "") &&
+    (draft.type || "") === (home.type ?? "") &&
+    (draft.humidityLevel || "") === (home.humidityLevel ?? "") &&
+    (draft.hasAirConditioning || "") === (home.hasAirConditioning == null ? "" : home.hasAirConditioning ? "yes" : "no") &&
+    draft.notes.trim() === (home.notes ?? "")
   );
 }
 
@@ -195,9 +211,34 @@ export function HomeRoomSettings({
   const [importDebugDetail, setImportDebugDetail] = useState<ImportDebugDetail | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [initialImportStarted, setInitialImportStarted] = useState(false);
-  const selectedHome = selectedHomeId ? homes.find((home) => home.id === selectedHomeId) : null;
+  const selectedHome = selectedHomeId ? homes.find((home) => home.id === selectedHomeId) ?? null : null;
   const selectedRooms = selectedHome ? rooms.filter((room) => room.homeId === selectedHome.id) : [];
   const unassignedPlants = plants.filter((plant) => !plant.homeId);
+
+  const hasUnsavedHomeChanges = !homeDraftEqualsHome(homeDraft, selectedHome);
+  const confirmDiscardChanges = () => {
+    if (window.confirm(t("homeContext.discardChangesConfirm"))) {
+      setSaveError(null);
+      setImportDebugDetail(null);
+      return true;
+    }
+    return false;
+  };
+  const goBackFromHomeForm = () => {
+    if (hasUnsavedHomeChanges && !confirmDiscardChanges()) {
+      return;
+    }
+    setHomeDraft(emptyHomeDraft);
+    setLocationQuery("");
+    setMode(selectedHome ? "home" : "list");
+  };
+  const goBackFromRoomForm = (hasRoomChanges: boolean) => {
+    if (hasRoomChanges && !confirmDiscardChanges()) {
+      return;
+    }
+    setRoomDraft(emptyRoomDraft);
+    setMode("home");
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -286,6 +327,14 @@ export function HomeRoomSettings({
     setSaveError(null);
     setImportDebugDetail(null);
     setSuccessMessage(null);
+    const requiresHomeName = mode === "edit_home" || mode === "first_import";
+    if (requiresHomeName && !homeDraft.name.trim()) {
+      setSaveError(t("homeContext.homeNameRequired"));
+      return;
+    }
+    if (mode === "edit_home" && selectedHome && !hasUnsavedHomeChanges) {
+      return;
+    }
     setIsSaving(true);
     const dedupedImportGroups = dedupeImportGroups(importGroups);
     try {
@@ -305,10 +354,12 @@ export function HomeRoomSettings({
         const home = await updateHome(selectedHome.id, input);
         setSelectedHomeId(home.id);
         setMode("home");
+        setSuccessMessage(t("homeContext.homeSaved"));
       } else {
         const home = await addHome(input);
         setSelectedHomeId(home.id);
         setMode("home");
+        setSuccessMessage(t("homeContext.homeSaved"));
       }
       setHomeDraft(emptyHomeDraft);
       setLocationQuery("");
@@ -336,7 +387,7 @@ export function HomeRoomSettings({
           })
         );
       }
-      setSaveError(t("homeContext.importFailed"));
+      setSaveError(mode === "first_import" || mode === "import_existing" ? t("homeContext.importFailed") : t("homeContext.homeSaveFailed"));
     } finally {
       setIsSaving(false);
     }
@@ -363,21 +414,34 @@ export function HomeRoomSettings({
       setRoomDraft(emptyRoomDraft);
       setMode("home");
       setSuccessMessage(t("homeContext.roomSaved"));
+    } catch (error) {
+      if (process.env.NODE_ENV !== "production") {
+        console.error("room_save_failed", {
+          roomId: roomDraft.id || null,
+          homeId: selectedHome.id,
+          message: error instanceof Error ? error.message : "Unknown error"
+        });
+      }
+      setSaveError(t("homeContext.roomSaveFailed"));
     } finally {
       setIsSaving(false);
     }
   };
 
+  const homeNameError = (mode === "edit_home" || mode === "first_import") && !homeDraft.name.trim() ? t("homeContext.homeNameRequired") : null;
   const homeForm = (
     <div className="grid gap-3 rounded-[22px] bg-white/70 p-3">
-      <input value={homeDraft.name} onChange={(event) => setHomeDraft((draft) => ({ ...draft, name: event.target.value }))} placeholder={t("homeContext.homeName")} className="min-h-11 rounded-[16px] bg-white px-3 text-base outline-none" />
-      <div className="rounded-[18px] bg-white p-3">
+      <FormTextField label={t("homeContext.homeName")} value={homeDraft.name} onChange={(value) => setHomeDraft((draft) => ({ ...draft, name: value }))} placeholder={t("homeContext.homeName")} error={homeNameError} />
+      <div className="rounded-[18px] bg-white/70 p-3">
         <p className="text-sm font-extrabold text-[#4f4940]">{t("homeContext.location")}</p>
-        <button type="button" onClick={() => void detectLocation()} className="mt-2 flex min-h-10 w-full items-center justify-center gap-2 rounded-[15px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
+        <p className="mt-1 text-sm font-bold leading-5 text-[#6f675c]">
+          {[homeDraft.city, homeDraft.country].filter(Boolean).join(", ") || t("homeContext.locationNotSet")}
+        </p>
+        <button type="button" onClick={() => void detectLocation()} className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-[15px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
           <MapPin aria-hidden="true" size={16} />
-          {t("homeContext.detectLocation")}
+          {homeDraft.city || homeDraft.country ? t("homeContext.changeLocation") : t("homeContext.detectLocation")}
         </button>
-        <input value={locationQuery} onChange={(event) => setLocationQuery(event.target.value)} placeholder={t("homeContext.searchCity")} className="mt-2 min-h-11 w-full rounded-[15px] bg-[#fffaf3] px-3 text-base outline-none" />
+        <FormTextField label={t("homeContext.searchCity")} value={locationQuery} onChange={setLocationQuery} placeholder={t("homeContext.searchCity")} />
         {locationSuggestions.length ? (
           <div className="mt-2 grid gap-1">
             {locationSuggestions.map((suggestion) => (
@@ -391,17 +455,10 @@ export function HomeRoomSettings({
             ))}
           </div>
         ) : null}
-        {homeDraft.city || homeDraft.country ? <p className="mt-2 text-sm font-bold text-[#6f675c]">{[homeDraft.city, homeDraft.country].filter(Boolean).join(", ")}</p> : null}
         {locationMessage ? <p className="mt-2 text-sm font-bold text-[#6f675c]">{locationMessage}</p> : null}
       </div>
-      <select value={homeDraft.type} onChange={(event) => setHomeDraft((draft) => ({ ...draft, type: event.target.value }))} className="min-h-11 rounded-[16px] bg-white px-3 text-base outline-none">
-        <option value="">{t("homeContext.homeType")}</option>
-        {homeTypeOptions.map((option) => <option key={option} value={option}>{t(`homeContext.homeType.${option}` as never)}</option>)}
-      </select>
-      <select value={homeDraft.humidityLevel} onChange={(event) => setHomeDraft((draft) => ({ ...draft, humidityLevel: event.target.value }))} className="min-h-11 rounded-[16px] bg-white px-3 text-base outline-none">
-        <option value="">{t("homeContext.humidity")}</option>
-        {humidityOptions.map((option) => <option key={option} value={option}>{t(`homeContext.humidity.${option}` as never)}</option>)}
-      </select>
+      <RoomOptionGroup title={t("homeContext.homeType")} value={homeDraft.type} options={homeTypeOptions} onChange={(value) => setHomeDraft((draft) => ({ ...draft, type: value }))} labelFor={(option) => t(`homeContext.homeType.${option}` as never)} />
+      <RoomOptionGroup title={t("homeContext.humidity")} value={homeDraft.humidityLevel} options={humidityOptions} onChange={(value) => setHomeDraft((draft) => ({ ...draft, humidityLevel: value }))} labelFor={(option) => t(`homeContext.humidity.${option}` as never)} />
     </div>
   );
 
@@ -467,16 +524,19 @@ export function HomeRoomSettings({
   }
 
   if (mode === "edit_home") {
+    const homeCanSave = Boolean(homeDraft.name.trim()) && (!selectedHome || hasUnsavedHomeChanges);
     return (
       <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
-        <button type="button" onClick={() => setMode(selectedHome ? "home" : "list")} className="mb-3 flex min-h-10 items-center gap-2 rounded-[16px] bg-white/75 px-3 text-sm font-extrabold text-[#6f675c]">
+        <button type="button" onClick={goBackFromHomeForm} className="mb-3 flex min-h-10 items-center gap-2 rounded-[16px] bg-white/75 px-3 text-sm font-extrabold text-[#6f675c]">
           <ChevronLeft aria-hidden="true" size={17} />
           {t("settings.back")}
         </button>
         <h2 className="font-rounded text-xl font-extrabold text-ink">{selectedHome ? t("homeContext.editHome") : t("homeContext.addHome")}</h2>
         <div className="mt-4">{homeForm}</div>
-        <button type="button" onClick={() => void saveHome()} disabled={isSaving} className="mt-4 min-h-12 w-full rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f] disabled:opacity-60">
-          {t("homeContext.saveHome")}
+        {!homeDraft.name.trim() ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{t("homeContext.homeNameRequired")}</p> : selectedHome && !hasUnsavedHomeChanges ? <p className="mt-3 text-center text-xs font-bold text-[#8a8378]">{t("homeContext.noHomeChanges")}</p> : null}
+        {saveError ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{saveError}</p> : null}
+        <button type="button" onClick={() => void saveHome()} disabled={isSaving || !homeCanSave} className="mt-4 min-h-12 w-full rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f] disabled:opacity-60">
+          {isSaving ? t("homeContext.saving") : t("homeContext.saveHome")}
         </button>
       </section>
     );
@@ -487,16 +547,13 @@ export function HomeRoomSettings({
     const hasRoomChanges = !roomDraftEqualsRoom(roomDraft, originalRoom);
     return (
       <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
-        <button type="button" onClick={() => setMode("home")} className="mb-3 flex min-h-10 items-center gap-2 rounded-[16px] bg-white/75 px-3 text-sm font-extrabold text-[#6f675c]">
+        <button type="button" onClick={() => goBackFromRoomForm(hasRoomChanges)} className="mb-3 flex min-h-10 items-center gap-2 rounded-[16px] bg-white/75 px-3 text-sm font-extrabold text-[#6f675c]">
           <ChevronLeft aria-hidden="true" size={17} />
           {t("settings.back")}
         </button>
         <h2 className="font-rounded text-xl font-extrabold text-ink">{roomDraft.id ? t("homeContext.editRoom") : t("homeContext.addRoom")}</h2>
         <div className="mt-4 grid gap-3 rounded-[22px] bg-white/70 p-3">
-          <label className="block rounded-[18px] bg-white/70 p-3">
-            <span className="text-sm font-extrabold text-[#4f4940]">{t("rooms.roomName")}</span>
-            <input value={roomDraft.name} onChange={(event) => setRoomDraft((draft) => ({ ...draft, name: event.target.value }))} placeholder={t("rooms.roomName")} className="mt-2 min-h-11 w-full rounded-[16px] bg-[#fffaf3] px-3 text-base font-bold outline-none" />
-          </label>
+          <FormTextField label={t("rooms.roomName")} value={roomDraft.name} onChange={(value) => setRoomDraft((draft) => ({ ...draft, name: value }))} placeholder={t("rooms.roomName")} error={!roomDraft.name.trim() ? t("homeContext.roomNameRequired") : null} />
           <RoomOptionGroup
             title={t("homeContext.lightLevel")}
             value={roomDraft.lightLevel}
@@ -528,8 +585,9 @@ export function HomeRoomSettings({
           />
         </div>
         {!roomDraft.name.trim() ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{t("homeContext.roomNameRequired")}</p> : !hasRoomChanges ? <p className="mt-3 text-center text-xs font-bold text-[#8a8378]">{t("homeContext.noRoomChanges")}</p> : null}
+        {saveError ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{saveError}</p> : null}
         <button type="button" onClick={() => void saveRoom()} disabled={isSaving || !roomDraft.name.trim() || !hasRoomChanges} className="mt-4 min-h-12 w-full rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f] disabled:opacity-60">
-          {roomDraft.id ? t("homeContext.saveRoom") : t("homeContext.addRoom")}
+          {isSaving ? t("homeContext.saving") : roomDraft.id ? t("homeContext.saveRoom") : t("homeContext.addRoom")}
         </button>
       </section>
     );
@@ -553,6 +611,7 @@ export function HomeRoomSettings({
             {t("homeContext.editHome")}
           </button>
         </div>
+        {successMessage ? <p className="mt-3 rounded-[18px] bg-[#ddf2dc] p-3 text-sm font-extrabold text-[#2d7a4f]">{successMessage}</p> : null}
 
         <h3 className="mt-5 px-1 font-rounded text-lg font-extrabold text-ink">{t("homeContext.rooms")}</h3>
         {shouldOfferExistingHomeImport({ homes, plants, homeId: selectedHome.id }) ? (
