@@ -11,9 +11,8 @@ import { roomOptions } from "./RoomPicker";
 
 export function CareSummary({ plant }: { plant: Plant }) {
   const { locale, t } = useI18n();
-  const { homes, rooms } = usePlantStore();
+  const { rooms } = usePlantStore();
   const builtInRoomKeys = roomOptions as readonly string[];
-  const structuredHome = plant.homeId ? homes.find((home) => home.id === plant.homeId) : undefined;
   const structuredRoom = plant.roomId ? rooms.find((room) => room.id === plant.roomId) : undefined;
   const legacyRoomValue = plant.roomKey
     ? builtInRoomKeys.includes(plant.roomKey)
@@ -29,15 +28,6 @@ export function CareSummary({ plant }: { plant: Plant }) {
       value: formatRelativeDate(plant.lastWateredAt, locale, t("plantDetail.notYet")),
       icon: <Droplets aria-hidden="true" size={18} />
     },
-    ...(structuredHome
-      ? [
-          {
-            label: t("homeContext.home"),
-            value: [structuredHome.name, structuredHome.city, structuredHome.country].filter(Boolean).join(", "),
-            icon: <MapPin aria-hidden="true" size={18} />
-          }
-        ]
-      : []),
     ...(structuredRoom || plant.roomKey
       ? [
           {

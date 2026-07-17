@@ -9,6 +9,7 @@ import { cleanScientificName, plantCommonName, plantDisplayName } from "@/lib/pl
 import { logNavigationEvent } from "@/lib/navigation-performance";
 import { DeletePlantDialog } from "./DeletePlantDialog";
 import { DeletePhotoDialog } from "./DeletePhotoDialog";
+import { CareDateEditor } from "./CareDateEditor";
 import { LocationPicker } from "./LocationPicker";
 import { PhotoUploadFlow } from "./PhotoUploadFlow";
 import { PhotoReviewGrid } from "./PhotoReviewGrid";
@@ -22,13 +23,17 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
     deletePlantPhoto,
     deletePlant,
     getPlant,
+    getPlantMilestones,
     getPlantPhotos,
+    saveBaselineHistory,
     setCoverPhoto,
     updatePhotoType,
     updatePlant
   } = usePlantStore();
   const plant = getPlant(plantId);
   const photos = getPlantPhotos(plantId);
+  const milestones = getPlantMilestones(plantId);
+  const repottingBaseline = milestones.find((milestone) => milestone.type === "repotted" || milestone.type === "repotting_unknown");
   const [homeName, setHomeName] = useState(plant?.homeName ?? "");
   const [speciesName, setSpeciesName] = useState(plant ? plantCommonName(plant) : "");
   const [scientificName, setScientificName] = useState(plant?.scientificName ?? "");
@@ -129,6 +134,22 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
     }
   };
 
+  const saveRepottingDate = async (date?: string, unknown = false) => {
+    setSaveError(null);
+    try {
+      await saveBaselineHistory(plant.id, { kind: "repotting", eventDate: date, unknown });
+      setToast(t("edit.saved"));
+    } catch (error) {
+      if (process.env.NODE_ENV !== "production") {
+        console.error("repotting_baseline_save_failed", {
+          plantId: plant.id,
+          message: error instanceof Error ? error.message : "Unknown error"
+        });
+      }
+      setSaveError(t("edit.saveFailed"));
+    }
+  };
+
   return (
     <main className="mx-auto min-h-screen w-full max-w-[430px] overflow-x-hidden bg-cream px-5 pb-10 pt-12">
       <header className="mb-5 flex min-w-0 items-center justify-between gap-2">
@@ -189,6 +210,17 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
             {t("homeContext.legacyRoomNote")}
           </p>
         ) : null}
+      </section>
+
+      <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
+        <h2 className="mb-3 px-1 font-rounded text-xl font-extrabold text-ink">{t("edit.careHistory")}</h2>
+        <CareDateEditor
+          label={t("baseline.lastRepottingLabel")}
+          value={repottingBaseline?.type === "repotted" ? repottingBaseline.eventDate : undefined}
+          isUnknown={repottingBaseline?.type === "repotting_unknown"}
+          onSaveDate={(date) => void saveRepottingDate(date)}
+          onSaveUnknown={() => void saveRepottingDate(undefined, true)}
+        />
       </section>
 
       {saveError ? <p className="mt-4 rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{saveError}</p> : null}

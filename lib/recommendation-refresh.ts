@@ -42,7 +42,7 @@ export function latestContextTimestamp(input: {
     input.plant.updatedAt,
     home?.updatedAt,
     room?.updatedAt,
-    ...input.milestones.map((item) => item.createdAt),
+    ...input.milestones.map((item) => item.updatedAt ?? item.createdAt),
     ...input.careEvents.map((item) => item.createdAt),
     ...input.hypothesisResolutions.map((item) => item.resolvedAt ?? item.createdAt)
   ]);
@@ -53,7 +53,7 @@ function isoTimestamp(value: number | null) {
 }
 
 function latestMilestoneTimestamp(items: PlantMilestone[]) {
-  return latestTimestamp(items.map((item) => item.eventDate ?? item.createdAt));
+  return latestTimestamp(items.map((item) => item.updatedAt ?? item.eventDate ?? item.createdAt));
 }
 
 function latestCareEventTimestamp(items: PlantCareEvent[]) {

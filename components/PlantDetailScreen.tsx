@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
-import { addDays, formatLongDate, toDateKey } from "@/lib/date-format";
+import { addDays, toDateKey } from "@/lib/date-format";
 import { buildPlantEnvironmentContext, formatEnvironmentContextForPrompt } from "@/lib/home-room-context";
 import { plantDisplayName } from "@/lib/plant-display";
 import { deriveCareActionState } from "@/lib/plant-action-eligibility";
@@ -13,6 +13,7 @@ import { PhotoStorageRepository } from "@/lib/photo-storage";
 import { buildRecommendationContextSnapshot, changedContextSince, impactLabelKey, isRecommendationStale, isVisualEvidenceStale, reasonTypeFromChangedContext, sourceAnalysisAgeDays, staleReasonKeys, type RecommendationChangedContext, type RecommendationContextSnapshot } from "@/lib/recommendation-refresh";
 import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION } from "@/lib/recommendation-version";
 import { CareHistory } from "./CareHistory";
+import { CareDateEditor } from "./CareDateEditor";
 import { CareSummary } from "./CareSummary";
 import { CheckSoilSheet } from "./CheckSoilSheet";
 import { DeletePlantDialog } from "./DeletePlantDialog";
@@ -197,13 +198,11 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const [isCompletingAction, setIsCompletingAction] = useState(false);
   const [fullCoverUrl, setFullCoverUrl] = useState<string | undefined>();
   const [baselineSaving, setBaselineSaving] = useState(false);
-  const [baselineDate, setBaselineDate] = useState("");
   const [photoAssessment, setPhotoAssessment] = useState<PhotoAssessmentState>({ status: "idle" });
   const [isUpdatingRecommendations, setIsUpdatingRecommendations] = useState(false);
   const [recommendationUpdateError, setRecommendationUpdateError] = useState<string | null>(null);
   const loggedEvents = useRef(new Set<string>());
   const openedActionRef = useRef<string | null>(null);
-  const baselineDateInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!toast) {
@@ -289,7 +288,6 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const hasWateringBaseline = milestones.some((milestone) => milestone.type === "watered" || milestone.type === "watering_unknown") || Boolean(plant.lastWateredAt);
   const hasRepottingBaseline = milestones.some((milestone) => milestone.type === "repotted" || milestone.type === "repotting_unknown");
   const baselineQuestion = !hasWateringBaseline ? "watering" : !hasRepottingBaseline ? "repotting" : null;
-  const formattedBaselineDate = baselineDate ? formatLongDate(baselineDate, locale) : t("baseline.chooseDate");
   const recommendationContextSnapshot = buildRecommendationContextSnapshot({
     plant,
     homes,
@@ -367,7 +365,6 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     setBaselineSaving(true);
     try {
       await saveBaselineHistory(plant.id, { kind, eventDate, unknown });
-      setBaselineDate("");
       setToast(t("edit.saved"));
     } finally {
       setBaselineSaving(false);
@@ -618,29 +615,14 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
               {t("addPlant.waterUnknown")}
             </button>
           </div>
-          <label className="relative mt-3 flex min-h-14 w-full min-w-0 cursor-pointer items-center justify-between gap-3 overflow-hidden rounded-[18px] bg-white/70 p-3 text-left">
-            <span className="min-w-0">
-              <span className="block text-xs font-bold uppercase text-[#a09a90]">{t("baseline.dateLabel")}</span>
-              <span className="mt-1 block truncate text-sm font-extrabold text-ink">{formattedBaselineDate}</span>
-            </span>
-            <span className="shrink-0 text-sm font-extrabold text-[#2d7a4f]">{t("baseline.changeDate")}</span>
-            <input
-              ref={baselineDateInputRef}
-              type="date"
-              max={toDateKey(new Date())}
-              value={baselineDate}
+          <div className="mt-3">
+            <CareDateEditor
+              label={t("baseline.dateLabel")}
               disabled={baselineSaving}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setBaselineDate(value);
-                if (value) {
-                  void saveBaselineAnswer(baselineQuestion, value);
-                }
-              }}
-              className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
-              aria-label={t("baseline.dateLabel")}
+              onSaveDate={(date) => void saveBaselineAnswer(baselineQuestion, date)}
+              onSaveUnknown={() => void saveBaselineAnswer(baselineQuestion, undefined, true)}
             />
-          </label>
+          </div>
         </section>
       ) : null}
       {photoAssessment.status !== "idle" ? (

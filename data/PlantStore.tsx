@@ -10,6 +10,7 @@ import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION } from "@/lib/rec
 import { recommendationRevisionIsUnchanged, type RecommendationChangedContext, type RecommendationContextSnapshot, type RecommendationRevisionSaveResult } from "@/lib/recommendation-refresh";
 import { PlantCreationError, plantCreationDiagnosticFromError, plantCreationError, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { calculateSoilCheckCareResolution } from "@/lib/soil-care";
+import { baselineMilestoneType, findExistingBaselineMilestone } from "@/lib/care-baseline";
 import type { HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, PlantRecommendationRevision, Room, SoilCheckResult } from "@/types/plant";
 import type { LegacyRoomImportGroup } from "@/lib/home-room-context";
 
@@ -91,7 +92,7 @@ type PlantStoreValue = PlantState & {
   ) => Promise<PlantMilestone>;
   updateMilestone: (
     milestoneId: string,
-    input: { type: PlantMilestone["type"]; eventDate: string; note?: string; photoId?: string }
+    input: { type: PlantMilestone["type"]; eventDate?: string | null; note?: string; photoId?: string }
   ) => Promise<void>;
   deleteMilestone: (milestoneId: string) => Promise<void>;
   waterPlant: (plantId: string) => Promise<void>;
@@ -854,13 +855,14 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
   );
 
   const updateMilestone = useCallback(
-    async (milestoneId: string, input: { type: PlantMilestone["type"]; eventDate: string; note?: string; photoId?: string }) => {
+    async (milestoneId: string, input: { type: PlantMilestone["type"]; eventDate?: string | null; note?: string; photoId?: string }) => {
       await repositories?.milestones.updateMilestone(milestoneId, input);
+      const updatedAt = new Date().toISOString();
       setState((current) => ({
         ...current,
         milestones: current.milestones.map((milestone) =>
-          milestone.id === milestoneId && milestone.isManual
-            ? { ...milestone, type: input.type, eventDate: input.eventDate, note: input.note?.trim() || undefined, photoId: input.photoId }
+          milestone.id === milestoneId
+            ? { ...milestone, type: input.type, eventDate: input.eventDate ?? undefined, updatedAt, note: input.note?.trim() || undefined, photoId: input.photoId }
             : milestone
         )
       }));
@@ -997,17 +999,36 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         throw new Error("Plant collection is not ready.");
       }
 
-      const today = toDateKey(new Date());
-      const eventDate = input.eventDate ?? today;
+      const eventDate = input.unknown ? undefined : input.eventDate;
+      if (!input.unknown && !eventDate) {
+        throw new Error("baseline_event_date_required");
+      }
+      const existingBaseline = findExistingBaselineMilestone(state.milestones, plantId, input.kind);
+      const upsertBaselineMilestone = async (type: PlantMilestone["type"], nextEventDate?: string) => {
+        if (existingBaseline) {
+          await repositories.milestones.updateMilestone(existingBaseline.id, { type, eventDate: nextEventDate ?? null });
+          return {
+            ...existingBaseline,
+            type,
+            eventDate: nextEventDate,
+            updatedAt: new Date().toISOString(),
+            note: undefined,
+            photoId: undefined
+          };
+        }
+        return repositories.milestones.addMilestone(plantId, { type, eventDate: nextEventDate ?? null });
+      };
+
       if (input.kind === "watering" && !input.unknown) {
-        const nextCheckAt = toDateKey(addDays(new Date(`${eventDate}T12:00:00`), 4));
-        const milestone = await repositories.milestones.addMilestone(plantId, { type: "watered", eventDate });
-        await repositories.careEvents.addCareEvent(plantId, { type: "watered", eventDate, metadata: { source: "baseline_history" } });
+        const wateringEventDate = eventDate as string;
+        const nextCheckAt = toDateKey(addDays(new Date(`${wateringEventDate}T12:00:00`), 4));
+        const milestone = await upsertBaselineMilestone("watered", wateringEventDate);
+        await repositories.careEvents.addCareEvent(plantId, { type: "watered", eventDate: wateringEventDate, metadata: { source: "baseline_history" } });
         await repositories.plants.updateRecommendationState(plantId, {
           status: state.plants.find((plant) => plant.id === plantId)?.status ?? "unknown",
           nextAction: state.plants.find((plant) => plant.id === plantId)?.nextAction ?? null,
           nextCheckAt,
-          lastWateredAt: eventDate,
+          lastWateredAt: wateringEventDate,
           careScheduleStatus: "active",
           notificationDueCycleKey: null
         });
@@ -1015,21 +1036,27 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           ...current,
           plants: current.plants.map((plant) =>
             plant.id === plantId
-              ? { ...plant, lastWateredAt: eventDate, nextCheckAt, careScheduleStatus: "active", notificationDueCycleKey: undefined }
+              ? { ...plant, lastWateredAt: wateringEventDate, nextCheckAt, careScheduleStatus: "active", notificationDueCycleKey: undefined }
               : plant
           ),
-          milestones: [milestone, ...current.milestones],
-          careEvents: [{ id: `${plantId}-baseline-watered-${Date.now()}`, plantId, type: "watered", createdAt: eventDate, metadata: { source: "baseline_history" } }, ...current.careEvents]
+          milestones: [milestone, ...current.milestones.filter((item) => item.id !== milestone.id)],
+          careEvents: [{ id: `${plantId}-baseline-watered-${Date.now()}`, plantId, type: "watered", createdAt: wateringEventDate, metadata: { source: "baseline_history" } }, ...current.careEvents]
         }));
         return;
       }
 
-      const milestoneType: PlantMilestone["type"] =
-        input.kind === "watering" ? (input.unknown ? "watering_unknown" : "watered") : input.unknown ? "repotting_unknown" : "repotted";
-      const milestone = await repositories.milestones.addMilestone(plantId, { type: milestoneType, eventDate });
-      setState((current) => ({ ...current, milestones: [milestone, ...current.milestones] }));
+      const milestoneType = baselineMilestoneType(input.kind, input.unknown);
+      const milestone = await upsertBaselineMilestone(milestoneType, eventDate);
+      setState((current) => ({
+        ...current,
+        plants:
+          input.kind === "watering" && input.unknown
+            ? current.plants.map((plant) => (plant.id === plantId ? { ...plant, lastWateredAt: undefined } : plant))
+            : current.plants,
+        milestones: [milestone, ...current.milestones.filter((item) => item.id !== milestone.id)]
+      }));
     },
-    [repositories, state.plants]
+    [repositories, state.milestones, state.plants]
   );
 
   const savePlantAnalysis = useCallback(

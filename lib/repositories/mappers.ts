@@ -90,10 +90,11 @@ export type MilestoneRow = {
   id: string;
   plant_id: string;
   type: PlantMilestoneType;
-  event_date: string;
+  event_date: string | null;
   note: string | null;
   photo_id: string | null;
   created_at: string;
+  updated_at?: string | null;
 };
 
 export type CareEventRow = {
@@ -267,7 +268,8 @@ export function mapMilestone(row: MilestoneRow): PlantMilestone {
     plantId: row.plant_id,
     type: row.type,
     createdAt: row.created_at,
-    eventDate: row.event_date,
+    updatedAt: row.updated_at ?? undefined,
+    eventDate: row.event_date ?? undefined,
     note: row.note ?? undefined,
     photoId: row.photo_id ?? undefined,
     isManual: row.type !== "plant_added"

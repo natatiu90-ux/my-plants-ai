@@ -260,6 +260,7 @@ export interface PlantMilestone {
   plantId: string;
   type: PlantMilestoneType;
   createdAt: string;
+  updatedAt?: string;
   eventDate?: string;
   titleKey?: TranslationKey;
   descriptionKey?: TranslationKey;

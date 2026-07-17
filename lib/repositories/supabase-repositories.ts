@@ -939,14 +939,14 @@ export class MilestoneRepository {
     return (data ?? []).map(mapMilestone);
   }
 
-  async addMilestone(plantId: string, input: { type: PlantMilestone["type"]; eventDate: string; note?: string; photoId?: string }) {
+  async addMilestone(plantId: string, input: { type: PlantMilestone["type"]; eventDate?: string | null; note?: string; photoId?: string }) {
     const { data, error } = await this.supabase
       .from("plant_milestones")
       .insert({
         user_id: this.user.id,
         plant_id: plantId,
         type: input.type,
-        event_date: input.eventDate,
+        event_date: input.eventDate ?? null,
         note: input.note || null,
         photo_id: input.photoId ?? null
       })
@@ -964,12 +964,12 @@ export class MilestoneRepository {
     return mapMilestone(data);
   }
 
-  async updateMilestone(milestoneId: string, input: { type: PlantMilestone["type"]; eventDate: string; note?: string; photoId?: string }) {
+  async updateMilestone(milestoneId: string, input: { type: PlantMilestone["type"]; eventDate?: string | null; note?: string; photoId?: string }) {
     const { error } = await this.supabase
       .from("plant_milestones")
       .update({
         type: input.type,
-        event_date: input.eventDate,
+        event_date: input.eventDate ?? null,
         note: input.note || null,
         photo_id: input.photoId ?? null
       })
