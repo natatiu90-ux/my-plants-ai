@@ -7,6 +7,7 @@ import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
 import type { Plant, PlantAnalysisRecord, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone } from "@/types/plant";
 import { AnswerChips } from "./AnswerChips";
+import type { RecommendationRefreshState } from "@/lib/recommendation-refresh-state";
 
 type HypothesisView = {
   id: PlantHypothesis | "recent_repotting_context";
@@ -256,13 +257,15 @@ export function PlantAnalysisSection({
   plant,
   milestones,
   hypothesisResolutions,
-  onResolveHypothesis
+  onResolveHypothesis,
+  recommendationRefreshState
 }: {
   analysis?: PlantAnalysisRecord;
   plant: Plant;
   milestones: PlantMilestone[];
   hypothesisResolutions: PlantHypothesisResolution[];
   onResolveHypothesis: (hypothesis: PlantHypothesis, status: PlantHypothesisStatus, result: string) => Promise<void>;
+  recommendationRefreshState?: RecommendationRefreshState;
 }) {
   const { locale, t } = useI18n();
   const [savingAnswerKey, setSavingAnswerKey] = useState<string | null>(null);
@@ -503,7 +506,18 @@ export function PlantAnalysisSection({
 
   return (
     <section className="mt-4 min-w-0 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
-      <h2 className="px-1 font-rounded text-xl font-extrabold text-ink [overflow-wrap:anywhere]">{t("plantAnalysis.title")}</h2>
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-1">
+        <h2 className="font-rounded text-xl font-extrabold text-ink [overflow-wrap:anywhere]">{t("plantAnalysis.title")}</h2>
+        {recommendationRefreshState?.status === "loading" ? (
+          <span className="rounded-full bg-[#eef5e8] px-3 py-1 text-xs font-extrabold text-[#4f6946]">{t("plantAnalysis.refreshingInline")}</span>
+        ) : null}
+        {recommendationRefreshState?.status === "success" ? (
+          <span className="rounded-full bg-[#eef5e8] px-3 py-1 text-xs font-extrabold text-[#355f3d]">{t("plantAnalysis.refreshSuccessBadge")}</span>
+        ) : null}
+      </div>
+      {recommendationRefreshState?.status === "error" ? (
+        <p className="mx-1 mt-2 rounded-[16px] bg-[#fff0e6] p-3 text-sm font-bold leading-5 text-[#8a5b24]">{recommendationRefreshState.error ?? t("plantAnalysis.refreshFailedInline")}</p>
+      ) : null}
       <div className="mt-3 grid gap-2">
         <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
           <p className="text-sm font-extrabold leading-5 text-[#355f3d] [overflow-wrap:anywhere]">{view.keyTakeaway}</p>

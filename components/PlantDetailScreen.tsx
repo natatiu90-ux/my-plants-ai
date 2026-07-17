@@ -11,8 +11,8 @@ import { deriveCareActionState } from "@/lib/plant-action-eligibility";
 import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
-import { buildRecommendationContextSnapshot, changedContextSince, impactLabelKey, isRecommendationStale, isVisualEvidenceStale, reasonTypeFromChangedContext, sourceAnalysisAgeDays, staleReasonKeys, type RecommendationChangedContext, type RecommendationContextSnapshot } from "@/lib/recommendation-refresh";
-import { recommendationRefreshReducer } from "@/lib/recommendation-refresh-state";
+import { buildRecommendationContextSnapshot, changedContextSince, impactLabelKey, isRecommendationStale, isVisualEvidenceStale, reasonTypeFromChangedContext, sourceAnalysisAgeDays, type RecommendationChangedContext, type RecommendationContextSnapshot } from "@/lib/recommendation-refresh";
+import { recommendationRefreshReducer, type RecommendationRefreshStatus } from "@/lib/recommendation-refresh-state";
 import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION } from "@/lib/recommendation-version";
 import { CareHistory } from "./CareHistory";
 import { CareDateEditor } from "./CareDateEditor";
@@ -171,8 +171,37 @@ function recommendationRefreshReason(
     : "Good news — the care guidance does not need a major change right now.";
 }
 
-function staleReasonMessage(reasonKey: string, t: (key: never) => string) {
-  return t(`plantAnalysis.staleReason.${reasonKey}` as never);
+function RecommendationAutoRefresh({
+  shouldRefresh,
+  refreshKey,
+  status,
+  onRefresh,
+  onReset
+}: {
+  shouldRefresh: boolean;
+  refreshKey: string;
+  status: RecommendationRefreshStatus;
+  onRefresh: () => void;
+  onReset: () => void;
+}) {
+  const lastStartedKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!shouldRefresh) {
+      lastStartedKeyRef.current = null;
+      return;
+    }
+
+    if (!refreshKey || status === "loading" || lastStartedKeyRef.current === refreshKey) {
+      return;
+    }
+
+    lastStartedKeyRef.current = refreshKey;
+    onReset();
+    window.setTimeout(onRefresh, 0);
+  }, [onRefresh, onReset, refreshKey, shouldRefresh, status]);
+
+  return null;
 }
 
 export function PlantDetailScreen({ plantId }: { plantId: string }) {
@@ -225,6 +254,17 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       recommendationRefreshAbortRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (recommendationRefreshState.status !== "success" && recommendationRefreshState.status !== "unchanged") {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      dispatchRecommendationRefresh({ type: "reset" });
+    }, 3200);
+    return () => window.clearTimeout(timeout);
+  }, [recommendationRefreshState.status]);
 
   const careActionState = useMemo(
     () => (plant ? deriveCareActionState(plant, hypothesisResolutions, new Date(), { isCareDataReady: secondaryDataReady }) : null),
@@ -310,12 +350,6 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     currentPromptVersion: RECOMMENDATION_PROMPT_VERSION,
     previousModelVersion: currentRecommendationRevision?.modelVersion
   });
-  const staleReasons = currentRecommendationRevision
-    ? staleReasonKeys({
-        changedContext: currentChangedContext,
-        currentRevision: currentRecommendationRevision
-      })
-    : ["no_revision"];
   const recommendationsAreStale = analysis
     ? !currentRecommendationRevision ||
       isRecommendationStale({
@@ -329,6 +363,14 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           hypothesisResolutions
         })
     : false;
+  const recommendationRefreshKey = JSON.stringify({
+    plantId: plant.id,
+    analysisId: analysis?.id ?? null,
+    revisionId: currentRecommendationRevision?.id ?? null,
+    changedContext: currentChangedContext,
+    promptVersion: RECOMMENDATION_PROMPT_VERSION,
+    recommendationVersion: RECOMMENDATION_VERSION
+  });
   const visualEvidenceAge = sourceAnalysisAgeDays(analysis);
   const visualEvidenceIsStale = isVisualEvidenceStale(analysis);
 
@@ -485,7 +527,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     const timeoutId = window.setTimeout(() => {
       didTimeout = true;
       abortController.abort();
-      dispatchRecommendationRefresh({ type: "error", error: t("plantAnalysis.updateFailed") });
+      dispatchRecommendationRefresh({ type: "error", error: t("plantAnalysis.refreshFailedInline") });
     }, recommendationRefreshTimeoutMs);
     const startedAt = Date.now();
     try {
@@ -576,7 +618,6 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       console.info("recommendation_refresh_completed", { plantId: plant.id, photoCount: photosForAnalysis.length, durationMs: Date.now() - startedAt });
       if (!didTimeout) {
         dispatchRecommendationRefresh({ type: revisionResult.unchanged ? "unchanged" : "success" });
-        setToast(revisionResult.unchanged ? t("plantAnalysis.alreadyCurrent") : t("plantAnalysis.updateSuccess"));
       }
     } catch (error) {
       const wasAborted = error instanceof DOMException && error.name === "AbortError";
@@ -586,7 +627,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         durationMs: Date.now() - startedAt
       });
       if (!didTimeout) {
-        dispatchRecommendationRefresh({ type: "error", error: t("plantAnalysis.updateFailed") });
+        dispatchRecommendationRefresh({ type: "error", error: t("plantAnalysis.refreshFailedInline") });
       }
     } finally {
       window.clearTimeout(timeoutId);
@@ -598,6 +639,13 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
 
   return (
     <main className={`mx-auto min-h-screen w-full max-w-[430px] bg-cream px-5 ${careActionState?.isActionable ? "pb-[calc(9rem+env(safe-area-inset-bottom))]" : "pb-10"}`}>
+      <RecommendationAutoRefresh
+        shouldRefresh={recommendationsAreStale}
+        refreshKey={recommendationRefreshKey}
+        status={recommendationRefreshState.status}
+        onRefresh={() => void updateRecommendations()}
+        onReset={() => dispatchRecommendationRefresh({ type: "reset" })}
+      />
       <PlantDetailHeader
         title={plantName}
         isMenuOpen={isMenuOpen}
@@ -682,6 +730,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         milestones={milestones}
         hypothesisResolutions={hypothesisResolutions}
         onResolveHypothesis={(hypothesis, status, result) => resolvePlantHypothesis(plant.id, hypothesis, status, result)}
+        recommendationRefreshState={recommendationRefreshState}
       />
       {currentRecommendationRevision?.reasonText && !recommendationsAreStale ? (
         <section className="mt-4 rounded-[24px] bg-[#eef5e8] p-4 shadow-soft">
@@ -701,28 +750,6 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         <section className="mt-4 rounded-[24px] bg-white/75 p-4 shadow-soft">
           <p className="text-sm font-extrabold leading-5 text-ink">{t("plantAnalysis.visualEvidenceOldTitle")}</p>
           <p className="mt-1 text-sm font-bold leading-5 text-[#7a7166]">{t("plantAnalysis.visualEvidenceOldBody").replace("{days}", String(visualEvidenceAge))}</p>
-        </section>
-      ) : null}
-      {recommendationsAreStale && recommendationRefreshState.status !== "success" && recommendationRefreshState.status !== "unchanged" ? (
-        <section className="mt-4 rounded-[24px] bg-[#fffaf3] p-4 shadow-soft">
-          <p className="text-sm font-extrabold leading-5 text-ink">{t("plantAnalysis.staleTitle")}</p>
-          <p className="mt-1 text-sm font-bold leading-5 text-[#7a7166]">{t("plantAnalysis.staleBody")}</p>
-          {staleReasons.length ? (
-            <ul className="mt-3 grid gap-1.5 text-sm font-bold leading-5 text-[#6f675c]">
-              {staleReasons.slice(0, 3).map((reason) => (
-                <li key={reason}>• {staleReasonMessage(reason, t)}</li>
-              ))}
-            </ul>
-          ) : null}
-          {recommendationRefreshState.status === "error" ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{recommendationRefreshState.error ?? t("plantAnalysis.updateFailed")}</p> : null}
-          <button
-            type="button"
-            onClick={() => void updateRecommendations()}
-            disabled={recommendationRefreshState.status === "loading" || !photos.length}
-            className="mt-3 min-h-11 w-full rounded-[18px] bg-[#2d7a4f] px-4 text-sm font-extrabold text-white disabled:opacity-60"
-          >
-            {recommendationRefreshState.status === "loading" ? t("plantAnalysis.updatingRecommendations") : t("plantAnalysis.updateRecommendations")}
-          </button>
         </section>
       ) : null}
       <button
