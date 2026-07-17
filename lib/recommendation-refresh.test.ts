@@ -164,6 +164,19 @@ assert.equal(
   }),
   false
 );
+assert.equal(
+  isRecommendationStale({
+    plant: { ...plant, updatedAt: "2026-07-16T11:01:00.000Z" },
+    analysis,
+    currentRevision: revision,
+    homes: [home],
+    rooms: [room],
+    milestones: [],
+    careEvents: [],
+    hypothesisResolutions: []
+  }),
+  false
+);
 assert.equal(sourceAnalysisAgeDays(analysis, new Date("2026-07-31T10:00:00.000Z")), 30);
 assert.equal(isVisualEvidenceStale(analysis, new Date("2026-07-31T10:00:00.000Z"), 30), true);
 

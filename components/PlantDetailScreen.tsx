@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
@@ -12,6 +12,7 @@ import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
 import { buildRecommendationContextSnapshot, changedContextSince, impactLabelKey, isRecommendationStale, isVisualEvidenceStale, reasonTypeFromChangedContext, sourceAnalysisAgeDays, staleReasonKeys, type RecommendationChangedContext, type RecommendationContextSnapshot } from "@/lib/recommendation-refresh";
+import { recommendationRefreshReducer } from "@/lib/recommendation-refresh-state";
 import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION } from "@/lib/recommendation-version";
 import { CareHistory } from "./CareHistory";
 import { CareDateEditor } from "./CareDateEditor";
@@ -32,6 +33,7 @@ import type { PlantAnalysisRecord, PlantPhoto, PlantRecommendationRevision, Soil
 import type { PendingPhotoUpload } from "./photo-upload-types";
 
 type Sheet = "check_soil" | "add_photo" | "add_event" | null;
+const recommendationRefreshTimeoutMs = 45_000;
 type PhotoAssessmentState =
   | { status: "idle" }
   | { status: "analyzing" }
@@ -200,10 +202,10 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const [fullCoverUrl, setFullCoverUrl] = useState<string | undefined>();
   const [baselineSaving, setBaselineSaving] = useState(false);
   const [photoAssessment, setPhotoAssessment] = useState<PhotoAssessmentState>({ status: "idle" });
-  const [isUpdatingRecommendations, setIsUpdatingRecommendations] = useState(false);
-  const [recommendationUpdateError, setRecommendationUpdateError] = useState<string | null>(null);
+  const [recommendationRefreshState, dispatchRecommendationRefresh] = useReducer(recommendationRefreshReducer, { status: "idle" });
   const loggedEvents = useRef(new Set<string>());
   const openedActionRef = useRef<string | null>(null);
+  const recommendationRefreshAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!toast) {
@@ -217,6 +219,12 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   useEffect(() => {
     logNavigationEvent("detail", plantId, "detail_shell_rendered");
   }, [plantId]);
+
+  useEffect(() => {
+    return () => {
+      recommendationRefreshAbortRef.current?.abort();
+    };
+  }, []);
 
   const careActionState = useMemo(
     () => (plant ? deriveCareActionState(plant, hypothesisResolutions, new Date(), { isCareDataReady: secondaryDataReady }) : null),
@@ -465,12 +473,20 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   };
 
   const updateRecommendations = async () => {
-    if (isUpdatingRecommendations || !photos.length || !analysis) {
+    if (recommendationRefreshState.status === "loading" || !photos.length || !analysis) {
       return;
     }
 
-    setIsUpdatingRecommendations(true);
-    setRecommendationUpdateError(null);
+    dispatchRecommendationRefresh({ type: "start" });
+    const abortController = new AbortController();
+    recommendationRefreshAbortRef.current?.abort();
+    recommendationRefreshAbortRef.current = abortController;
+    let didTimeout = false;
+    const timeoutId = window.setTimeout(() => {
+      didTimeout = true;
+      abortController.abort();
+      dispatchRecommendationRefresh({ type: "error", error: t("plantAnalysis.updateFailed") });
+    }, recommendationRefreshTimeoutMs);
     const startedAt = Date.now();
     try {
       const photosForAnalysis = [coverPhoto, ...photos.filter((photo) => photo.id !== coverPhoto?.id)].filter(Boolean).slice(0, 5) as PlantPhoto[];
@@ -526,8 +542,10 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         })
       );
 
-      const response = await fetch("/api/analyze-plant", { method: "POST", body: formData });
-      const payload = await response.json().catch(() => null);
+      const response = await fetch("/api/analyze-plant", { method: "POST", body: formData, signal: abortController.signal });
+      const payload = await response.json().catch(() => {
+        throw new Error("recommendation_refresh_invalid_json");
+      });
       if (!response.ok || !payload?.ok || !payload.analysis) {
         throw new Error(typeof payload?.error === "string" ? payload.error : "recommendation_refresh_failed");
       }
@@ -556,16 +574,25 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         changeSummary: payload.analysis.recommendationImpact?.changeSummary
       });
       console.info("recommendation_refresh_completed", { plantId: plant.id, photoCount: photosForAnalysis.length, durationMs: Date.now() - startedAt });
-      setToast(revisionResult.unchanged ? t("plantAnalysis.alreadyCurrent") : t("plantAnalysis.updateSuccess"));
+      if (!didTimeout) {
+        dispatchRecommendationRefresh({ type: revisionResult.unchanged ? "unchanged" : "success" });
+        setToast(revisionResult.unchanged ? t("plantAnalysis.alreadyCurrent") : t("plantAnalysis.updateSuccess"));
+      }
     } catch (error) {
+      const wasAborted = error instanceof DOMException && error.name === "AbortError";
       console.warn("recommendation_refresh_failed", {
         plantId: plant.id,
-        message: error instanceof Error ? error.message : "Unknown error",
+        message: wasAborted ? "recommendation_refresh_timeout_or_abort" : error instanceof Error ? error.message : "Unknown error",
         durationMs: Date.now() - startedAt
       });
-      setRecommendationUpdateError(t("plantAnalysis.updateFailed"));
+      if (!didTimeout) {
+        dispatchRecommendationRefresh({ type: "error", error: t("plantAnalysis.updateFailed") });
+      }
     } finally {
-      setIsUpdatingRecommendations(false);
+      window.clearTimeout(timeoutId);
+      if (recommendationRefreshAbortRef.current === abortController) {
+        recommendationRefreshAbortRef.current = null;
+      }
     }
   };
 
@@ -656,7 +683,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         hypothesisResolutions={hypothesisResolutions}
         onResolveHypothesis={(hypothesis, status, result) => resolvePlantHypothesis(plant.id, hypothesis, status, result)}
       />
-      {currentRecommendationRevision?.reasonText ? (
+      {currentRecommendationRevision?.reasonText && !recommendationsAreStale ? (
         <section className="mt-4 rounded-[24px] bg-[#eef5e8] p-4 shadow-soft">
           <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.revisionNoteTitle")}</p>
           <p className="mt-1 text-sm font-extrabold leading-5 text-[#355f3d]">{currentRecommendationRevision.reasonText}</p>
@@ -676,7 +703,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           <p className="mt-1 text-sm font-bold leading-5 text-[#7a7166]">{t("plantAnalysis.visualEvidenceOldBody").replace("{days}", String(visualEvidenceAge))}</p>
         </section>
       ) : null}
-      {recommendationsAreStale ? (
+      {recommendationsAreStale && recommendationRefreshState.status !== "success" && recommendationRefreshState.status !== "unchanged" ? (
         <section className="mt-4 rounded-[24px] bg-[#fffaf3] p-4 shadow-soft">
           <p className="text-sm font-extrabold leading-5 text-ink">{t("plantAnalysis.staleTitle")}</p>
           <p className="mt-1 text-sm font-bold leading-5 text-[#7a7166]">{t("plantAnalysis.staleBody")}</p>
@@ -687,14 +714,14 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
               ))}
             </ul>
           ) : null}
-          {recommendationUpdateError ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{recommendationUpdateError}</p> : null}
+          {recommendationRefreshState.status === "error" ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{recommendationRefreshState.error ?? t("plantAnalysis.updateFailed")}</p> : null}
           <button
             type="button"
             onClick={() => void updateRecommendations()}
-            disabled={isUpdatingRecommendations || !photos.length}
+            disabled={recommendationRefreshState.status === "loading" || !photos.length}
             className="mt-3 min-h-11 w-full rounded-[18px] bg-[#2d7a4f] px-4 text-sm font-extrabold text-white disabled:opacity-60"
           >
-            {isUpdatingRecommendations ? t("plantAnalysis.updatingRecommendations") : t("plantAnalysis.updateRecommendations")}
+            {recommendationRefreshState.status === "loading" ? t("plantAnalysis.updatingRecommendations") : t("plantAnalysis.updateRecommendations")}
           </button>
         </section>
       ) : null}

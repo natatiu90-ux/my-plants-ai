@@ -377,10 +377,6 @@ export function recommendationRevisionIsUnchanged(input: {
   if (input.modelVersion && input.currentRevision.modelVersion && input.currentRevision.modelVersion !== input.modelVersion) {
     return false;
   }
-  if (snapshotTimestamp(input.currentRevision.contextSnapshot) !== snapshotTimestamp(input.contextSnapshot as unknown as Record<string, unknown>)) {
-    return false;
-  }
-
   return (
     stableRecommendationFingerprint({
       recommendations: input.currentRevision.recommendations,
@@ -414,16 +410,21 @@ export function isRecommendationStale(input: {
   careEvents: PlantCareEvent[];
   hypothesisResolutions: PlantHypothesisResolution[];
 }) {
-  const contextAt = latestContextTimestamp(input);
-  const revisionContextAt = snapshotTimestamp(input.currentRevision?.contextSnapshot);
-  if (revisionContextAt != null) {
-    return Boolean(
-      (contextAt != null && contextAt > revisionContextAt) ||
-        input.currentRevision?.promptVersion !== RECOMMENDATION_PROMPT_VERSION ||
-        input.currentRevision?.recommendationVersion !== RECOMMENDATION_VERSION
+  if (input.currentRevision?.isCurrent) {
+    const currentSnapshot = buildRecommendationContextSnapshot(input);
+    const changedContext = changedContextSince(input.currentRevision.contextSnapshot, currentSnapshot, {
+      previousPromptVersion: input.currentRevision.promptVersion,
+      currentPromptVersion: RECOMMENDATION_PROMPT_VERSION,
+      previousModelVersion: input.currentRevision.modelVersion
+    });
+    return (
+      hasChangedContextChanges(changedContext) ||
+      input.currentRevision.promptVersion !== RECOMMENDATION_PROMPT_VERSION ||
+      input.currentRevision.recommendationVersion !== RECOMMENDATION_VERSION
     );
   }
 
+  const contextAt = latestContextTimestamp(input);
   const analysisAt = lastAnalysisTimestamp(input.analysis);
   return Boolean(analysisAt != null && contextAt != null && contextAt > analysisAt);
 }

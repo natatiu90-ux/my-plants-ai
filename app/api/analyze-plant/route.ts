@@ -588,6 +588,7 @@ function parseBoolean(value: FormDataEntryValue | null) {
 }
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
   const trace: AnalyzeTraceEvent[] = [];
   traceEvent(trace, "request_received", {
     method: request.method,
@@ -931,6 +932,11 @@ export async function POST(request: Request) {
         typeof speciesAwareAnalysis.speciesReasoning === "object" && speciesAwareAnalysis.speciesReasoning && "questionSelection" in speciesAwareAnalysis.speciesReasoning
           ? (speciesAwareAnalysis.speciesReasoning as { questionSelection?: { selectedQuestions?: unknown } }).questionSelection?.selectedQuestions ?? null
           : null
+    });
+    traceEvent(trace, "response_returned", {
+      ok: true,
+      analysisMode,
+      durationMs: Date.now() - startedAt
     });
 
     return NextResponse.json({
