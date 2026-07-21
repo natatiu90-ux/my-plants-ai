@@ -58,6 +58,19 @@ type AddPlantInput = {
   };
 };
 
+export type CompleteSoilCheckResult = {
+  reused: boolean;
+  milestone?: PlantMilestone;
+  latestSoilResult: SoilCheckResult;
+  checkedAt: string;
+  nextCheckAt: string | null;
+  taskState: {
+    status: Plant["status"];
+    nextAction: Plant["nextAction"];
+    careScheduleStatus: Plant["careScheduleStatus"];
+  };
+};
+
 type PlantStoreValue = PlantState & {
   status: StoreStatus;
   error: string | null;
@@ -100,7 +113,8 @@ type PlantStoreValue = PlantState & {
   ) => Promise<void>;
   deleteMilestone: (milestoneId: string) => Promise<void>;
   waterPlant: (plantId: string) => Promise<void>;
-  recordSoilChecked: (plantId: string, result: SoilCheckResult, note?: string, actionSessionId?: string) => Promise<{ reused: boolean }>;
+  completeSoilCheck: (plantId: string, result: SoilCheckResult, note?: string, actionSessionId?: string) => Promise<CompleteSoilCheckResult>;
+  recordSoilChecked: (plantId: string, result: SoilCheckResult, note?: string, actionSessionId?: string) => Promise<CompleteSoilCheckResult>;
   saveBaselineHistory: (plantId: string, input: { kind: "watering" | "repotting"; eventDate?: string; unknown?: boolean }) => Promise<void>;
   savePlantAnalysis: (
     plantId: string,
@@ -178,7 +192,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
   const [user, setUser] = useState<User | null>(null);
   const [repositories, setRepositories] = useState<Repositories | null>(null);
   const attemptedLegacyClaimForUser = useRef<string | null>(null);
-  const soilCheckInFlightRef = useRef(new Map<string, Promise<{ reused: boolean }>>());
+  const soilCheckInFlightRef = useRef(new Map<string, Promise<CompleteSoilCheckResult>>());
   const completedSoilCheckKeysRef = useRef(new Set<string>());
 
   const resetToUnauthenticated = useCallback(() => {
@@ -962,7 +976,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
     [repositories]
   );
 
-  const recordSoilChecked = useCallback(
+  const completeSoilCheck = useCallback(
     async (plantId: string, result: SoilCheckResult, note?: string, actionSessionId?: string) => {
       if (!repositories) {
         throw new Error("Plant collection is not ready.");
@@ -971,7 +985,18 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       const actionKey = soilCheckActionKey({ plantId, result, actionSessionId });
       if (completedSoilCheckKeysRef.current.has(actionKey)) {
         console.info("care_action_idempotent_reuse", { plantId, action: "soil_checked", result, actionSessionId });
-        return { reused: true };
+        const plant = state.plants.find((item) => item.id === plantId);
+        return {
+          reused: true,
+          latestSoilResult: result,
+          checkedAt: plant?.lastSoilCheckedAt ?? toDateKey(new Date()),
+          nextCheckAt: plant?.nextCheckAt ?? null,
+          taskState: {
+            status: plant?.status ?? "healthy",
+            nextAction: plant?.nextAction ?? null,
+            careScheduleStatus: plant?.careScheduleStatus ?? "active"
+          }
+        };
       }
 
       const inFlight = soilCheckInFlightRef.current.get(actionKey);
@@ -987,6 +1012,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         throw new Error("Plant not found.");
       }
 
+      const checkedAt = toDateKey(new Date());
       const plantMilestones = state.milestones.filter((milestone) => milestone.plantId === plantId);
       const plantHypothesisResolutions = state.hypothesisResolutions.filter((resolution) => resolution.plantId === plantId);
       const resolution = calculateSoilCheckCareResolution(currentPlant, result, plantMilestones, plantHypothesisResolutions);
@@ -1008,7 +1034,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         status: resolution.status,
         nextAction: resolution.nextAction,
         nextCheckAt: resolution.nextCheckAt,
-        lastSoilCheckedAt: toDateKey(new Date()),
+        lastSoilCheckedAt: checkedAt,
         lastSoilResult: result,
         careScheduleStatus: resolution.careScheduleStatus,
         notificationDueCycleKey: null
@@ -1017,7 +1043,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       console.info("care_schedule_recalculated", { result, profile: resolution.profile, nextCheckAt: resolution.nextCheckAt, checkInDays: resolution.checkInDays });
       const milestone = await repositories.milestones.addMilestone(plantId, {
         type: "soil_checked",
-        eventDate: toDateKey(new Date()),
+        eventDate: checkedAt,
         note
       });
       console.info("care_save_completed", {
@@ -1047,7 +1073,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
                     : "plants.afterWatering.message",
                 nextAction: resolution.nextAction,
                 nextCheckAt: resolution.nextCheckAt ?? undefined,
-                lastSoilCheckedAt: toDateKey(new Date()),
+                lastSoilCheckedAt: checkedAt,
                 lastSoilResult: result,
                 careScheduleStatus: resolution.careScheduleStatus,
                 notificationDueCycleKey: undefined
@@ -1055,7 +1081,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
             : plant
         ),
         careEvents: [
-          { id: `${plantId}-soil-${Date.now()}`, plantId, type: "soil_checked", createdAt: toDateKey(new Date()), metadata: { result } },
+          { id: `${plantId}-soil-${Date.now()}`, plantId, type: "soil_checked", createdAt: checkedAt, metadata: { result } },
           ...current.careEvents
         ],
         milestones: [milestone, ...current.milestones],
@@ -1067,7 +1093,18 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           : current.hypothesisResolutions
       }));
       completedSoilCheckKeysRef.current.add(actionKey);
-      return { reused: false };
+      return {
+        reused: false,
+        milestone,
+        latestSoilResult: result,
+        checkedAt,
+        nextCheckAt: resolution.nextCheckAt,
+        taskState: {
+          status: resolution.status,
+          nextAction: resolution.nextAction,
+          careScheduleStatus: resolution.careScheduleStatus
+        }
+      };
       })();
 
       soilCheckInFlightRef.current.set(actionKey, savePromise);
@@ -1089,6 +1126,8 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
     },
     [repositories, state.hypothesisResolutions, state.milestones, state.plants]
   );
+
+  const recordSoilChecked = completeSoilCheck;
 
   const saveBaselineHistory = useCallback(
     async (plantId: string, input: { kind: "watering" | "repotting"; eventDate?: string; unknown?: boolean }) => {
@@ -1487,6 +1526,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       updateMilestone,
       deleteMilestone,
       waterPlant,
+      completeSoilCheck,
       recordSoilChecked,
       saveBaselineHistory,
       savePlantAnalysis,
@@ -1520,6 +1560,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       getPlantCareEvents,
       getPlantMilestones,
       getPlantPhotos,
+      completeSoilCheck,
       recordSoilChecked,
       importLegacyPlantsToHome,
       saveBaselineHistory,

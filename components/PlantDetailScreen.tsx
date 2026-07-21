@@ -16,6 +16,7 @@ import { nextPostCreationClarificationStep } from "@/lib/post-creation-clarifica
 import { buildRecommendationContextSnapshot, changedContextSince, impactLabelKey, isRecommendationStale, isVisualEvidenceStale, reasonTypeFromChangedContext, sourceAnalysisAgeDays, type RecommendationChangedContext, type RecommendationContextSnapshot } from "@/lib/recommendation-refresh";
 import { recommendationRefreshReducer, type RecommendationRefreshStatus } from "@/lib/recommendation-refresh-state";
 import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION } from "@/lib/recommendation-version";
+import { soilCheckResultFromClarificationAnswer } from "@/lib/soil-check-completion";
 import { CareHistory } from "./CareHistory";
 import { CareDateEditor } from "./CareDateEditor";
 import { CareSummary } from "./CareSummary";
@@ -32,7 +33,7 @@ import { PlantNotificationControls } from "./PlantNotificationControls";
 import { PlantStatusSection } from "./PlantStatusSection";
 import { PrimaryCareAction } from "./PrimaryCareAction";
 import { Toast } from "./Toast";
-import type { PlantAnalysisRecord, PlantPhoto, PlantRecommendationRevision, Room, SoilCheckResult } from "@/types/plant";
+import type { PlantAnalysisRecord, PlantHypothesis, PlantHypothesisStatus, PlantPhoto, PlantRecommendationRevision, Room, SoilCheckResult } from "@/types/plant";
 import type { PendingPhotoUpload } from "./photo-upload-types";
 
 type Sheet = "check_soil" | "add_photo" | "add_event" | null;
@@ -224,7 +225,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useI18n();
-  const { addMilestone, addPlantPhotos, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getCurrentRecommendationRevision, getPlant, getPlantAnalysis, getPlantCareEvents, getPlantHypothesisResolutions, getPlantMilestones, getPlantPhotos, homes, recordSoilChecked, resolvePlantHypothesis, rooms, saveBaselineHistory, savePlantAnalysis, saveRecommendationRevision, secondaryDataReady, updateRoom, waterPlant } =
+  const { addMilestone, addPlantPhotos, completeSoilCheck, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getCurrentRecommendationRevision, getPlant, getPlantAnalysis, getPlantCareEvents, getPlantHypothesisResolutions, getPlantMilestones, getPlantPhotos, homes, recordSoilChecked, resolvePlantHypothesis, rooms, saveBaselineHistory, savePlantAnalysis, saveRecommendationRevision, secondaryDataReady, updateRoom, waterPlant } =
     usePlantStore();
   const { locale } = useI18n();
   const plant = getPlant(plantId);
@@ -458,6 +459,16 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     } finally {
       setSunlightSavingKey(null);
     }
+  };
+
+  const completeClarificationAnswer = async (hypothesis: PlantHypothesis, status: PlantHypothesisStatus, result: string) => {
+    if (hypothesis === "soil_condition") {
+      const soilResult = soilCheckResultFromClarificationAnswer(result);
+      await completeSoilCheck(plant.id, soilResult, undefined, `analysis-${displayAnalysis?.id ?? "current"}-soil`);
+      return;
+    }
+
+    await resolvePlantHypothesis(plant.id, hypothesis, status, result);
   };
 
   const analyzeNewPhotos = async (selectedPhotos: PendingPhotoUpload[], savedPhotos: PlantPhoto[]) => {
@@ -803,7 +814,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         plant={plant}
         milestones={milestones}
         hypothesisResolutions={hypothesisResolutions}
-        onResolveHypothesis={(hypothesis, status, result) => resolvePlantHypothesis(plant.id, hypothesis, status, result)}
+        onResolveHypothesis={completeClarificationAnswer}
         recommendationRefreshState={recommendationRefreshState}
         hasPendingBaselineQuestions={Boolean(baselineQuestion)}
       />

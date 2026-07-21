@@ -1,4 +1,4 @@
-import { deriveCareActionState, isDueCareActionState } from "@/lib/plant-action-eligibility";
+import { deriveCareActionState, isDueCareActionState } from "./plant-action-eligibility";
 import type { Plant, PlantHypothesisResolution } from "@/types/plant";
 
 const today = new Date("2026-07-16T12:00:00.000Z");
@@ -241,4 +241,32 @@ const homeAttentionCount = careActionFixtures.filter((fixture) => {
 
 if (homeAttentionCount !== 6) {
   throw new Error(`Expected 6 due attention fixtures, got ${homeAttentionCount}`);
+}
+
+const afterAiSoilAnswerBeforeRefresh = deriveCareActionState(
+  plant({
+    status: "healthy",
+    nextAction: "check_soil",
+    nextCheckAt: "2026-07-20",
+    lastSoilCheckedAt: "2026-07-16",
+    lastSoilResult: "slightly_damp"
+  }),
+  [soilResolution({ resolvedAt: "2026-07-16T08:00:00.000Z", createdAt: "2026-07-16T08:00:00.000Z" })],
+  today,
+  { isCareDataReady: true }
+);
+
+if (afterAiSoilAnswerBeforeRefresh.isActionable || afterAiSoilAnswerBeforeRefresh.status !== "upcoming") {
+  throw new Error("AI soil answer should complete the due soil CTA before recommendation refresh finishes.");
+}
+
+const failedCarePersistenceStillDue = deriveCareActionState(
+  plant({ status: "check_soon", nextAction: "check_soil", nextCheckAt: "2026-07-16" }),
+  [],
+  today,
+  { isCareDataReady: true }
+);
+
+if (!failedCarePersistenceStillDue.isActionable || failedCarePersistenceStillDue.status !== "due") {
+  throw new Error("Failed soil persistence must leave the due soil CTA retryable.");
 }
