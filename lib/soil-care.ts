@@ -1,4 +1,4 @@
-import { addDays, toDateKey } from "@/lib/date-format";
+import { addDays, toDateKey } from "./date-format";
 import type { Plant, PlantHypothesisResolution, PlantMilestone, SoilCheckResult } from "@/types/plant";
 
 export type SoilCareProfile = "drought_tolerant" | "balanced" | "moisture_loving";
@@ -15,6 +15,13 @@ export type SoilCheckCareResolution = {
     en: string;
     ru: string;
   };
+};
+
+type NextPlantActionResolution = {
+  status: Plant["status"];
+  nextAction: Plant["nextAction"];
+  checkInDays: number | null;
+  replacementRecommendationId: string | null;
 };
 
 function normalizedPlantName(plant: Plant) {
@@ -66,6 +73,82 @@ function hasPoorDrainage(resolutions: PlantHypothesisResolution[]) {
 
 function wasRepottedRecently(milestones: PlantMilestone[]) {
   return milestones.some((milestone) => milestone.type === "repotted" && milestone.eventDate && (daysSince(milestone.eventDate) ?? Number.POSITIVE_INFINITY) <= 14);
+}
+
+export function deriveNextPlantAction(input: {
+  plant: Plant;
+  soilResult: SoilCheckResult;
+  profile?: SoilCareProfile;
+  milestones?: PlantMilestone[];
+  hypothesisResolutions?: PlantHypothesisResolution[];
+}): NextPlantActionResolution {
+  const profile = input.profile ?? soilCareProfileForPlant(input.plant);
+  const lastWateredDaysAgo = daysSince(input.plant.lastWateredAt);
+  const recentRepotting = wasRepottedRecently(input.milestones ?? []);
+  const drainageConcern = hasPoorDrainage(input.hypothesisResolutions ?? []);
+
+  if (input.soilResult === "dry") {
+    const wateredVeryRecently = lastWateredDaysAgo != null && lastWateredDaysAgo <= 2;
+    if (profile === "drought_tolerant") {
+      if (!wateredVeryRecently && !recentRepotting && !drainageConcern) {
+        return {
+          status: "check_soon",
+          nextAction: "water",
+          checkInDays: null,
+          replacementRecommendationId: "water_after_soil_check"
+        };
+      }
+
+      return {
+        status: "healthy",
+        nextAction: null,
+        checkInDays: 5,
+        replacementRecommendationId: "next_check_scheduled"
+      };
+    }
+
+    if (profile === "moisture_loving") {
+      return {
+        status: "check_soon",
+        nextAction: "water",
+        checkInDays: null,
+        replacementRecommendationId: "water_after_soil_check"
+      };
+    }
+
+    const shouldWait = lastWateredDaysAgo != null && lastWateredDaysAgo <= 3;
+    return {
+      status: shouldWait ? "healthy" : "check_soon",
+      nextAction: shouldWait ? null : "water",
+      checkInDays: shouldWait ? 2 : null,
+      replacementRecommendationId: shouldWait ? "next_check_scheduled" : "water_after_soil_check"
+    };
+  }
+
+  if (input.soilResult === "slightly_damp") {
+    return {
+      status: "healthy",
+      nextAction: null,
+      checkInDays: (profile === "drought_tolerant" ? 4 : profile === "moisture_loving" ? 2 : 3) + (recentRepotting ? 1 : 0),
+      replacementRecommendationId: "next_check_scheduled"
+    };
+  }
+
+  if (input.soilResult === "very_wet") {
+    return {
+      status: drainageConcern || profile === "drought_tolerant" ? "check_soon" : "healthy",
+      nextAction: null,
+      checkInDays: profile === "moisture_loving" && !drainageConcern ? 2 : 3,
+      replacementRecommendationId: drainageConcern ? "check_drainage_after_wet_soil" : "next_check_scheduled"
+    };
+  }
+
+  return {
+    status: "check_soon",
+    nextAction: "check_soil",
+    checkInDays: null,
+    replacementRecommendationId: "soil_check_guidance"
+  };
 }
 
 function dateInDays(days: number | null) {
@@ -134,52 +217,17 @@ export function calculateSoilCheckCareResolution(
   hypothesisResolutions: PlantHypothesisResolution[]
 ): SoilCheckCareResolution {
   const profile = soilCareProfileForPlant(plant);
-  const lastWateredDaysAgo = daysSince(plant.lastWateredAt);
-  const recentRepotting = wasRepottedRecently(milestones);
   const drainageConcern = hasPoorDrainage(hypothesisResolutions);
-
-  let days: number | null;
-  let nextAction: Plant["nextAction"] = null;
-  let status: Plant["status"] = "healthy";
-  let replacementRecommendationId: string | null = "next_check_scheduled";
-
-  if (result === "dry") {
-    const wateredVeryRecently = lastWateredDaysAgo != null && lastWateredDaysAgo <= 2;
-    if (profile === "drought_tolerant") {
-      days = wateredVeryRecently || recentRepotting ? 5 : 4;
-    } else if (profile === "moisture_loving") {
-      days = null;
-      nextAction = "water";
-      status = "check_soon";
-      replacementRecommendationId = "water_after_soil_check";
-    } else {
-      days = lastWateredDaysAgo != null && lastWateredDaysAgo <= 3 ? 2 : null;
-      nextAction = days == null ? "water" : null;
-      status = days == null ? "check_soon" : "healthy";
-      replacementRecommendationId = days == null ? "water_after_soil_check" : "next_check_scheduled";
-    }
-  } else if (result === "slightly_damp") {
-    days = profile === "drought_tolerant" ? 4 : profile === "moisture_loving" ? 2 : 3;
-    if (recentRepotting) days += 1;
-  } else if (result === "very_wet") {
-    days = profile === "drought_tolerant" || drainageConcern ? 3 : profile === "moisture_loving" ? 2 : 3;
-    status = drainageConcern || profile === "drought_tolerant" ? "check_soon" : "healthy";
-    replacementRecommendationId = drainageConcern ? "check_drainage_after_wet_soil" : "next_check_scheduled";
-  } else {
-    days = null;
-    nextAction = "check_soil";
-    status = "check_soon";
-    replacementRecommendationId = "soil_check_guidance";
-  }
+  const next = deriveNextPlantAction({ plant, soilResult: result, profile, milestones, hypothesisResolutions });
 
   return {
     profile,
-    status,
-    nextAction,
-    nextCheckAt: dateInDays(days),
-    checkInDays: days,
+    status: next.status,
+    nextAction: next.nextAction,
+    nextCheckAt: dateInDays(next.checkInDays),
+    checkInDays: next.checkInDays,
     careScheduleStatus: "active",
-    replacementRecommendationId,
-    message: localizedMessage(plant, result, days, nextAction, profile, drainageConcern)
+    replacementRecommendationId: next.replacementRecommendationId,
+    message: localizedMessage(plant, result, next.checkInDays, next.nextAction, profile, drainageConcern)
   };
 }
