@@ -164,6 +164,13 @@ function builtInRoomExists(name: string) {
   );
 }
 
+function resolveWithTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T) {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => window.setTimeout(() => resolve(fallback), timeoutMs))
+  ]);
+}
+
 export function PlantStoreProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<PlantState>(emptyState);
   const [status, setStatus] = useState<StoreStatus>("loading");
@@ -620,18 +627,6 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           : input.lastWateredAt
             ? toDateKey(addDays(reminderStartDate, 4))
             : undefined;
-      const shouldEnablePlantReminders = await getNotificationSupport()
-        .then((support) =>
-          shouldEnableRemindersForNewPlant(support.state, {
-            careNotificationsEnabled: support.careNotificationsEnabled
-          })
-        )
-        .catch((reminderError) => {
-          console.info("new_plant_reminder_default_check_failed", {
-            message: reminderError instanceof Error ? reminderError.message : "Unknown error"
-          });
-          return false;
-        });
       let plant: Plant;
       try {
         plant = await repositories.plants.createPlant({
@@ -711,25 +706,6 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           }));
         }
 
-        if (shouldEnablePlantReminders) {
-          await repositories.plants.updateRecommendationState(plant.id, {
-            status: plant.status,
-            nextAction: plant.nextAction ?? null,
-            nextCheckAt: plant.nextCheckAt ?? null,
-            notificationEnabled: true
-          })
-            .then(() => {
-              plant = { ...plant, notificationEnabled: true };
-              console.info("new_plant_reminders_enabled", { plantId: plant.id });
-            })
-            .catch((reminderError) => {
-              console.info("new_plant_reminders_enable_failed", {
-                plantId: plant.id,
-                message: reminderError instanceof Error ? reminderError.message : "Unknown error"
-              });
-            });
-        }
-
         const analysisRecord: PlantAnalysisRecord | null = input.analysis
           ? {
               id: `${plant.id}-analysis-${Date.now()}`,
@@ -760,6 +736,47 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
             ...current.careEvents
           ]
         }));
+
+        void resolveWithTimeout(
+          getNotificationSupport()
+            .then((support) =>
+              shouldEnableRemindersForNewPlant(support.state, {
+                careNotificationsEnabled: support.careNotificationsEnabled
+              })
+            )
+            .catch((reminderError) => {
+              console.info("new_plant_reminder_default_check_failed", {
+                plantId: plant.id,
+                message: reminderError instanceof Error ? reminderError.message : "Unknown error"
+              });
+              return false;
+            }),
+          1200,
+          false
+        ).then(async (shouldEnablePlantReminders) => {
+          if (!shouldEnablePlantReminders) {
+            return;
+          }
+
+          try {
+            await repositories.plants.updateRecommendationState(plant.id, {
+              status: plant.status,
+              nextAction: plant.nextAction ?? null,
+              nextCheckAt: plant.nextCheckAt ?? null,
+              notificationEnabled: true
+            });
+            setState((current) => ({
+              ...current,
+              plants: current.plants.map((item) => (item.id === plant.id ? { ...item, notificationEnabled: true } : item))
+            }));
+            console.info("new_plant_reminders_enabled", { plantId: plant.id });
+          } catch (reminderError) {
+            console.info("new_plant_reminders_enable_failed", {
+              plantId: plant.id,
+              message: reminderError instanceof Error ? reminderError.message : "Unknown error"
+            });
+          }
+        });
 
         return plant.id;
       } catch (error) {
