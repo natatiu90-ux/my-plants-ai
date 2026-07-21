@@ -18,6 +18,7 @@ import {
 import { appBuildStorageKey, appBuildVersion, isStandalonePwa } from "@/lib/app-version";
 import { inspectImageDisplay, normalizeImageBlob, readJpegExifOrientation } from "@/lib/client-image-normalization";
 import { buildPlantEnvironmentContext, formatEnvironmentContextForPrompt } from "@/lib/home-room-context";
+import { INITIAL_ADD_FAST_ANALYSIS_MODE } from "@/lib/plant-analysis-pipeline";
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
 import { plantCreationDiagnosticFromError, type PlantCreationDiagnostic, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
@@ -112,7 +113,11 @@ const performanceRows: { label: string; reportLabel: string; key: keyof AddPlant
   { label: "Network upload", reportLabel: "Upload", key: "network_upload" },
   { label: "AI response", reportLabel: "AI", key: "ai_response_latency" },
   { label: "Response parsing", reportLabel: "Parse", key: "response_parsing" },
-  { label: "UI render", reportLabel: "Render", key: "ui_render_after_response" }
+  { label: "UI render", reportLabel: "Render", key: "ui_render_after_response" },
+  { label: "Plant persistence", reportLabel: "Persist", key: "plant_persistence" },
+  { label: "Detail opened", reportLabel: "Detail", key: "time_until_detail_open" },
+  { label: "Recommendation enrichment", reportLabel: "Enrich", key: "recommendation_enrichment_latency" },
+  { label: "Enrichment persistence", reportLabel: "EnrichPersist", key: "recommendation_enrichment_persistence" }
 ];
 
 const analysisStageCount = 4;
@@ -912,6 +917,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         });
 
         formData.append("locale", locale);
+        formData.append("analysisMode", INITIAL_ADD_FAST_ANALYSIS_MODE);
         const selectedRoom = roomKey && !roomKey.startsWith("rooms.") ? analysisContext.rooms.find((room) => room.id === roomKey) : undefined;
         const environmentContext = buildPlantEnvironmentContext({
           plant: selectedRoom
@@ -1342,6 +1348,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
 
     let activeSaveStage: PlantCreationStage = "unknown";
     let savedPlantId: string | undefined;
+    let persistenceToken: ReturnType<typeof startAddPlantPerformanceStage> | null = null;
     logAddPlantDebug("plant_submit_started", {
       photoCount: selectedPhotos.length,
       hasRoom: Boolean(roomKey),
@@ -1402,6 +1409,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         }
       }
       activeSaveStage = "create_plant";
+      persistenceToken = startAddPlantPerformanceStage("plant_persistence", {
+        selectedPhotos: selectedPhotos.length,
+        hasAnalysis: Boolean(analysis)
+      });
       const plantId = await addPlant({
         homeName: savedNickname,
         speciesName: savedCommonName,
@@ -1422,6 +1433,11 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             }
           : undefined
       });
+      endAddPlantPerformanceStage(persistenceToken, {
+        plantId,
+        ok: true
+      });
+      persistenceToken = null;
       savedPlantId = plantId;
       logAddPlantDebug("plant_save_completed", { plantId });
       logAddPlantDebug("temporary_photo_cleanup_started", {
@@ -1438,11 +1454,19 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       clearAddPlantDraft();
       discardedDraftRef.current = true;
       revokePhotoObjectUrls(selectedPhotos);
+      recordAddPlantPerformanceStage("time_until_detail_open", 0, { plantId });
       router.push(`/plants/${plantId}`);
       router.refresh();
       logAddPlantDebug("modal_close_started", { plantId });
       onClose();
     } catch (error) {
+      if (persistenceToken) {
+        endAddPlantPerformanceStage(persistenceToken, {
+          ok: false,
+          stage: activeSaveStage,
+          message: error instanceof Error ? error.message : "plant_save_failed"
+        });
+      }
       const diagnostic = plantCreationDiagnosticFromError(error, {
         stage: activeSaveStage,
         plantId: savedPlantId

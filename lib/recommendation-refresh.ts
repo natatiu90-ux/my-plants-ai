@@ -1,6 +1,7 @@
 import type { HomeContext, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesisResolution, PlantMilestone, PlantRecommendationRevision, Room } from "@/types/plant";
 import type { RecommendationImpactLevel, RecommendationRevisionReasonType } from "@/types/plant";
 import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION, VISUAL_EVIDENCE_STALE_DAYS } from "@/lib/recommendation-version";
+import { shouldStartRecommendationEnrichment } from "./plant-analysis-pipeline";
 
 function timestamp(value: string | undefined | null) {
   if (!value) {
@@ -422,6 +423,15 @@ export function isRecommendationStale(input: {
       input.currentRevision.promptVersion !== RECOMMENDATION_PROMPT_VERSION ||
       input.currentRevision.recommendationVersion !== RECOMMENDATION_VERSION
     );
+  }
+
+  if (
+    shouldStartRecommendationEnrichment({
+      sourceAnalysisMode: typeof input.analysis?.rawResult?.analysisMode === "string" ? input.analysis.rawResult.analysisMode : null,
+      hasCurrentRevision: Boolean(input.currentRevision?.isCurrent)
+    })
+  ) {
+    return true;
   }
 
   const contextAt = latestContextTimestamp(input);

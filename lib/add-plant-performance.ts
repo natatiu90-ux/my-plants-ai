@@ -29,7 +29,11 @@ export type AddPlantPerformanceSummary = {
     | "network_upload"
     | "ai_response_latency"
     | "response_parsing"
-    | "ui_render_after_response",
+    | "ui_render_after_response"
+    | "plant_persistence"
+    | "time_until_detail_open"
+    | "recommendation_enrichment_latency"
+    | "recommendation_enrichment_persistence",
     number
   >>;
   totalMs: number;
@@ -53,7 +57,7 @@ const summaryGlobalKey = "__myPlantsAddPlantPerformanceSummary";
 export const addPlantPerformanceSummaryEvent = "my-plants:add-plant-performance-summary";
 
 function isEnabled() {
-  return typeof window !== "undefined" && process.env.NODE_ENV !== "production";
+  return typeof window !== "undefined" && (process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_DEBUG_ANALYSIS === "true");
 }
 
 function state(): AddPlantPerformanceState | null {
@@ -188,6 +192,10 @@ export function logAddPlantPerformanceSummary(data: Record<string, unknown> = {}
     AI: totals.ai_response_latency ?? 0,
     Parse: totals.response_parsing ?? 0,
     Render: totals.ui_render_after_response ?? 0,
+    PlantPersistence: totals.plant_persistence ?? 0,
+    DetailOpen: totals.time_until_detail_open ?? 0,
+    Enrichment: totals.recommendation_enrichment_latency ?? 0,
+    EnrichmentPersistence: totals.recommendation_enrichment_persistence ?? 0,
     TOTAL: totalMs,
     Bottleneck: bottleneck[0],
     BottleneckMs: bottleneck[1],

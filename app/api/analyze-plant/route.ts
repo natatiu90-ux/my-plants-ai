@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import convertHeic from "heic-convert";
 import sharp from "sharp";
 import { selectSpeciesCareProfile, speciesProfilesPromptContext, speciesTraitsForAnalysis } from "@/lib/species-profiles";
+import { INITIAL_ADD_FAST_LLM_FIELDS, isInitialAddFastAnalysisMode, maxOutputTokensForAnalysisMode } from "@/lib/plant-analysis-pipeline";
 import { RECOMMENDATION_PROMPT_VERSION } from "@/lib/recommendation-version";
 
 export const runtime = "nodejs";
@@ -16,6 +17,16 @@ const openAIRequestTimeoutMs = 90_000;
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 const allowedExtensions = new Set(["jpg", "jpeg", "png", "heic", "heif"]);
 const model = process.env.OPENAI_MODEL ?? "gpt-5-mini";
+const allowedReasoningEfforts = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const allowedResponseVerbosities = new Set(["low", "medium", "high"]);
+const openAIReasoningEffort = allowedReasoningEfforts.has(process.env.OPENAI_REASONING_EFFORT ?? "")
+  ? process.env.OPENAI_REASONING_EFFORT
+  : "minimal";
+const openAIResponseVerbosity = allowedResponseVerbosities.has(process.env.OPENAI_RESPONSE_VERBOSITY ?? "")
+  ? process.env.OPENAI_RESPONSE_VERBOSITY
+  : "low";
+const parsedMaxOutputTokens = Number(process.env.OPENAI_MAX_OUTPUT_TOKENS ?? 6000);
+const openAIMaxOutputTokens = Number.isFinite(parsedMaxOutputTokens) && parsedMaxOutputTokens > 0 ? Math.round(parsedMaxOutputTokens) : 6000;
 
 type ImageDiagnostic = {
   debugId: string | null;
@@ -392,6 +403,114 @@ const schema = {
   strict: true
 };
 
+const compactClarificationQuestionSchema = {
+  type: "array",
+  maxItems: 1,
+  items: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      hypothesis: { type: "string", enum: ["soil_condition", "repotting", "root_condition", "drainage", "direct_sun", "pests"] },
+      question: localizedNullableStringSchema,
+      options: {
+        type: "array",
+        maxItems: 4,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            label: localizedNullableStringSchema,
+            status: { type: "string", enum: ["confirmed", "ruled_out", "unknown"] },
+            result: { type: "string" }
+          },
+          required: ["label", "status", "result"]
+        }
+      },
+      reasonForAsking: localizedNullableStringSchema,
+      expectedImpact: localizedStringSchema
+    },
+    required: ["hypothesis", "question", "options", "reasonForAsking", "expectedImpact"]
+  }
+} as const;
+
+const compactSchema = {
+  name: "plant_initial_add_fast_analysis",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      detectedSpecies: { type: ["string", "null"] },
+      commonName: {
+        type: ["object", "null"],
+        additionalProperties: false,
+        properties: { en: { type: ["string", "null"] }, ru: { type: ["string", "null"] } },
+        required: ["en", "ru"]
+      },
+      scientificName: { type: ["string", "null"] },
+      confidence: { type: "number", minimum: 0, maximum: 1 },
+      growthHabit: { type: "string", enum: ["foliage", "cactus", "succulent", "orchid", "vine", "palm", "unknown"] },
+      organVocabulary: { type: "array", maxItems: 5, items: { type: "string" } },
+      plantStatus: { type: "string", enum: ["healthy", "adapting", "watch", "needs_attention", "action_needed"] },
+      urgency: { type: "string", enum: ["none", "observe", "soon", "today"] },
+      primaryActionId: {
+        type: "string",
+        enum: [
+          "none",
+          "continue_normal_care",
+          "check_soil",
+          "do_not_water",
+          "water_now",
+          "move_to_indirect_light",
+          "keep_current_light",
+          "monitor_growth",
+          "inspect_pests",
+          "take_new_photo",
+          "improve_drainage",
+          "avoid_repotting"
+        ]
+      },
+      actionTimeframeId: {
+        type: "string",
+        enum: ["none", "now", "today", "within_24_hours", "next_few_days", "before_next_watering", "next_check", "ongoing"]
+      },
+      statusReasonCode: {
+        type: "string",
+        enum: [
+          "healthy_no_issues",
+          "recent_change_adapting",
+          "minor_old_damage",
+          "possible_water_issue",
+          "possible_light_stress",
+          "possible_pests",
+          "soil_moisture_unknown",
+          "needs_fresh_photo",
+          "unknown"
+        ]
+      },
+      condition: { type: "string", enum: ["healthy", "check_soon", "needs_attention", "unknown"] },
+      visibleObservations: { type: "array", maxItems: 2, items: localizedStringSchema },
+      nextAction: { type: "string", enum: ["water", "check_soil", "take_photo", "none"] },
+      nextCheckInDays: { type: ["number", "null"], minimum: 0, maximum: 30 },
+      clarificationQuestions: compactClarificationQuestionSchema,
+      visualEvidenceSnapshot: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          concerns: { type: "array", maxItems: 3, items: { type: "string" } },
+          affectedParts: { type: "array", maxItems: 4, items: { type: "string" } },
+          severity: { type: "string", enum: ["none", "minor", "moderate", "severe", "unknown"] },
+          evidenceConfidence: { type: "string", enum: ["low", "medium", "high"] },
+          imageRolesUsed: { type: "array", maxItems: 5, items: { type: "string" } },
+          speciesCandidates: { type: "array", maxItems: 3, items: { type: "string" } }
+        },
+        required: ["concerns", "affectedParts", "severity", "evidenceConfidence", "imageRolesUsed", "speciesCandidates"]
+      }
+    },
+    required: INITIAL_ADD_FAST_LLM_FIELDS
+  },
+  strict: true
+};
+
 async function optimizeImageForAnalysis(file: File) {
   const inputBuffer = Buffer.from(await file.arrayBuffer());
   const isHeicLike = file.type === "image/heic" || file.type === "image/heif" || extensionFromName(file.name) === "heic" || extensionFromName(file.name) === "heif";
@@ -490,6 +609,152 @@ function detectedFormat(file: File) {
   return extension ?? "unknown";
 }
 
+function localizedText(en: string | null, ru: string | null) {
+  return { en, ru };
+}
+
+function actionText(actionId: string | undefined) {
+  switch (actionId) {
+    case "continue_normal_care":
+      return localizedText("Continue normal care.", "Продолжай обычный уход.");
+    case "check_soil":
+      return localizedText("Check the soil before watering.", "Проверь почву перед поливом.");
+    case "do_not_water":
+      return localizedText("Do not water today.", "Сегодня не поливай.");
+    case "water_now":
+      return localizedText("Water the plant now.", "Полей растение сейчас.");
+    case "move_to_indirect_light":
+      return localizedText("Move it to bright indirect light.", "Переставь в яркий рассеянный свет.");
+    case "keep_current_light":
+      return localizedText("Keep the current light if new damage does not appear.", "Оставь на текущем месте, если новые повреждения не появляются.");
+    case "monitor_growth":
+      return localizedText("Watch new growth for the next few days.", "Понаблюдай за новым ростом в ближайшие дни.");
+    case "inspect_pests":
+      return localizedText("Inspect the affected areas for pests.", "Осмотри проблемные места на вредителей.");
+    case "take_new_photo":
+      return localizedText("Take another photo if the condition changes.", "Сделай новое фото, если состояние изменится.");
+    case "improve_drainage":
+      return localizedText("Make sure excess water can drain freely.", "Убедись, что лишняя вода свободно уходит.");
+    case "avoid_repotting":
+      return localizedText("Do not repot again right now.", "Сейчас не пересаживай повторно.");
+    default:
+      return localizedText(null, null);
+  }
+}
+
+function timeframeText(timeframeId: string | undefined) {
+  switch (timeframeId) {
+    case "now":
+      return localizedText("Now.", "Сейчас.");
+    case "today":
+      return localizedText("Today.", "Сегодня.");
+    case "within_24_hours":
+      return localizedText("Within 24 hours.", "В течение суток.");
+    case "next_few_days":
+      return localizedText("Within the next few days.", "В ближайшие дни.");
+    case "before_next_watering":
+      return localizedText("Before the next watering.", "Перед следующим поливом.");
+    case "next_check":
+      return localizedText("At the next check.", "Во время следующей проверки.");
+    case "ongoing":
+      return localizedText("Keep doing this for now.", "Пока продолжай так.");
+    default:
+      return localizedText(null, null);
+  }
+}
+
+function reasonText(reasonCode: string | undefined) {
+  switch (reasonCode) {
+    case "healthy_no_issues":
+      return localizedText("No meaningful concern is visible in the photo.", "На фото не видно заметных причин для беспокойства.");
+    case "recent_change_adapting":
+      return localizedText("The plant may be adapting after a recent care change.", "Растение может адаптироваться после недавнего изменения ухода.");
+    case "minor_old_damage":
+      return localizedText("The visible marks look minor or old rather than urgent.", "Видимые следы похожи на небольшие или старые, не срочные повреждения.");
+    case "possible_water_issue":
+      return localizedText("The next care step depends on the current soil moisture.", "Следующий шаг зависит от текущей влажности почвы.");
+    case "possible_light_stress":
+      return localizedText("The visible marks may be connected with light stress.", "Видимые следы могут быть связаны со стрессом от освещения.");
+    case "possible_pests":
+      return localizedText("Some visible signs are worth checking for pests.", "Некоторые признаки стоит проверить на вредителей.");
+    case "soil_moisture_unknown":
+      return localizedText("The photo is not enough to know the soil moisture.", "По фото нельзя точно понять влажность почвы.");
+    case "needs_fresh_photo":
+      return localizedText("A fresh photo would help if the condition changes.", "Свежее фото поможет, если состояние изменится.");
+    default:
+      return localizedText("The first photo gives enough for an initial care step.", "Первого фото достаточно для начального совета.");
+  }
+}
+
+function summaryText(input: { plantStatus?: string; statusReasonCode?: string; primaryActionId?: string }) {
+  if (input.plantStatus === "action_needed") {
+    return localizedText("The plant needs a clear care step now.", "Растению сейчас нужен конкретный шаг ухода.");
+  }
+  if (input.plantStatus === "needs_attention") {
+    return localizedText("There is something worth checking soon.", "Есть момент, который стоит проверить в ближайшее время.");
+  }
+  if (input.plantStatus === "adapting" || input.statusReasonCode === "recent_change_adapting") {
+    return localizedText("The plant appears to be adapting.", "Похоже, растение адаптируется.");
+  }
+  if (input.plantStatus === "watch") {
+    return localizedText("The plant looks mostly stable, with something to watch.", "Растение выглядит в целом стабильно, но есть за чем понаблюдать.");
+  }
+  if (input.primaryActionId === "check_soil") {
+    return localizedText("The plant looks stable; soil moisture is the next useful check.", "Растение выглядит стабильно; полезнее всего проверить влажность почвы.");
+  }
+  return localizedText("The plant looks healthy from the first photo.", "По первому фото растение выглядит здоровым.");
+}
+
+function recommendationType(actionId: string | undefined) {
+  if (actionId === "water_now" || actionId === "do_not_water" || actionId === "check_soil") return "watering";
+  if (actionId === "move_to_indirect_light" || actionId === "keep_current_light") return "light";
+  if (actionId === "inspect_pests") return "monitoring";
+  if (actionId === "improve_drainage") return "watering";
+  if (actionId === "avoid_repotting") return "repotting";
+  if (actionId === "monitor_growth" || actionId === "take_new_photo") return "monitoring";
+  return "other";
+}
+
+function recommendationPriority(plantStatus: string | undefined) {
+  if (plantStatus === "action_needed") return "high";
+  if (plantStatus === "needs_attention") return "medium";
+  return "low";
+}
+
+function hydrateInitialAddFastAnalysis(analysis: AnalysisPayload & Record<string, unknown>) {
+  const primaryActionId = typeof analysis.primaryActionId === "string" ? analysis.primaryActionId : "none";
+  const actionTimeframeId = typeof analysis.actionTimeframeId === "string" ? analysis.actionTimeframeId : "none";
+  const statusReasonCode = typeof analysis.statusReasonCode === "string" ? analysis.statusReasonCode : "unknown";
+  const primaryAction = actionText(primaryActionId);
+  const actionTimeframe = timeframeText(actionTimeframeId);
+  const statusReason = reasonText(statusReasonCode);
+  const summary = summaryText({
+    plantStatus: typeof analysis.plantStatus === "string" ? analysis.plantStatus : undefined,
+    statusReasonCode,
+    primaryActionId
+  });
+  const hasActionText = Boolean(primaryAction.en || primaryAction.ru);
+
+  return {
+    ...analysis,
+    primaryAction,
+    actionTimeframe,
+    statusReason,
+    summary,
+    recommendations: hasActionText
+      ? [
+          {
+            type: recommendationType(primaryActionId),
+            priority: recommendationPriority(typeof analysis.plantStatus === "string" ? analysis.plantStatus : undefined),
+            en: [primaryAction.en, actionTimeframe.en].filter(Boolean).join(" "),
+            ru: [primaryAction.ru, actionTimeframe.ru].filter(Boolean).join(" ")
+          }
+        ]
+      : [],
+    generatedTextStrategy: "stage1_template_hydrated"
+  };
+}
+
 function diagnosticResponse(message: string, status = 400, diagnostics?: ImageDiagnostic[], stage?: string, trace?: AnalyzeTraceEvent[], originalError?: ReturnType<typeof sanitizeError>) {
   return NextResponse.json(
     {
@@ -561,7 +826,9 @@ function applySpeciesAwareQuestionLimits(analysis: AnalysisPayload) {
 
   if (Array.isArray(analysis.clarificationQuestions)) {
     const selectedQuestionTypes = new Set(selectedQuestions);
-    analysis.clarificationQuestions = analysis.clarificationQuestions.filter((question) => selectedQuestionTypes.has(String(question.hypothesis))).slice(0, 2);
+    analysis.clarificationQuestions = selectedQuestionTypes.size
+      ? analysis.clarificationQuestions.filter((question) => selectedQuestionTypes.has(String(question.hypothesis))).slice(0, 2)
+      : analysis.clarificationQuestions.slice(0, 1);
   }
 
   if (Array.isArray(analysis.alternativeCauses)) {
@@ -624,6 +891,9 @@ export async function POST(request: Request) {
   const currentLightCondition = String(formData.get("currentLightCondition") ?? "");
   const environmentContext = String(formData.get("environmentContext") ?? "");
   const analysisMode = String(formData.get("analysisMode") ?? "initial_or_photo_analysis");
+  const isInitialAddFast = isInitialAddFastAnalysisMode(analysisMode);
+  const responseSchema = isInitialAddFast ? compactSchema : schema;
+  const maxOutputTokensForRequest = maxOutputTokensForAnalysisMode(analysisMode, openAIMaxOutputTokens);
   const previousAnalysis = String(formData.get("previousAnalysis") ?? "");
   const photoTypes = formData.getAll("photoTypes").map(String);
   const photoSources = formData.getAll("photoSources").map(String);
@@ -673,6 +943,7 @@ export async function POST(request: Request) {
     imageCount: files.length,
     locale,
     analysisMode,
+    schemaName: responseSchema.name,
     hasCurrentPlantContext: Boolean(currentCommonName || currentScientificName || currentDetectedSpecies),
     hasEnvironmentContext: Boolean(environmentContext),
     photoTypes,
@@ -890,6 +1161,9 @@ export async function POST(request: Request) {
           "Before returning, silently self-check: no invisible claims, species-appropriate terminology, no overstated certainty, concrete actions, no generic filler, no repeated advice. Rewrite any weak section before returning JSON.",
           `User locale: ${locale}. Photo types in order: ${photoTypes.join(", ") || "unknown"}.`,
           `Analysis mode: ${analysisMode}.`,
+          isInitialAddFast
+            ? "Initial add fast rule: this is the first onboarding analysis before the plant is saved. Return only compact primitive fields. Do not write primary action prose, timeframe prose, status reason prose, summary prose, recommendation prose, species education, full reasoning, alternative causes, multiple hypotheses, impact metadata, or detailed what-not-to-do advice. Choose primaryActionId, actionTimeframeId, and statusReasonCode carefully; the app will localize obvious text from those IDs. Use free text only for species/common names and up to 2 meaningful visibleObservations from the photo. Include a compact visualEvidenceSnapshot for later enrichment. Keep the full response ideally under 900 tokens."
+            : "Follow-up analysis rule: include enough structured context to update recommendations clearly without repeating old advice. If previousAnalysis includes visualEvidenceSnapshot from an initial_add_fast result, treat it as the baseline visual snapshot and enrich care recommendations from current context instead of redoing unnecessary broad visual speculation. Do not contradict the initial visual snapshot unless the new photos or context clearly change confidence, and say so if confidence changed.",
           `Current plant context, if this is a follow-up photo analysis: commonName="${currentCommonName || "unknown"}", scientificName="${currentScientificName || "unknown"}", detectedSpecies="${currentDetectedSpecies || "unknown"}", light="${currentLightCondition || "unknown"}".`,
           `Structured home and room context: ${environmentContext || "No structured home or room context was provided."}`,
           `Previous analysis, if available: ${previousAnalysis || "No previous analysis was provided."}`,
@@ -909,9 +1183,9 @@ export async function POST(request: Request) {
         width: image.normalizedWidth,
         height: image.normalizedHeight
       })),
-      schemaName: schema.name,
-      schemaHasHypotheses: Boolean(schema.schema.properties.hypotheses),
-      schemaRequired: schema.schema.required
+      schemaName: responseSchema.name,
+      schemaHasHypotheses: "hypotheses" in responseSchema.schema.properties,
+      schemaRequired: responseSchema.schema.required
     });
 
     openAIRequestStartedAt = Date.now();
@@ -919,22 +1193,33 @@ export async function POST(request: Request) {
     traceEvent(trace, "openai_request_started", {
       model,
       imageCount: optimizedImages.length,
-      timeoutMs: openAIRequestTimeoutMs
+      timeoutMs: openAIRequestTimeoutMs,
+      reasoningEffort: openAIReasoningEffort,
+      responseVerbosity: openAIResponseVerbosity,
+      maxOutputTokens: maxOutputTokensForRequest
     });
     console.info("openai_request_started", {
       model,
       imageCount: optimizedImages.length,
-      timeoutMs: openAIRequestTimeoutMs
+      timeoutMs: openAIRequestTimeoutMs,
+      reasoningEffort: openAIReasoningEffort,
+      responseVerbosity: openAIResponseVerbosity,
+      maxOutputTokens: maxOutputTokensForRequest
     });
 
     const response = await client.responses.create(
       {
         model,
         input: [{ role: "user", content: inputContent as never }],
+        max_output_tokens: maxOutputTokensForRequest,
+        reasoning: {
+          effort: openAIReasoningEffort
+        },
         text: {
+          verbosity: openAIResponseVerbosity,
           format: {
             type: "json_schema",
-            ...schema
+            ...responseSchema
           }
         }
       } as never,
@@ -955,22 +1240,28 @@ export async function POST(request: Request) {
     traceEvent(trace, "json_parse_started");
     const text = response.output_text;
     const analysis = JSON.parse(text);
+    const baseAnalysisWithMetadata = {
+      ...analysis,
+      analysisMode,
+      sourceSchema: responseSchema.name
+    };
+    const analysisWithMetadata = isInitialAddFast ? hydrateInitialAddFastAnalysis(baseAnalysisWithMetadata) : baseAnalysisWithMetadata;
     traceEvent(trace, "json_parse_completed", {
-      hasDetectedSpecies: Boolean(analysis?.detectedSpecies),
-      hasRecommendations: Array.isArray(analysis?.recommendations),
-      recommendationCount: Array.isArray(analysis?.recommendations) ? analysis.recommendations.length : null,
-      hasHypotheses: Array.isArray(analysis?.hypotheses),
-      hypothesisCount: Array.isArray(analysis?.hypotheses) ? analysis.hypotheses.length : null,
-      plantStatus: analysis?.plantStatus ?? null,
-      condition: analysis?.condition ?? null
+      hasDetectedSpecies: Boolean(analysisWithMetadata?.detectedSpecies),
+      hasRecommendations: Array.isArray(analysisWithMetadata?.recommendations),
+      recommendationCount: Array.isArray(analysisWithMetadata?.recommendations) ? analysisWithMetadata.recommendations.length : null,
+      hasHypotheses: Array.isArray(analysisWithMetadata?.hypotheses),
+      hypothesisCount: Array.isArray(analysisWithMetadata?.hypotheses) ? analysisWithMetadata.hypotheses.length : null,
+      plantStatus: analysisWithMetadata?.plantStatus ?? null,
+      condition: analysisWithMetadata?.condition ?? null
     });
     traceEvent(trace, "schema_validation_completed", {
       source: "openai_structured_outputs",
-      schemaName: schema.name,
-      strict: schema.strict
+      schemaName: responseSchema.name,
+      strict: responseSchema.strict
     });
     failureStage = "species_reasoning_postprocess";
-    const speciesAwareAnalysis = applySpeciesAwareQuestionLimits(analysis);
+    const speciesAwareAnalysis = applySpeciesAwareQuestionLimits(analysisWithMetadata);
     traceEvent(trace, "species_reasoning_postprocess_completed", {
       profileId:
         typeof speciesAwareAnalysis.speciesReasoning === "object" && speciesAwareAnalysis.speciesReasoning && "profileId" in speciesAwareAnalysis.speciesReasoning

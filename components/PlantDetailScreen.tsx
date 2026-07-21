@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
 import { addDays, toDateKey } from "@/lib/date-format";
+import { recordAddPlantPerformanceStage } from "@/lib/add-plant-performance";
 import { buildPlantEnvironmentContext, formatEnvironmentContextForPrompt } from "@/lib/home-room-context";
 import { plantDisplayName } from "@/lib/plant-display";
 import { deriveCareActionState } from "@/lib/plant-action-eligibility";
@@ -42,6 +43,16 @@ type PhotoAssessmentState =
 
 function localized(value: { en?: string | null; ru?: string | null } | undefined, locale: "en" | "ru") {
   return value?.[locale] || value?.en || value?.ru || "";
+}
+
+function durationFromTrace(trace: unknown, startStage: string, endStage: string) {
+  if (!Array.isArray(trace)) return null;
+  const start = trace.find((event) => event && typeof event === "object" && (event as { stage?: unknown }).stage === startStage) as { at?: unknown } | undefined;
+  const end = trace.find((event) => event && typeof event === "object" && (event as { stage?: unknown }).stage === endStage) as { at?: unknown } | undefined;
+  if (typeof start?.at !== "string" || typeof end?.at !== "string") return null;
+  const startedAt = new Date(start.at).getTime();
+  const endedAt = new Date(end.at).getTime();
+  return Number.isFinite(startedAt) && Number.isFinite(endedAt) && endedAt >= startedAt ? endedAt - startedAt : null;
 }
 
 function photoAssessmentChanges(condition: string | undefined, locale: "en" | "ru") {
@@ -114,6 +125,8 @@ function compactPreviousRecommendation(
     })) ?? [],
     whatNotToDo: Array.isArray(analysis?.rawResult?.whatNotToDo) ? analysis.rawResult.whatNotToDo : [],
     confidence: typeof analysis?.rawResult?.confidence === "number" ? analysis.rawResult.confidence : null,
+    visualEvidenceSnapshot: analysis?.rawResult?.visualEvidenceSnapshot ?? null,
+    initialAnalysisMode: typeof analysis?.rawResult?.analysisMode === "string" ? analysis.rawResult.analysisMode : null,
     sourceAnalysis: analysis ? { id: analysis.id, createdAt: analysis.createdAt } : null,
     previousContextSnapshot: input.previousContextSnapshot ?? null,
     changedContext: input.changedContext ?? null,
@@ -588,10 +601,19 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       const payload = await response.json().catch(() => {
         throw new Error("recommendation_refresh_invalid_json");
       });
+      const enrichmentLatencyMs = durationFromTrace(payload?.trace, "openai_request_started", "openai_response_received");
+      if (enrichmentLatencyMs != null) {
+        recordAddPlantPerformanceStage("recommendation_enrichment_latency", enrichmentLatencyMs, {
+          plantId: plant.id,
+          analysisId: analysis.id,
+          model: payload?.model ?? "unknown"
+        });
+      }
       if (!response.ok || !payload?.ok || !payload.analysis) {
         throw new Error(typeof payload?.error === "string" ? payload.error : "recommendation_refresh_failed");
       }
 
+      const persistenceStartedAt = performance.now();
       const revisionResult = await saveRecommendationRevision(plant.id, {
         analysisId: analysis.id,
         recommendations: Array.isArray(payload.analysis.recommendations) ? payload.analysis.recommendations : [],
@@ -614,6 +636,11 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         modelVersion: typeof payload.model === "string" ? payload.model : undefined,
         impactLevel: payload.analysis.recommendationImpact?.impactLevel,
         changeSummary: payload.analysis.recommendationImpact?.changeSummary
+      });
+      recordAddPlantPerformanceStage("recommendation_enrichment_persistence", performance.now() - persistenceStartedAt, {
+        plantId: plant.id,
+        analysisId: analysis.id,
+        unchanged: Boolean(revisionResult.unchanged)
       });
       console.info("recommendation_refresh_completed", { plantId: plant.id, photoCount: photosForAnalysis.length, durationMs: Date.now() - startedAt });
       if (!didTimeout) {
