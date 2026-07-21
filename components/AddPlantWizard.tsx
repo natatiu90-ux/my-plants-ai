@@ -348,6 +348,8 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const latestDraftRef = useRef<AddPlantDraft | null>(null);
   const activeAnalysisRequestIdRef = useRef<string | null>(null);
   const discardedDraftRef = useRef(false);
+  const frozenAnalysisContextRef = useRef({ homes, rooms, speciesName });
+  const ensureSuggestedNicknameRef = useRef<() => string>(() => "");
   const wakeLockDiagnostic = useScreenWakeLock(step === "analysis");
 
   useEffect(() => {
@@ -540,6 +542,16 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
 
   const ensureSuggestedNickname = useCallback(() => generatedNicknameRef.current ?? generateNicknameOnce(), [generateNicknameOnce]);
 
+  useEffect(() => {
+    ensureSuggestedNicknameRef.current = ensureSuggestedNickname;
+  }, [ensureSuggestedNickname]);
+
+  useEffect(() => {
+    if (step !== "analysis") {
+      frozenAnalysisContextRef.current = { homes, rooms, speciesName };
+    }
+  }, [homes, rooms, speciesName, step]);
+
   const cleanupTemporaryPhotos = useCallback(async (photos: PendingPhotoUpload[]) => {
     await Promise.allSettled(photos.map((photo) => PhotoStorageRepository.deletePhoto(photo.storageId)));
   }, []);
@@ -659,6 +671,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     let isMounted = true;
     const abortController = new AbortController();
     const requestId = createAnalysisRequestId();
+    const analysisContext = frozenAnalysisContextRef.current;
     activeAnalysisRequestIdRef.current = requestId;
     setAnalysisRequestId(requestId);
     analysisAbortRef.current = abortController;
@@ -899,14 +912,14 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         });
 
         formData.append("locale", locale);
-        const selectedRoom = roomKey && !roomKey.startsWith("rooms.") ? rooms.find((room) => room.id === roomKey) : undefined;
+        const selectedRoom = roomKey && !roomKey.startsWith("rooms.") ? analysisContext.rooms.find((room) => room.id === roomKey) : undefined;
         const environmentContext = buildPlantEnvironmentContext({
           plant: selectedRoom
             ? {
                 id: "new-plant",
                 homeId: selectedRoom.homeId,
                 roomId: selectedRoom.id,
-                speciesName,
+                speciesName: analysisContext.speciesName,
                 status: "unknown",
                 messageKey: "plants.new.message",
                 statusLabelKey: "status.doingGreat",
@@ -914,8 +927,8 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                 notificationEnabled: true
               }
             : undefined,
-          homes,
-          rooms,
+          homes: analysisContext.homes,
+          rooms: analysisContext.rooms,
           legacyRoomName: selectedRoom ? selectedRoom.name : undefined
         });
         formData.append("environmentContext", formatEnvironmentContextForPrompt(environmentContext));
@@ -1012,7 +1025,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         const nextSpeciesName = localizedCommonName(nextAnalysis, locale) || commonNameFromScientificName(nextScientificName);
         setSpeciesName(nextSpeciesName);
         setScientificName(nextScientificName);
-        setHomeName((current) => current || ensureSuggestedNickname());
+        setHomeName((current) => current || ensureSuggestedNicknameRef.current());
       } catch (error) {
         if (uploadToken) {
           endAddPlantPerformanceStage(uploadToken, {
@@ -1053,7 +1066,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       } finally {
         const isCurrentRequest = activeAnalysisRequestIdRef.current === requestId && !discardedDraftRef.current;
         if (isMounted && isCurrentRequest) {
-          setHomeName((current) => current || ensureSuggestedNickname());
+          setHomeName((current) => current || ensureSuggestedNicknameRef.current());
           if (!abortController.signal.aborted) {
             await finishAnalysisSheet();
           }
@@ -1084,7 +1097,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         activeAnalysisRequestIdRef.current = null;
       }
     };
-  }, [analysisAttempt, ensureSuggestedNickname, homes, locale, roomKey, rooms, selectedPhotos, speciesName, step]);
+  }, [analysisAttempt, locale, roomKey, selectedPhotos, step]);
 
   const copyPhotoPickerDiagnostic = () => {
     if (!photoPickerDiagnostic) {
