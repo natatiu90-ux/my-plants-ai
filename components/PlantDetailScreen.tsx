@@ -12,6 +12,7 @@ import { deriveCareActionState } from "@/lib/plant-action-eligibility";
 import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
+import { nextPostCreationClarificationStep } from "@/lib/post-creation-clarifications";
 import { buildRecommendationContextSnapshot, changedContextSince, impactLabelKey, isRecommendationStale, isVisualEvidenceStale, reasonTypeFromChangedContext, sourceAnalysisAgeDays, type RecommendationChangedContext, type RecommendationContextSnapshot } from "@/lib/recommendation-refresh";
 import { recommendationRefreshReducer, type RecommendationRefreshStatus } from "@/lib/recommendation-refresh-state";
 import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION } from "@/lib/recommendation-version";
@@ -21,6 +22,7 @@ import { CareSummary } from "./CareSummary";
 import { CheckSoilSheet } from "./CheckSoilSheet";
 import { DeletePlantDialog } from "./DeletePlantDialog";
 import { MilestoneEditor } from "./MilestoneEditor";
+import { AnswerChips } from "./AnswerChips";
 import { PhotoGallery } from "./PhotoGallery";
 import { PhotoUploadFlow } from "./PhotoUploadFlow";
 import { PlantAnalysisSection } from "./PlantAnalysisSection";
@@ -30,11 +32,12 @@ import { PlantNotificationControls } from "./PlantNotificationControls";
 import { PlantStatusSection } from "./PlantStatusSection";
 import { PrimaryCareAction } from "./PrimaryCareAction";
 import { Toast } from "./Toast";
-import type { PlantAnalysisRecord, PlantPhoto, PlantRecommendationRevision, SoilCheckResult } from "@/types/plant";
+import type { PlantAnalysisRecord, PlantPhoto, PlantRecommendationRevision, Room, SoilCheckResult } from "@/types/plant";
 import type { PendingPhotoUpload } from "./photo-upload-types";
 
 type Sheet = "check_soil" | "add_photo" | "add_event" | null;
 const recommendationRefreshTimeoutMs = 45_000;
+const sunlightOptions: NonNullable<Room["directSun"]>[] = ["none", "morning", "midday", "evening", "most_of_day", "unsure"];
 type PhotoAssessmentState =
   | { status: "idle" }
   | { status: "analyzing" }
@@ -221,7 +224,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useI18n();
-  const { addMilestone, addPlantPhotos, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getCurrentRecommendationRevision, getPlant, getPlantAnalysis, getPlantCareEvents, getPlantHypothesisResolutions, getPlantMilestones, getPlantPhotos, homes, recordSoilChecked, resolvePlantHypothesis, rooms, saveBaselineHistory, savePlantAnalysis, saveRecommendationRevision, secondaryDataReady, waterPlant } =
+  const { addMilestone, addPlantPhotos, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getCurrentRecommendationRevision, getPlant, getPlantAnalysis, getPlantCareEvents, getPlantHypothesisResolutions, getPlantMilestones, getPlantPhotos, homes, recordSoilChecked, resolvePlantHypothesis, rooms, saveBaselineHistory, savePlantAnalysis, saveRecommendationRevision, secondaryDataReady, updateRoom, waterPlant } =
     usePlantStore();
   const { locale } = useI18n();
   const plant = getPlant(plantId);
@@ -243,6 +246,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const [isCompletingAction, setIsCompletingAction] = useState(false);
   const [fullCoverUrl, setFullCoverUrl] = useState<string | undefined>();
   const [baselineSaving, setBaselineSaving] = useState(false);
+  const [sunlightSavingKey, setSunlightSavingKey] = useState<string | null>(null);
   const [photoAssessment, setPhotoAssessment] = useState<PhotoAssessmentState>({ status: "idle" });
   const [recommendationRefreshState, dispatchRecommendationRefresh] = useReducer(recommendationRefreshReducer, { status: "idle" });
   const loggedEvents = useRef(new Set<string>());
@@ -349,7 +353,14 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const plantName = plantDisplayName(plant, t("plants.unknownName"));
   const hasWateringBaseline = milestones.some((milestone) => milestone.type === "watered" || milestone.type === "watering_unknown") || Boolean(plant.lastWateredAt);
   const hasRepottingBaseline = milestones.some((milestone) => milestone.type === "repotted" || milestone.type === "repotting_unknown");
-  const baselineQuestion = !hasWateringBaseline ? "watering" : !hasRepottingBaseline ? "repotting" : null;
+  const assignedRoom = plant.roomId ? rooms.find((room) => room.id === plant.roomId) : undefined;
+  const baselineQuestion = nextPostCreationClarificationStep({
+    hasWateringBaseline,
+    hasRepottingBaseline,
+    hasAssignedRoom: Boolean(assignedRoom),
+    roomDirectSun: assignedRoom?.directSun,
+    analysis: displayAnalysis?.rawResult
+  });
   const recommendationContextSnapshot = buildRecommendationContextSnapshot({
     plant,
     homes,
@@ -432,6 +443,20 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       setToast(t("edit.saved"));
     } finally {
       setBaselineSaving(false);
+    }
+  };
+
+  const saveSunlightAnswer = async (directSun: NonNullable<Room["directSun"]>) => {
+    if (!assignedRoom || sunlightSavingKey) {
+      return;
+    }
+
+    setSunlightSavingKey(directSun);
+    try {
+      await updateRoom(assignedRoom.id, { directSun });
+      setToast(t("edit.saved"));
+    } finally {
+      setSunlightSavingKey(null);
     }
   };
 
@@ -699,33 +724,55 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
           <p className="text-xs font-bold uppercase text-[#a09a90]">{baselineQuestion === "watering" ? t("baseline.welcome") : t("baseline.thanks")}</p>
           <h2 className="mt-1 font-rounded text-xl font-extrabold text-ink">
-            {baselineQuestion === "watering" ? t("baseline.lastWateringQuestion") : t("baseline.lastRepottingQuestion")}
+            {baselineQuestion === "watering"
+              ? t("baseline.lastWateringQuestion")
+              : baselineQuestion === "repotting"
+                ? t("baseline.lastRepottingQuestion")
+                : t("baseline.sunlightQuestion")}
           </h2>
           <p className="mt-1 text-sm font-bold leading-5 text-[#7a7166]">
-            {baselineQuestion === "watering" ? t("baseline.wateringHelper") : t("baseline.repottingHelper")}
+            {baselineQuestion === "watering"
+              ? t("baseline.wateringHelper")
+              : baselineQuestion === "repotting"
+                ? t("baseline.repottingHelper")
+                : t("baseline.sunlightHelper")}
           </p>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <button type="button" disabled={baselineSaving} onClick={() => void saveBaselineAnswer(baselineQuestion, toDateKey(new Date()))} className="min-h-11 rounded-[16px] bg-white px-3 text-sm font-extrabold text-[#5f594f] disabled:opacity-60">
-              {t("addPlant.waterToday")}
-            </button>
-            <button type="button" disabled={baselineSaving} onClick={() => void saveBaselineAnswer(baselineQuestion, toDateKey(addDays(new Date(), -1)))} className="min-h-11 rounded-[16px] bg-white px-3 text-sm font-extrabold text-[#5f594f] disabled:opacity-60">
-              {t("addPlant.waterYesterday")}
-            </button>
-            <button type="button" disabled={baselineSaving} onClick={() => void saveBaselineAnswer(baselineQuestion, toDateKey(addDays(new Date(), -4)))} className="min-h-11 rounded-[16px] bg-white px-3 text-sm font-extrabold text-[#5f594f] disabled:opacity-60">
-              {t("addPlant.waterFewDaysAgo")}
-            </button>
-            <button type="button" disabled={baselineSaving} onClick={() => void saveBaselineAnswer(baselineQuestion, undefined, true)} className="min-h-11 rounded-[16px] bg-white px-3 text-sm font-extrabold text-[#5f594f] disabled:opacity-60">
-              {t("addPlant.waterUnknown")}
-            </button>
-          </div>
-          <div className="mt-3">
-            <CareDateEditor
-              label={t("baseline.dateLabel")}
-              disabled={baselineSaving}
-              onSaveDate={(date) => void saveBaselineAnswer(baselineQuestion, date)}
-              onSaveUnknown={() => void saveBaselineAnswer(baselineQuestion, undefined, true)}
+          {baselineQuestion === "sunlight" ? (
+            <AnswerChips
+              options={sunlightOptions}
+              getKey={(option) => option}
+              labelFor={(option) => t(`homeContext.sun.${option}` as never)}
+              onSelect={(option) => void saveSunlightAnswer(option)}
+              loadingKey={sunlightSavingKey}
+              disabled={Boolean(sunlightSavingKey)}
+              variant="neutral"
             />
-          </div>
+          ) : (
+            <>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button type="button" disabled={baselineSaving} onClick={() => void saveBaselineAnswer(baselineQuestion, toDateKey(new Date()))} className="min-h-11 rounded-[16px] bg-white px-3 text-sm font-extrabold text-[#5f594f] disabled:opacity-60">
+                  {t("addPlant.waterToday")}
+                </button>
+                <button type="button" disabled={baselineSaving} onClick={() => void saveBaselineAnswer(baselineQuestion, toDateKey(addDays(new Date(), -1)))} className="min-h-11 rounded-[16px] bg-white px-3 text-sm font-extrabold text-[#5f594f] disabled:opacity-60">
+                  {t("addPlant.waterYesterday")}
+                </button>
+                <button type="button" disabled={baselineSaving} onClick={() => void saveBaselineAnswer(baselineQuestion, toDateKey(addDays(new Date(), -4)))} className="min-h-11 rounded-[16px] bg-white px-3 text-sm font-extrabold text-[#5f594f] disabled:opacity-60">
+                  {t("addPlant.waterFewDaysAgo")}
+                </button>
+                <button type="button" disabled={baselineSaving} onClick={() => void saveBaselineAnswer(baselineQuestion, undefined, true)} className="min-h-11 rounded-[16px] bg-white px-3 text-sm font-extrabold text-[#5f594f] disabled:opacity-60">
+                  {t("addPlant.waterUnknown")}
+                </button>
+              </div>
+              <div className="mt-3">
+                <CareDateEditor
+                  label={t("baseline.dateLabel")}
+                  disabled={baselineSaving}
+                  onSaveDate={(date) => void saveBaselineAnswer(baselineQuestion, date)}
+                  onSaveUnknown={() => void saveBaselineAnswer(baselineQuestion, undefined, true)}
+                />
+              </div>
+            </>
+          )}
         </section>
       ) : null}
       {photoAssessment.status !== "idle" ? (
@@ -758,6 +805,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         hypothesisResolutions={hypothesisResolutions}
         onResolveHypothesis={(hypothesis, status, result) => resolvePlantHypothesis(plant.id, hypothesis, status, result)}
         recommendationRefreshState={recommendationRefreshState}
+        hasPendingBaselineQuestions={Boolean(baselineQuestion)}
       />
       {currentRecommendationRevision?.reasonText && !recommendationsAreStale && recommendationRefreshState.status === "success" && currentRecommendationRevision.impactLevel && currentRecommendationRevision.impactLevel !== "none" ? (
         <section className="mt-4 rounded-[24px] bg-[#eef5e8] p-4 shadow-soft">
@@ -854,8 +902,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       {sheet === "add_event" ? (
         <MilestoneEditor
           onCancel={() => setSheet(null)}
-          onSave={(input) => {
-            addMilestone(plant.id, input);
+          onSave={async (input) => {
+            await addMilestone(plant.id, input);
             setSheet(null);
             setToast(t("edit.saved"));
           }}

@@ -2,8 +2,9 @@ import type { Plant } from "@/types/plant";
 
 export function cleanPlantName(value: string | null | undefined) {
   return (value ?? "")
-    .replace(/\([^)]*(confidence|уверен|пример|approx|possible|likely)[^)]*\)/gi, "")
-    .replace(/\b(confidence|approx\.?|approximately|possibly|likely)\b.*$/gi, "")
+    .replace(/\([^)]*(confidence|уверен|пример|вероятн|approx|possible|possibly|likely|probably)[^)]*\)/gi, "")
+    .replace(/\b(confidence|approx\.?|approximately|possibly|likely|probably)\b.*$/gi, "")
+    .replace(/(?:^|\s)(вероятно|возможно|примерно).*$/gi, "")
     .trim();
 }
 

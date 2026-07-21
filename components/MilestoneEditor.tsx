@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { toDateKey } from "@/lib/date-format";
+import { formatLongDate, toDateKey } from "@/lib/date-format";
+import { canSaveMilestoneDraft, dateFieldIsVisible, initialMilestoneEditorDraft, selectMilestoneType } from "@/lib/milestone-editor-state";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
 import type { PlantMilestone, PlantMilestoneType } from "@/types/plant";
@@ -46,23 +47,44 @@ export function MilestoneEditor({
 }: {
   milestone?: PlantMilestone;
   onCancel: () => void;
-  onSave: (input: { type: PlantMilestoneType; eventDate: string; note?: string }) => void;
+  onSave: (input: { type: PlantMilestoneType; eventDate: string; note?: string }) => Promise<void> | void;
 }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const today = toDateKey(new Date());
-  const [type, setType] = useState<PlantMilestoneType>(milestone?.type ?? "repotted");
-  const [eventDate, setEventDate] = useState(milestone?.eventDate ?? milestone?.createdAt ?? today);
-  const [note, setNote] = useState(milestone?.note ?? milestone?.customDescription ?? "");
+  const initialDraft = initialMilestoneEditorDraft(milestone, today);
+  const [type, setType] = useState<PlantMilestoneType | null>(initialDraft.type);
+  const [eventDate, setEventDate] = useState(initialDraft.eventDate);
+  const [note, setNote] = useState(initialDraft.note);
   const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const save = () => {
+  const selectType = (nextType: PlantMilestoneType) => {
+    setType(nextType);
+    setEventDate((current) => selectMilestoneType(current, today));
+    setError(null);
+  };
+
+  const save = async () => {
+    if (!type || !eventDate || isSaving) {
+      return;
+    }
+
     if (eventDate > today) {
       setError(t("story.noFutureDate"));
       return;
     }
 
-    onSave({ type, eventDate, note: note.trim() || undefined });
+    setIsSaving(true);
+    setError(null);
+    try {
+      await onSave({ type, eventDate, note: note.trim() || undefined });
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : t("story.saveFailed"));
+      setIsSaving(false);
+    }
   };
+
+  const canSave = canSaveMilestoneDraft({ type, eventDate, isSaving });
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#1c1c1e]/20 px-4 pb-4 backdrop-blur-[2px] sm:items-center sm:pb-0">
@@ -74,7 +96,7 @@ export function MilestoneEditor({
             <button
               key={milestoneType}
               type="button"
-              onClick={() => setType(milestoneType)}
+              onClick={() => selectType(milestoneType)}
               className={`min-h-12 rounded-[18px] px-3 text-sm font-extrabold ${
                 type === milestoneType ? "bg-[#ddf2dc] text-[#2d7a4f]" : "bg-white/75 text-[#5f594f]"
               }`}
@@ -83,19 +105,25 @@ export function MilestoneEditor({
             </button>
           ))}
         </div>
-        <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
-          {t("story.eventDate")}
-          <input
-            type="date"
-            max={today}
-            value={eventDate}
-            onChange={(event) => {
-              setEventDate(event.target.value);
-              setError(null);
-            }}
-            className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none"
-          />
-        </label>
+        {dateFieldIsVisible(type) ? (
+          <label className="mt-4 block min-w-0 text-sm font-extrabold text-[#4f4940]">
+            {t("story.eventDate")}
+            <span className="relative mt-2 flex min-h-12 w-full max-w-full min-w-0 items-center justify-between gap-3 overflow-hidden rounded-[18px] bg-white/80 px-4 text-base font-extrabold text-[#3f3b35]">
+              <span className="min-w-0 flex-1 truncate">{eventDate ? formatLongDate(eventDate, locale) : t("baseline.chooseDate")}</span>
+              <span className="shrink-0 text-sm text-[#2d7a4f]">{eventDate ? t("baseline.changeDate") : t("baseline.chooseDate")}</span>
+              <input
+                type="date"
+                max={today}
+                value={eventDate}
+                onChange={(event) => {
+                  setEventDate(event.target.value);
+                  setError(null);
+                }}
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              />
+            </span>
+          </label>
+        ) : null}
         <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
           {t("story.eventNote")}
           <textarea
@@ -107,11 +135,11 @@ export function MilestoneEditor({
         </label>
         {error ? <p className="mt-3 rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold text-[#9b2c3e]">{error}</p> : null}
         <div className="mt-5 grid grid-cols-2 gap-2">
-          <button type="button" onClick={onCancel} className="min-h-12 rounded-[18px] bg-white px-4 text-sm font-extrabold text-[#5f594f]">
+          <button type="button" onClick={onCancel} disabled={isSaving} className="min-h-12 rounded-[18px] bg-white px-4 text-sm font-extrabold text-[#5f594f] disabled:opacity-60">
             {t("plantDetail.cancel")}
           </button>
-          <button type="button" onClick={save} className="min-h-12 rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]">
-            {t("story.saveEvent")}
+          <button type="button" onClick={() => void save()} disabled={!canSave} className="min-h-12 rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f] disabled:opacity-60">
+            {isSaving ? t("homeContext.saving") : t("story.saveEvent")}
           </button>
         </div>
       </div>

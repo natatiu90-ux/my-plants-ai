@@ -258,7 +258,8 @@ export function PlantAnalysisSection({
   milestones,
   hypothesisResolutions,
   onResolveHypothesis,
-  recommendationRefreshState
+  recommendationRefreshState,
+  hasPendingBaselineQuestions = false
 }: {
   analysis?: PlantAnalysisRecord;
   plant: Plant;
@@ -266,6 +267,7 @@ export function PlantAnalysisSection({
   hypothesisResolutions: PlantHypothesisResolution[];
   onResolveHypothesis: (hypothesis: PlantHypothesis, status: PlantHypothesisStatus, result: string) => Promise<void>;
   recommendationRefreshState?: RecommendationRefreshState;
+  hasPendingBaselineQuestions?: boolean;
 }) {
   const { locale, t } = useI18n();
   const [savingAnswerKey, setSavingAnswerKey] = useState<string | null>(null);
@@ -520,6 +522,9 @@ export function PlantAnalysisSection({
       </div>
       {recommendationRefreshState?.status === "error" ? (
         <p className="mx-1 mt-2 rounded-[16px] bg-[#fff0e6] p-3 text-sm font-bold leading-5 text-[#8a5b24]">{recommendationRefreshState.error ?? t("plantAnalysis.refreshFailedInline")}</p>
+      ) : null}
+      {hasPendingBaselineQuestions ? (
+        <p className="mx-1 mt-2 rounded-[16px] bg-[#eef5e8] p-3 text-sm font-bold leading-5 text-[#4f6946]">{t("plantAnalysis.pendingBaselineQuestions")}</p>
       ) : null}
       <div className="mt-3 grid gap-2">
         <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">

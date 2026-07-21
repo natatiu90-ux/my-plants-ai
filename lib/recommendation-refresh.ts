@@ -1,7 +1,7 @@
 import type { HomeContext, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesisResolution, PlantMilestone, PlantRecommendationRevision, Room } from "@/types/plant";
 import type { RecommendationImpactLevel, RecommendationRevisionReasonType } from "@/types/plant";
-import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION, VISUAL_EVIDENCE_STALE_DAYS } from "@/lib/recommendation-version";
 import { shouldStartRecommendationEnrichment } from "./plant-analysis-pipeline";
+import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION, VISUAL_EVIDENCE_STALE_DAYS } from "./recommendation-version";
 
 function timestamp(value: string | undefined | null) {
   if (!value) {
@@ -54,7 +54,7 @@ function isoTimestamp(value: number | null) {
 }
 
 function latestMilestoneTimestamp(items: PlantMilestone[]) {
-  return latestTimestamp(items.map((item) => item.updatedAt ?? item.eventDate ?? item.createdAt));
+  return latestTimestamp(items.filter(isCareContextMilestone).map((item) => item.updatedAt ?? item.eventDate ?? item.createdAt));
 }
 
 function latestCareEventTimestamp(items: PlantCareEvent[]) {
@@ -63,6 +63,22 @@ function latestCareEventTimestamp(items: PlantCareEvent[]) {
 
 function latestResolutionTimestamp(items: PlantHypothesisResolution[]) {
   return latestTimestamp(items.map((item) => item.resolvedAt ?? item.createdAt));
+}
+
+function isCareContextMilestone(item: PlantMilestone) {
+  return (
+    item.type === "watered" ||
+    item.type === "watering_unknown" ||
+    item.type === "repotted" ||
+    item.type === "repotting_unknown" ||
+    item.type === "soil_checked" ||
+    item.type === "fertilized" ||
+    item.type === "moved_home" ||
+    item.type === "damaged" ||
+    item.type === "recovered" ||
+    item.type === "treatment_started" ||
+    item.type === "treatment_completed"
+  );
 }
 
 export type RecommendationContextSnapshot = {
@@ -197,7 +213,7 @@ export function buildRecommendationContextSnapshot(input: {
         }
       : undefined,
     history: {
-      milestoneCount: input.milestones.length,
+      milestoneCount: input.milestones.filter(isCareContextMilestone).length,
       careEventCount: input.careEvents.length,
       resolutionCount: input.hypothesisResolutions.length,
       latestMilestoneAt: isoTimestamp(latestMilestoneTimestamp(input.milestones)),
