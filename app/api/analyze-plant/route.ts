@@ -4,6 +4,7 @@ import convertHeic from "heic-convert";
 import sharp from "sharp";
 import { selectSpeciesCareProfile, speciesProfilesPromptContext, speciesTraitsForAnalysis } from "@/lib/species-profiles";
 import { INITIAL_ADD_FAST_LLM_FIELDS, isInitialAddFastAnalysisMode, maxOutputTokensForAnalysisMode } from "@/lib/plant-analysis-pipeline";
+import { buildSpeciesLearningState } from "@/lib/species-learning";
 import { RECOMMENDATION_PROMPT_VERSION } from "@/lib/recommendation-version";
 
 export const runtime = "nodejs";
@@ -88,6 +89,7 @@ type AnalysisPayload = {
   alternativeCauses?: unknown[];
   hypotheses?: AnalysisHypothesisPayload[];
   speciesReasoning?: unknown;
+  speciesIdentification?: unknown;
   recommendationImpact?: {
     impactLevel?: "none" | "minor" | "moderate" | "major";
     changeSummary?: { en?: string | null; ru?: string | null };
@@ -737,6 +739,7 @@ function hydrateInitialAddFastAnalysis(analysis: AnalysisPayload & Record<string
 
   return {
     ...analysis,
+    speciesIdentification: buildSpeciesLearningState(analysis),
     primaryAction,
     actionTimeframe,
     statusReason,
@@ -846,6 +849,7 @@ function applySpeciesAwareQuestionLimits(analysis: AnalysisPayload) {
       rule: "Questions must be species-relevant and able to change recommendation, urgency, action, or next check date."
     }
   };
+  analysis.speciesIdentification = buildSpeciesLearningState(analysis);
 
   return analysis;
 }

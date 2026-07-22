@@ -11,6 +11,8 @@ export type SoilCheckResult = "dry" | "slightly_damp" | "very_wet" | "not_sure";
 export type CareScheduleStatus = "active" | "paused" | "needs_first_check";
 export type PlantHypothesis = "soil_condition" | "repotting" | "root_condition" | "drainage" | "direct_sun" | "pests";
 export type PlantHypothesisStatus = "confirmed" | "ruled_out" | "unknown";
+export type SpeciesIdentificationStatus = "learning" | "probable" | "confident" | "confirmed_by_user";
+export type SpeciesIdentificationEvidenceType = "visual" | "growth_habit" | "user" | "care_context";
 export type HomeType = "apartment" | "house" | "studio" | "other";
 export type HomeHumidityLevel = "dry" | "normal" | "humid" | "unknown";
 export type RoomLightLevel = "low" | "medium_indirect" | "bright_indirect" | "direct_sun" | "unknown";
@@ -114,6 +116,34 @@ export interface PlantAnalysisRecord {
     ru?: string;
   }[];
   rawResult?: {
+    detectedSpecies?: string | null;
+    commonName?: { en?: string | null; ru?: string | null } | string | null;
+    scientificName?: string | null;
+    confidence?: number | null;
+    growthHabit?: string | null;
+    organVocabulary?: string[];
+    speciesIdentification?: {
+      status: SpeciesIdentificationStatus;
+      currentLabel?: string | null;
+      confidence?: number | null;
+      candidates: {
+        label: string;
+        confidence?: number | null;
+        source: "ai_visual" | "user" | "derived";
+      }[];
+      userConfirmation?: {
+        commonName?: string | null;
+        scientificName?: string | null;
+        confirmedAt?: string | null;
+        source: "manual";
+      } | null;
+      evidence: {
+        type: SpeciesIdentificationEvidenceType;
+        label: string;
+      }[];
+      updatedAt?: string;
+      source: "analysis" | "user_signal" | "combined";
+    };
     plantStatus?: "healthy" | "adapting" | "watch" | "needs_attention" | "action_needed";
     urgency?: "none" | "observe" | "soon" | "today";
     primaryAction?: { en?: string | null; ru?: string | null };

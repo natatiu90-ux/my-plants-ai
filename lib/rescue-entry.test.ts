@@ -17,8 +17,8 @@ assert.equal(
     commonName: "Monstera",
     scientificName: "Monstera deliciosa"
   }),
-  true,
-  "low confidence should activate Rescue Entry"
+  false,
+  "low confidence alone should not activate Rescue Entry"
 );
 
 assert.equal(
@@ -27,8 +27,23 @@ assert.equal(
     commonName: "Неизвестное растение",
     scientificName: ""
   }),
+  false,
+  "unknown species alone should be a learning state, not Rescue Entry"
+);
+
+assert.equal(
+  shouldShowRescueEntry({
+    analysis: {
+      confidence: 0.8,
+      detectedSpecies: null,
+      condition: "needs_attention",
+      rawResult: { visualEvidenceSnapshot: { concerns: ["dry branches"], severity: "moderate" } }
+    },
+    commonName: "Неизвестное растение",
+    scientificName: ""
+  }),
   true,
-  "unknown species should activate Rescue Entry even when the request succeeded"
+  "visible plant problems should activate Rescue Entry even when species is unknown"
 );
 
 assert.equal(shouldShowRescueEntry({ analysis: null, commonName: "", scientificName: "" }), false);

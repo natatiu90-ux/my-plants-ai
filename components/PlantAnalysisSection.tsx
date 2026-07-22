@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { formatRelativeDate } from "@/lib/date-format";
 import { deriveConversationalCareState } from "@/lib/conversational-care";
+import { isStillLearningSpecies, speciesLearningStateFromAnalysis } from "@/lib/species-learning";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
 import type { Plant, PlantAnalysisRecord, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone } from "@/types/plant";
@@ -251,6 +252,53 @@ function recommendationDensity(analysis: PlantAnalysisRecord, activeHypotheses: 
   }
 
   return "healthy";
+}
+
+function SpeciesLearningCard({ analysis }: { analysis?: PlantAnalysisRecord }) {
+  const { t } = useI18n();
+  const state = speciesLearningStateFromAnalysis(analysis);
+  if (!isStillLearningSpecies(state)) return null;
+
+  const confidencePercent = typeof state?.confidence === "number" ? Math.round(state.confidence * 100) : null;
+  const candidates = state?.candidates?.filter((candidate) => candidate.label && candidate.label !== state.currentLabel).slice(0, 3) ?? [];
+  const evidence = state?.evidence?.map((item) => item.label).filter(Boolean).slice(0, 3) ?? [];
+
+  return (
+    <div className="min-w-0 rounded-[22px] bg-[#eef7ed] p-3">
+      <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.learningTitle")}</p>
+      <p className="mt-2 text-sm font-extrabold leading-5 text-[#355f3d]">{t("plantAnalysis.learningIntro")}</p>
+      {state?.currentLabel ? (
+        <div className="mt-3 rounded-[18px] bg-white/65 p-3">
+          <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.learningCurrentUnderstanding")}</p>
+          <p className="mt-1 font-rounded text-lg font-extrabold leading-6 text-[#3f3b35] [overflow-wrap:anywhere]">{state.currentLabel}</p>
+          {confidencePercent != null ? <p className="mt-1 text-xs font-bold text-[#8a8378]">{t("plantAnalysis.learningConfidence")}: {confidencePercent}%</p> : null}
+        </div>
+      ) : null}
+      {candidates.length ? (
+        <div className="mt-2 rounded-[18px] bg-white/50 p-3">
+          <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.learningPossibleMatches")}</p>
+          <ul className="mt-1 grid gap-1 text-sm font-bold text-[#5f594f]">
+            {candidates.map((candidate) => (
+              <li key={candidate.label}>{candidate.label}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {evidence.length ? (
+        <p className="mt-2 text-xs font-bold leading-4 text-[#6f675d] [overflow-wrap:anywhere]">
+          {t("plantAnalysis.learningEvidence")}: {evidence.join(", ")}
+        </p>
+      ) : null}
+      <div className="mt-2 rounded-[18px] bg-white/50 p-3">
+        <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.learningHelpImprove")}</p>
+        <ul className="mt-1 grid gap-1 text-sm font-bold leading-5 text-[#5f594f]">
+          <li>{t("plantAnalysis.learningAddClosePhoto")}</li>
+          <li>{t("plantAnalysis.learningAddStemPhoto")}</li>
+          <li>{t("plantAnalysis.learningTellName")}</li>
+        </ul>
+      </div>
+    </div>
+  );
 }
 
 export function PlantAnalysisSection({
@@ -536,6 +584,8 @@ export function PlantAnalysisSection({
         ) : null}
 
         <div className="mt-3 grid gap-2">
+          <SpeciesLearningCard analysis={analysis} />
+
           {conversationalState.goodNews ? (
             <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
               <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.conversationGoodNews")}</p>
@@ -659,6 +709,8 @@ export function PlantAnalysisSection({
         <p className="mx-1 mt-2 rounded-[16px] bg-[#eef5e8] p-3 text-sm font-bold leading-5 text-[#4f6946]">{t("plantAnalysis.pendingBaselineQuestions")}</p>
       ) : null}
       <div className="mt-3 grid gap-2">
+        <SpeciesLearningCard analysis={analysis} />
+
         <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
           <p className="text-sm font-extrabold leading-5 text-[#355f3d] [overflow-wrap:anywhere]">{view.keyTakeaway}</p>
         </div>

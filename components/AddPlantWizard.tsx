@@ -23,6 +23,7 @@ import { cleanPlantName, cleanScientificName, commonNameFromScientificName } fro
 import { plantCreationDiagnosticFromError, type PlantCreationDiagnostic, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
 import { isUnknownPlantName, shouldShowRescueEntry } from "@/lib/rescue-entry";
+import { isStillLearningSpecies, speciesLearningStateFromAnalysis } from "@/lib/species-learning";
 import { useScreenWakeLock } from "@/lib/use-screen-wake-lock";
 import { MultiPhotoPicker, PhotoPickerDebugPanel, type PhotoPickerDiagnostic } from "./MultiPhotoPicker";
 import { PhotoBatchReview } from "./PhotoBatchReview";
@@ -1266,8 +1267,27 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
     : t("addPlant.noRoomSelected");
   const displayCommonName = cleanPlantName(speciesName) || commonNameFromScientificName(scientificName) || t("plants.unknownName");
   const displayScientificName = cleanScientificName(scientificName);
+  const speciesLearningState = speciesLearningStateFromAnalysis(
+    analysis
+      ? {
+          id: "pending-analysis",
+          plantId: "pending-plant",
+          condition: analysis.condition,
+          nextAction: analysis.nextAction === "none" ? null : analysis.nextAction,
+          recommendations: Array.isArray(analysis.recommendations) ? analysis.recommendations : [],
+          rawResult: analysis.rawResult as never,
+          createdAt: new Date().toISOString()
+        }
+      : null
+  );
+  const speciesStillLearning = isStillLearningSpecies(speciesLearningState);
   const rescueEntryActive = shouldShowRescueEntry({ analysis, commonName: speciesName, scientificName });
-  const confirmationTitle = rescueEntryActive && isUnknownPlantName(displayCommonName) ? t("addPlant.rescuePlantName") : displayCommonName;
+  const confirmationTitle =
+    rescueEntryActive && isUnknownPlantName(displayCommonName)
+      ? t("addPlant.rescuePlantName")
+      : speciesStillLearning && isUnknownPlantName(displayCommonName)
+        ? speciesLearningState?.currentLabel ?? t("addPlant.learningPlantName")
+        : displayCommonName;
   const conditionSummary =
     analysis?.condition === "needs_attention"
       ? {
@@ -1405,7 +1425,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         savedNickname = generateNicknameOnce();
         setHomeName(savedNickname);
       }
-      const savedCommonName = cleanPlantName(speciesName) || commonNameFromScientificName(displayScientificName) || (rescueStarted ? t("addPlant.rescuePlantName") : "");
+      const savedCommonName = cleanPlantName(speciesName) || commonNameFromScientificName(displayScientificName) || (rescueStarted ? t("addPlant.rescuePlantName") : speciesStillLearning ? t("addPlant.learningPlantName") : "");
       if (!savedCommonName && !displayScientificName && (analysisFailed || rescueEntryActive)) {
         const shouldSaveManualPlant = window.confirm(t("addPlant.manualEmptyConfirm"));
         if (!shouldSaveManualPlant) {
@@ -1630,6 +1650,17 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             <div className="pt-5">
               <h3 className="font-rounded text-[30px] font-black leading-tight text-ink">{confirmationTitle}</h3>
               {displayScientificName ? <p className="mt-1 text-sm italic leading-5 text-[#8e867b]">{displayScientificName}</p> : null}
+              {speciesStillLearning ? (
+                <div className="mt-4 rounded-[22px] bg-[#eef7ed] p-4">
+                  <p className="font-rounded text-lg font-extrabold text-[#2d7a4f]">{t("addPlant.learningSpeciesTitle")}</p>
+                  <p className="mt-2 text-sm font-bold leading-5 text-[#5f594f]">{t("addPlant.learningSpeciesText")}</p>
+                  {speciesLearningState?.currentLabel ? (
+                    <p className="mt-3 text-sm font-extrabold leading-5 text-[#6f675d]">
+                      {t("addPlant.learningCurrentUnderstanding")}: {speciesLearningState.currentLabel}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               {rescueEntryActive ? (
                 <div className="mt-4 rounded-[22px] bg-[#fff8e8] p-4">
                   <p className="font-rounded text-lg font-extrabold text-[#8a6230]">{t("addPlant.rescueEntryTitle")}</p>
@@ -1654,7 +1685,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                     </button>
                   )}
                 </div>
-              ) : isLowConfidenceAnalysis ? (
+              ) : isLowConfidenceAnalysis && !speciesStillLearning ? (
                 <div className="mt-4 rounded-[20px] bg-[#fff8e8] p-3">
                   <p className="font-rounded text-lg font-extrabold text-[#8a6230]">{t("addPlant.lowConfidenceTitle")}</p>
                   <p className="mt-1 text-sm font-bold leading-5 text-[#7a623d]">{t("addPlant.lowConfidenceText")}</p>
