@@ -7,6 +7,7 @@ import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
 import { clearAddPlantDraft, createAddPlantDraftId, createAnalysisRequestId, loadAddPlantDraft, saveAddPlantDraft, type AddPlantDraft } from "@/lib/add-plant-draft";
 import { deriveAddPlantConfirmationPresentation } from "@/lib/add-plant-confirmation-presentation";
+import { deriveAddPlantDefaultLocation, lastUsedAddPlantHomeStorageKey, lastUsedAddPlantRoomStorageKey, rememberAddPlantLocation, selectedHomeStoragePrefix } from "@/lib/add-plant-default-location";
 import {
   addPlantPerformanceSummaryEvent,
   endAddPlantPerformanceStage,
@@ -29,8 +30,10 @@ import { useScreenWakeLock } from "@/lib/use-screen-wake-lock";
 import { MultiPhotoPicker, PhotoPickerDebugPanel, type PhotoPickerDiagnostic } from "./MultiPhotoPicker";
 import { PhotoBatchReview } from "./PhotoBatchReview";
 import { PhotoImage } from "./PhotoImage";
+import { LocationPicker } from "./LocationPicker";
 import { RoomPicker } from "./RoomPicker";
 import type { PendingPhotoUpload } from "./photo-upload-types";
+import type { Plant } from "@/types/plant";
 
 type Step = "pick" | "pick_more" | "review" | "analysis" | "confirm" | "details";
 type ConfirmationPicker = "room" | null;
@@ -334,6 +337,9 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [isConfirmingNicknameRegeneration, setIsConfirmingNicknameRegeneration] = useState(false);
   const [speciesName, setSpeciesName] = useState("");
   const [scientificName, setScientificName] = useState("");
+  const [homeId, setHomeId] = useState<string | undefined>();
+  const [roomId, setRoomId] = useState<string | undefined>();
+  const [positionInRoom, setPositionInRoom] = useState<Plant["positionInRoom"]>();
   const [roomKey, setRoomKey] = useState<string | undefined>();
   const [activePicker, setActivePicker] = useState<ConfirmationPicker>(null);
   const [analysis, setAnalysis] = useState<PlantAnalysis | null>(null);
@@ -356,6 +362,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const latestDraftRef = useRef<AddPlantDraft | null>(null);
   const activeAnalysisRequestIdRef = useRef<string | null>(null);
   const discardedDraftRef = useRef(false);
+  const didApplyDefaultLocationRef = useRef(false);
   const frozenAnalysisContextRef = useRef({ homes, rooms, speciesName });
   const ensureSuggestedNicknameRef = useRef<() => string>(() => "");
   const wakeLockDiagnostic = useScreenWakeLock(step === "analysis");
@@ -437,8 +444,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       setSelectedPhotos(photos);
       setHomeName(draft.identifiedPlantDraft.homeName);
       generatedNicknameRef.current = draft.identifiedPlantDraft.homeName || generatedNicknameRef.current;
+      setHomeId(draft.identifiedPlantDraft.homeId);
       setSpeciesName(draft.identifiedPlantDraft.speciesName);
       setScientificName(draft.identifiedPlantDraft.scientificName);
+      setRoomId(draft.identifiedPlantDraft.roomId);
       setRoomKey(draft.identifiedPlantDraft.roomKey);
 
       if (draft.analysisResult) {
@@ -480,6 +489,25 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   }, []);
 
   useEffect(() => {
+    if (!isDraftRestored || didApplyDefaultLocationRef.current || homeId || roomId || roomKey) {
+      return;
+    }
+
+    didApplyDefaultLocationRef.current = true;
+    const defaultLocation = deriveAddPlantDefaultLocation({
+      homes,
+      rooms,
+      plants,
+      lastUsedHomeId: window.localStorage.getItem(lastUsedAddPlantHomeStorageKey),
+      lastUsedRoomId: window.localStorage.getItem(lastUsedAddPlantRoomStorageKey),
+      activeHomeId: userId ? window.localStorage.getItem(`${selectedHomeStoragePrefix}${userId}`) : null
+    });
+    setHomeId(defaultLocation.homeId);
+    setRoomId(defaultLocation.roomId);
+    setRoomKey(defaultLocation.roomId);
+  }, [homeId, homes, isDraftRestored, plants, roomId, roomKey, rooms, userId]);
+
+  useEffect(() => {
     if (!isDraftRestored || discardedDraftRef.current) {
       return;
     }
@@ -509,16 +537,18 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       analysisError: analysisErrorCode,
       identifiedPlantDraft: {
         homeName,
+        homeId,
         speciesName,
         scientificName,
-        roomKey
+        roomKey,
+        roomId
       },
       updatedAt: new Date().toISOString()
     };
 
     latestDraftRef.current = draft;
     saveAddPlantDraft(draft);
-  }, [analysis, analysisErrorCode, analysisFailed, analysisRequestId, draftId, homeName, isDraftRestored, roomKey, scientificName, selectedPhotos, speciesName, step]);
+  }, [analysis, analysisErrorCode, analysisFailed, analysisRequestId, draftId, homeId, homeName, isDraftRestored, roomId, roomKey, scientificName, selectedPhotos, speciesName, step]);
 
   useEffect(() => {
     const persistLatestDraft = () => {
@@ -1259,11 +1289,15 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   }
 
   const coverPhoto = selectedPhotos.find((photo) => photo.isCover) ?? selectedPhotos[0];
-  const selectedRoomName = roomKey
-    ? roomKey.startsWith("rooms.")
-      ? t(roomKey as never)
-      : rooms.find((room) => room.id === roomKey)?.name ?? t("addPlant.noRoomSelected")
-    : t("addPlant.noRoomSelected");
+  const selectedHomeName = homeId ? homes.find((home) => home.id === homeId)?.name ?? t("homeContext.noHome") : t("homeContext.noHome");
+  const selectedRoomName = roomId
+    ? rooms.find((room) => room.id === roomId)?.name ?? t("addPlant.noRoomSelected")
+    : roomKey
+      ? roomKey.startsWith("rooms.")
+        ? t(roomKey as never)
+        : rooms.find((room) => room.id === roomKey)?.name ?? t("addPlant.noRoomSelected")
+      : t("addPlant.noRoomSelected");
+  const shouldExplainFirstHome = homes.length === 0;
   const displayCommonName = cleanPlantName(speciesName) || commonNameFromScientificName(scientificName) || t("plants.unknownName");
   const displayScientificName = cleanScientificName(scientificName);
   const speciesLearningState = speciesLearningStateFromAnalysis(
@@ -1410,6 +1444,8 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
 
       logAddPlantDebug("plant_save_started", {
         photoCount: selectedPhotos.length,
+        homeId,
+        roomId,
         roomKey,
         speciesName: displayCommonName,
         hasScientificName: Boolean(displayScientificName)
@@ -1441,9 +1477,12 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       });
       const plantId = await addPlant({
         homeName: savedNickname,
+        homeId,
         speciesName: savedCommonName,
         scientificName: displayScientificName || undefined,
-        roomKey,
+        roomKey: roomId ?? roomKey,
+        roomId,
+        positionInRoom,
         photos: selectedPhotos,
         analysis: analysis
           ? {
@@ -1465,6 +1504,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       });
       persistenceToken = null;
       savedPlantId = plantId;
+      rememberAddPlantLocation({ homeId, roomId });
       logAddPlantDebug("plant_save_completed", { plantId });
       logAddPlantDebug("temporary_photo_cleanup_started", {
         plantId,
@@ -1716,16 +1756,24 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                     </div>
                   )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => openPicker("room")}
-                  className="rounded-[20px] bg-white/70 p-3 text-left"
-                >
-                  <p className="text-xs font-bold uppercase text-[#a09a90]">{t("addPlant.locationLabel")}</p>
+                {shouldExplainFirstHome ? (
+                  <p className="rounded-[18px] bg-white/70 p-3 text-sm leading-5 text-[#6f675d]">{t("addPlant.firstHomeHint")}</p>
+                ) : null}
+                <button type="button" onClick={() => openPicker("room")} className="rounded-[20px] bg-white/70 p-3 text-left">
+                  <p className="text-xs font-bold text-[#a09a90]">{t("homeContext.home")}</p>
                   <div className="mt-1 flex items-center justify-between gap-3">
-                    <p className="font-extrabold text-[#3f3b35]">{selectedRoomName}</p>
+                    <p className="font-semibold text-[#3f3b35]">{selectedHomeName}</p>
                     <span className="shrink-0 text-sm font-extrabold text-[#2d7a4f]">
-                      {roomKey ? t("addPlant.change") : t("addPlant.select")}
+                      {homeId ? t("addPlant.change") : t("addPlant.select")}
+                    </span>
+                  </div>
+                </button>
+                <button type="button" onClick={() => openPicker("room")} className="rounded-[20px] bg-white/70 p-3 text-left">
+                  <p className="text-xs font-bold text-[#a09a90]">{t("homeContext.room")}</p>
+                  <div className="mt-1 flex items-center justify-between gap-3">
+                    <p className="font-semibold text-[#3f3b35]">{selectedRoomName}</p>
+                    <span className="shrink-0 text-sm font-extrabold text-[#2d7a4f]">
+                      {roomId || roomKey ? t("addPlant.change") : t("addPlant.select")}
                     </span>
                   </div>
                 </button>
@@ -1876,18 +1924,45 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#1c1c1e]/20 px-4 pb-4 backdrop-blur-[2px] sm:items-center sm:pb-0">
           <div role="dialog" aria-modal="true" className="w-full max-w-[390px] rounded-[28px] bg-[#fffaf3] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]">
             <h2 className="font-rounded text-2xl font-extrabold text-ink">{t("addPlant.locationLabel")}</h2>
+            {shouldExplainFirstHome ? <p className="mt-2 text-sm leading-5 text-[#6f675d]">{t("addPlant.firstHomeHint")}</p> : null}
             <div className="mt-4">
-              <RoomPicker
-                value={roomKey}
+              <LocationPicker
+                homeId={homeId}
+                roomId={roomId}
+                positionInRoom={positionInRoom}
                 onChange={(value) => {
-                  setRoomKey(value);
-                  setActivePicker(null);
+                  setHomeId(value.homeId);
+                  setRoomId(value.roomId);
+                  setRoomKey(value.roomId);
+                  setPositionInRoom(value.positionInRoom);
                 }}
               />
             </div>
+            {homes.length === 0 ? (
+              <div className="mt-4">
+                <RoomPicker
+                  value={roomKey}
+                  onChange={(value) => {
+                    setRoomKey(value);
+                    setRoomId(undefined);
+                    setActivePicker(null);
+                  }}
+                />
+              </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setActivePicker(null)}
+              className="mt-3 min-h-12 w-full rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]"
+            >
+              {t("common.done")}
+            </button>
             <button
               type="button"
               onClick={() => {
+                setHomeId(undefined);
+                setRoomId(undefined);
+                setPositionInRoom(undefined);
                 setRoomKey(undefined);
                 setActivePicker(null);
               }}

@@ -1305,7 +1305,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           changedContext: input.changedContext ?? {
             home: { city: false, country: false, type: false, humidity: false, airConditioning: false },
             room: { assignment: false, lightLevel: false, directSun: false, temperature: false, airConditioning: false },
-            plant: { positionInRoom: false, lightCondition: false },
+            plant: { species: false, positionInRoom: false, lightCondition: false },
             care: { watering: false, repotting: false, soilCondition: false, history: false },
             system: { promptVersion: false, modelVersion: false }
           },

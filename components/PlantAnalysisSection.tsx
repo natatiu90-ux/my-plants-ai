@@ -305,7 +305,8 @@ export function PlantAnalysisSection({
   hasPendingBaselineQuestions = false,
   careActionState,
   onKnowSpecies,
-  onAddPhoto
+  onAddPhoto,
+  onRetryRecommendationRefresh
 }: {
   analysis?: PlantAnalysisRecord;
   plant: Plant;
@@ -317,6 +318,7 @@ export function PlantAnalysisSection({
   careActionState?: DerivedCareActionState | null;
   onKnowSpecies?: () => void;
   onAddPhoto?: () => void;
+  onRetryRecommendationRefresh?: () => void;
 }) {
   const { locale, t } = useI18n();
   const [savingAnswerKey, setSavingAnswerKey] = useState<string | null>(null);
@@ -328,6 +330,7 @@ export function PlantAnalysisSection({
     () => deriveConversationalCareState({ analysis, plant, milestones, hypothesisResolutions, locale }),
     [analysis, hypothesisResolutions, locale, milestones, plant]
   );
+  const userProvidedSpecies = userProvidedSpeciesFromPlant(plant);
   const completedFact = completedFactLabel({
     resolution: latestResolution(hypothesisResolutions),
     translate: t,
@@ -577,15 +580,15 @@ export function PlantAnalysisSection({
             }
             return true;
           });
-    const primaryConversationText = conversationalState.question ? t("plantAnalysis.firstAnswerQuestion") : canonicalActionText || todayActions[0] || t("careAction.noAction");
-    const planActions = conversationalState.question || completedFact ? todayActions : todayActions.filter((action) => action !== primaryConversationText);
+    const primaryConversationText = canonicalActionText || todayActions[0] || t("careAction.noAction");
+    const planActions = conversationalState.question ? [] : completedFact ? todayActions.filter((action) => action !== completedFact.conclusion) : todayActions.filter((action) => action !== primaryConversationText);
 
     return (
       <section className="mt-4 min-w-0 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-1">
-          <h2 className="font-rounded text-xl font-extrabold text-ink [overflow-wrap:anywhere]">{t("plantAnalysis.title")}</h2>
+          <h2 className="font-rounded text-xl font-extrabold text-ink [overflow-wrap:anywhere]">{t("plantAnalysis.recoveryTitle")}</h2>
           {recommendationRefreshState?.status === "loading" ? (
-            <span className="rounded-full bg-[#eef5e8] px-3 py-1 text-xs font-extrabold text-[#4f6946]">{t("plantAnalysis.refreshingInline")}</span>
+            <span className="rounded-full bg-[#eef5e8] px-3 py-1 text-xs font-extrabold text-[#4f6946]">{userProvidedSpecies ? t("plantAnalysis.userSpeciesRefreshLoading") : t("plantAnalysis.refreshingInline")}</span>
           ) : null}
           {recommendationRefreshState?.status === "success" ? (
             <span className="rounded-full bg-[#eef5e8] px-3 py-1 text-xs font-extrabold text-[#355f3d]">{t("plantAnalysis.refreshSuccessBadge")}</span>
@@ -595,18 +598,25 @@ export function PlantAnalysisSection({
           ) : null}
         </div>
         {recommendationRefreshState?.status === "error" ? (
-          <p className="mx-1 mt-2 rounded-[16px] bg-[#fff0e6] p-3 text-sm font-bold leading-5 text-[#8a5b24]">{recommendationRefreshState.error ?? t("plantAnalysis.refreshFailedInline")}</p>
+          <div className="mx-1 mt-2 rounded-[16px] bg-[#fff0e6] p-3 text-sm leading-5 text-[#8a5b24]">
+            <p>{recommendationRefreshState.error ?? t("plantAnalysis.refreshFailedInline")}</p>
+            {onRetryRecommendationRefresh ? (
+              <button type="button" onClick={onRetryRecommendationRefresh} className="mt-2 min-h-9 rounded-[14px] bg-white/75 px-3 text-xs font-extrabold text-[#6f4e20]">
+                {t("common.tryAgain")}
+              </button>
+            ) : null}
+          </div>
         ) : null}
-        {hasPendingBaselineQuestions ? (
+        {hasPendingBaselineQuestions && !conversationalState.question ? (
           <p className="mx-1 mt-2 rounded-[16px] bg-[#eef5e8] p-3 text-sm font-bold leading-5 text-[#4f6946]">{t("plantAnalysis.pendingBaselineQuestions")}</p>
         ) : null}
 
         <div className="mt-3 grid gap-2">
           {conversationalState.question ? (
             <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
-              <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.conversationQuestion")}</p>
-              <p className="mt-2 text-sm font-extrabold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{conversationalState.question.question}</p>
-              <p className="mt-1 text-xs font-bold leading-4 text-[#5f7a54] [overflow-wrap:anywhere]">{conversationalState.question.reason}</p>
+              <p className="text-xs font-bold text-[#6f8c62]">{t("plantAnalysis.conversationQuestion")}</p>
+              <p className="mt-2 text-sm font-semibold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{conversationalState.question.question}</p>
+              <p className="mt-1 text-xs leading-4 text-[#5f7a54] [overflow-wrap:anywhere]">{conversationalState.question.reason}</p>
               <AnswerChips
                 options={conversationalState.question.options}
                 getKey={(option) => `${conversationalState.question!.hypothesis}:${option.result}`}
@@ -620,13 +630,13 @@ export function PlantAnalysisSection({
             </div>
           ) : completedFact ? (
             <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
-              <p className="text-sm font-extrabold leading-5 text-[#355f3d]">✓ {completedFact.label}: {completedFact.value}</p>
-              <p className="mt-1 text-sm font-bold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{completedFact.conclusion}</p>
+              <p className="text-sm font-semibold leading-5 text-[#355f3d]">✓ {completedFact.label}: {completedFact.value}</p>
+              <p className="mt-1 text-sm leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{completedFact.conclusion}</p>
             </div>
           ) : (
             <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
-              <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.conversationNow")}</p>
-              <p className="mt-1 text-sm font-extrabold leading-5 text-[#355f3d] [overflow-wrap:anywhere]">
+              <p className="text-xs font-bold text-[#6f8c62]">{t("plantAnalysis.conversationNow")}</p>
+              <p className="mt-1 text-sm font-semibold leading-5 text-[#355f3d] [overflow-wrap:anywhere]">
                 {primaryConversationText}
               </p>
             </div>
@@ -634,8 +644,8 @@ export function PlantAnalysisSection({
 
           {planActions.length ? (
             <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
-              <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.conversationToday")}</p>
-              <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f] [overflow-wrap:anywhere]">
+              <p className="text-xs font-bold text-[#a09a90]">{t("plantAnalysis.conversationToday")}</p>
+              <ul className="mt-2 grid gap-1.5 text-sm leading-5 text-[#5f594f] [overflow-wrap:anywhere]">
                 {planActions.map((action) => (
                   <li key={action}>{action}</li>
                 ))}
@@ -645,8 +655,8 @@ export function PlantAnalysisSection({
 
           {conversationalState.concern ? (
             <div className="min-w-0 rounded-[20px] bg-white/50 p-3">
-              <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.conversationConcern")}</p>
-              <p className="mt-1 text-sm font-bold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{conversationalState.concern}</p>
+              <p className="text-xs font-bold text-[#a09a90]">{t("plantAnalysis.conversationConcern")}</p>
+              <p className="mt-1 text-sm leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{conversationalState.concern}</p>
             </div>
           ) : null}
 
@@ -718,7 +728,7 @@ export function PlantAnalysisSection({
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-1">
         <h2 className="font-rounded text-xl font-extrabold text-ink [overflow-wrap:anywhere]">{t("plantAnalysis.title")}</h2>
         {recommendationRefreshState?.status === "loading" ? (
-          <span className="rounded-full bg-[#eef5e8] px-3 py-1 text-xs font-extrabold text-[#4f6946]">{t("plantAnalysis.refreshingInline")}</span>
+          <span className="rounded-full bg-[#eef5e8] px-3 py-1 text-xs font-extrabold text-[#4f6946]">{userProvidedSpecies ? t("plantAnalysis.userSpeciesRefreshLoading") : t("plantAnalysis.refreshingInline")}</span>
         ) : null}
         {recommendationRefreshState?.status === "success" ? (
           <span className="rounded-full bg-[#eef5e8] px-3 py-1 text-xs font-extrabold text-[#355f3d]">{t("plantAnalysis.refreshSuccessBadge")}</span>
@@ -728,7 +738,14 @@ export function PlantAnalysisSection({
         ) : null}
       </div>
       {recommendationRefreshState?.status === "error" ? (
-        <p className="mx-1 mt-2 rounded-[16px] bg-[#fff0e6] p-3 text-sm font-bold leading-5 text-[#8a5b24]">{recommendationRefreshState.error ?? t("plantAnalysis.refreshFailedInline")}</p>
+        <div className="mx-1 mt-2 rounded-[16px] bg-[#fff0e6] p-3 text-sm leading-5 text-[#8a5b24]">
+          <p>{recommendationRefreshState.error ?? t("plantAnalysis.refreshFailedInline")}</p>
+          {onRetryRecommendationRefresh ? (
+            <button type="button" onClick={onRetryRecommendationRefresh} className="mt-2 min-h-9 rounded-[14px] bg-white/75 px-3 text-xs font-extrabold text-[#6f4e20]">
+              {t("common.tryAgain")}
+            </button>
+          ) : null}
+        </div>
       ) : null}
       {hasPendingBaselineQuestions ? (
         <p className="mx-1 mt-2 rounded-[16px] bg-[#eef5e8] p-3 text-sm font-bold leading-5 text-[#4f6946]">{t("plantAnalysis.pendingBaselineQuestions")}</p>

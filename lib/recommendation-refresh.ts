@@ -86,6 +86,8 @@ export type RecommendationContextSnapshot = {
   plant: {
     homeId?: string;
     roomId?: string;
+    speciesName?: string;
+    scientificName?: string;
     positionInRoom?: Plant["positionInRoom"];
     lightConditionKey?: Plant["lightConditionKey"];
     lastWateredAt?: string;
@@ -138,6 +140,7 @@ export type RecommendationChangedContext = {
     airConditioning: boolean;
   };
   plant: {
+    species: boolean;
     positionInRoom: boolean;
     lightCondition: boolean;
   };
@@ -162,7 +165,7 @@ export type RecommendationRevisionSaveResult = {
 const emptyChangedContext = (): RecommendationChangedContext => ({
   home: { city: false, country: false, type: false, humidity: false, airConditioning: false },
   room: { assignment: false, lightLevel: false, directSun: false, temperature: false, airConditioning: false },
-  plant: { positionInRoom: false, lightCondition: false },
+  plant: { species: false, positionInRoom: false, lightCondition: false },
   care: { watering: false, repotting: false, soilCondition: false, history: false },
   system: { promptVersion: false, modelVersion: false }
 });
@@ -182,6 +185,8 @@ export function buildRecommendationContextSnapshot(input: {
     plant: {
       homeId: input.plant.homeId,
       roomId: input.plant.roomId,
+      speciesName: input.plant.speciesName,
+      scientificName: input.plant.scientificName,
       positionInRoom: input.plant.positionInRoom,
       lightConditionKey: input.plant.lightConditionKey,
       lastWateredAt: input.plant.lastWateredAt,
@@ -259,6 +264,7 @@ export function changedContextSince(
   changes.room.temperature = previousRoom?.temperatureRelative !== current.room?.temperatureRelative;
   changes.room.airConditioning = previousRoom?.hasAirConditioning !== current.room?.hasAirConditioning;
 
+  changes.plant.species = previousPlant?.speciesName !== current.plant.speciesName || previousPlant?.scientificName !== current.plant.scientificName;
   changes.plant.positionInRoom = previousPlant?.positionInRoom !== current.plant.positionInRoom;
   changes.plant.lightCondition = previousPlant?.lightConditionKey !== current.plant.lightConditionKey;
 
@@ -312,6 +318,7 @@ export function staleReasonKeys(input: {
   if (input.changedContext.care.soilCondition) reasons.push("soil_changed");
   if (input.changedContext.care.watering) reasons.push("watering_changed");
   if (input.changedContext.care.repotting || input.changedContext.care.history) reasons.push("care_history_changed");
+  if (input.changedContext.plant.species) reasons.push("species_changed");
   if (input.changedContext.room.assignment || input.changedContext.plant.positionInRoom) reasons.push("plant_location_changed");
   if (input.changedContext.room.temperature) reasons.push("temperature_changed");
   if (input.changedContext.home.airConditioning || input.changedContext.room.airConditioning) reasons.push("air_conditioning_changed");

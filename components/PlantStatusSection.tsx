@@ -28,7 +28,7 @@ export function PlantStatusSection({
   const speciesLabel = speciesDetailLabel({ fallbackName: plantCommonName(plant), speciesLearningState, userProvidedSpecies });
   const commonName = speciesLabel.labelKey ? t(speciesLabel.labelKey) : speciesLabel.labelText ?? "";
   const healthStatus = derivePlantHealthStatus({ plant, analysis, milestones, careActionState });
-  const message = hasActiveQuestion ? t("plantAnalysis.waitingForAnswer") : t(healthStatus.messageKey);
+  const message = hasActiveQuestion ? t("plantAnalysis.needsOneFact") : t(healthStatus.messageKey);
 
   return (
     <section className="mt-4 min-w-0 rounded-[28px] bg-[#fffaf3] p-5 shadow-soft">

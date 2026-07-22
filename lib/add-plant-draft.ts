@@ -20,9 +20,11 @@ export type AddPlantDraft = {
   analysisError: string | null;
   identifiedPlantDraft: {
     homeName: string;
+    homeId?: string;
     speciesName: string;
     scientificName: string;
     roomKey?: string;
+    roomId?: string;
   };
   updatedAt: string;
 };

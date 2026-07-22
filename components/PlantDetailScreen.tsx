@@ -488,6 +488,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
 
     setPhotoAssessment({ status: "analyzing" });
     const startedAt = Date.now();
+    const userProvidedSpeciesContext = recommendationSpeciesContextFromPlant(plant);
     try {
       const formData = new FormData();
       for (const photo of selectedPhotos) {
@@ -514,7 +515,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       formData.append("currentCommonName", plant.speciesName ?? "");
       formData.append("currentScientificName", plant.scientificName ?? "");
       formData.append("currentDetectedSpecies", [plant.speciesName, plant.scientificName].filter(Boolean).join(" "));
-      formData.append("userProvidedSpecies", JSON.stringify(recommendationSpeciesContextFromPlant(plant)));
+      formData.append("userProvidedSpecies", JSON.stringify(userProvidedSpeciesContext));
       formData.append("currentLightCondition", plant.lightConditionKey ? t(plant.lightConditionKey) : "");
       formData.append("environmentContext", formatEnvironmentContextForPrompt(buildPlantEnvironmentContext({ plant, homes, rooms })));
 
@@ -590,6 +591,12 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       dispatchRecommendationRefresh({ type: "error", error: t("plantAnalysis.refreshFailedInline") });
     }, recommendationRefreshTimeoutMs);
     const startedAt = Date.now();
+    const userProvidedSpeciesContext = recommendationSpeciesContextFromPlant(plant);
+    console.info("recommendation_refresh_started", {
+      plantId: plant.id,
+      revisionIdBefore: currentRecommendationRevision?.id ?? null,
+      hasUserProvidedSpecies: Boolean(userProvidedSpeciesContext?.displayName)
+    });
     try {
       const photosForAnalysis = [coverPhoto, ...photos.filter((photo) => photo.id !== coverPhoto?.id)].filter(Boolean).slice(0, 5) as PlantPhoto[];
       const formData = new FormData();
@@ -641,7 +648,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
             previousContextSnapshot: currentRecommendationRevision?.contextSnapshot,
             changedContext,
             reasonType,
-            userProvidedSpecies: recommendationSpeciesContextFromPlant(plant)
+            userProvidedSpecies: userProvidedSpeciesContext
           })
         })
       );
@@ -691,7 +698,14 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         analysisId: analysis.id,
         unchanged: Boolean(revisionResult.unchanged)
       });
-      console.info("recommendation_refresh_completed", { plantId: plant.id, photoCount: photosForAnalysis.length, durationMs: Date.now() - startedAt });
+      console.info("recommendation_refresh_completed", {
+        plantId: plant.id,
+        photoCount: photosForAnalysis.length,
+        durationMs: Date.now() - startedAt,
+        revisionIdBefore: currentRecommendationRevision?.id ?? null,
+        revisionIdAfter: revisionResult.revisionId,
+        hasUserProvidedSpecies: Boolean(userProvidedSpeciesContext?.displayName)
+      });
       if (!didTimeout) {
         dispatchRecommendationRefresh({ type: revisionResult.unchanged ? "unchanged" : "success" });
       }
@@ -699,11 +713,13 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       const wasAborted = error instanceof DOMException && error.name === "AbortError";
       console.warn("recommendation_refresh_failed", {
         plantId: plant.id,
+        revisionIdBefore: currentRecommendationRevision?.id ?? null,
+        hasUserProvidedSpecies: Boolean(userProvidedSpeciesContext?.displayName),
         message: wasAborted ? "recommendation_refresh_timeout_or_abort" : error instanceof Error ? error.message : "Unknown error",
         durationMs: Date.now() - startedAt
       });
       if (!didTimeout) {
-        dispatchRecommendationRefresh({ type: "error", error: t("plantAnalysis.refreshFailedInline") });
+        dispatchRecommendationRefresh({ type: "error", error: userProvidedSpeciesContext ? t("plantAnalysis.userSpeciesRefreshFailed") : t("plantAnalysis.refreshFailedInline") });
       }
     } finally {
       window.clearTimeout(timeoutId);
@@ -833,6 +849,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         careActionState={careActionState}
         onKnowSpecies={() => router.push(`/plants/${plant.id}/edit`)}
         onAddPhoto={() => setSheet("add_photo")}
+        onRetryRecommendationRefresh={() => void updateRecommendations()}
       />
       {currentRecommendationRevision?.reasonText && !recommendationsAreStale && recommendationRefreshState.status === "success" && currentRecommendationRevision.impactLevel && currentRecommendationRevision.impactLevel !== "none" ? (
         <section className="mt-4 rounded-[24px] bg-[#eef5e8] p-4 shadow-soft">
