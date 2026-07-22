@@ -47,14 +47,13 @@ export function MilestoneEditor({
 }: {
   milestone?: PlantMilestone;
   onCancel: () => void;
-  onSave: (input: { type: PlantMilestoneType; eventDate: string; note?: string }) => Promise<void> | void;
+  onSave: (input: { type: PlantMilestoneType; eventDate: string }) => Promise<void> | void;
 }) {
   const { locale, t } = useI18n();
   const today = toDateKey(new Date());
   const initialDraft = initialMilestoneEditorDraft(milestone, today);
   const [type, setType] = useState<PlantMilestoneType | null>(initialDraft.type);
   const [eventDate, setEventDate] = useState(initialDraft.eventDate);
-  const [note, setNote] = useState(initialDraft.note);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -77,7 +76,7 @@ export function MilestoneEditor({
     setIsSaving(true);
     setError(null);
     try {
-      await onSave({ type, eventDate, note: note.trim() || undefined });
+      await onSave({ type, eventDate });
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : t("story.saveFailed"));
       setIsSaving(false);
@@ -124,15 +123,6 @@ export function MilestoneEditor({
             </span>
           </label>
         ) : null}
-        <label className="mt-4 block text-sm font-extrabold text-[#4f4940]">
-          {t("story.eventNote")}
-          <textarea
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-            placeholder={t("story.eventNotePlaceholder")}
-            className="mt-2 min-h-28 w-full rounded-[20px] bg-white/80 p-4 text-sm leading-6 outline-none"
-          />
-        </label>
         {error ? <p className="mt-3 rounded-[18px] bg-[#fdeaf0] p-3 text-sm font-bold text-[#9b2c3e]">{error}</p> : null}
         <div className="mt-5 grid grid-cols-2 gap-2">
           <button type="button" onClick={onCancel} disabled={isSaving} className="min-h-12 rounded-[18px] bg-white px-4 text-sm font-extrabold text-[#5f594f] disabled:opacity-60">

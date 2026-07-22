@@ -4,12 +4,10 @@ export function initialMilestoneEditorDraft(milestone: PlantMilestone | undefine
   return {
     type: milestone?.type ?? null,
     eventDate: milestone?.eventDate ?? "",
-    note: milestone?.note ?? milestone?.customDescription ?? "",
     today
   } satisfies {
     type: PlantMilestoneType | null;
     eventDate: string;
-    note: string;
     today: string;
   };
 }

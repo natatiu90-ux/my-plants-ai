@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { formatRelativeDate } from "@/lib/date-format";
+import { deriveConversationalCareState } from "@/lib/conversational-care";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
 import type { Plant, PlantAnalysisRecord, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone } from "@/types/plant";
@@ -273,6 +274,12 @@ export function PlantAnalysisSection({
   const [savingAnswerKey, setSavingAnswerKey] = useState<string | null>(null);
   const [answerError, setAnswerError] = useState<string | null>(null);
   const [showOtherCauses, setShowOtherCauses] = useState(false);
+  const [openGuide, setOpenGuide] = useState<"pruning" | "repotting" | null>(null);
+
+  const conversationalState = useMemo(
+    () => deriveConversationalCareState({ analysis, plant, milestones, hypothesisResolutions, locale }),
+    [analysis, hypothesisResolutions, locale, milestones, plant]
+  );
 
   const view = useMemo(() => {
     if (!analysis) return null;
@@ -505,6 +512,131 @@ export function PlantAnalysisSection({
       setSavingAnswerKey(null);
     }
   };
+
+  if (conversationalState.enabled) {
+    return (
+      <section className="mt-4 min-w-0 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-1">
+          <h2 className="font-rounded text-xl font-extrabold text-ink [overflow-wrap:anywhere]">{t("plantAnalysis.title")}</h2>
+          {recommendationRefreshState?.status === "loading" ? (
+            <span className="rounded-full bg-[#eef5e8] px-3 py-1 text-xs font-extrabold text-[#4f6946]">{t("plantAnalysis.refreshingInline")}</span>
+          ) : null}
+          {recommendationRefreshState?.status === "success" ? (
+            <span className="rounded-full bg-[#eef5e8] px-3 py-1 text-xs font-extrabold text-[#355f3d]">{t("plantAnalysis.refreshSuccessBadge")}</span>
+          ) : null}
+          {recommendationRefreshState?.status === "unchanged" ? (
+            <span className="rounded-full bg-[#eef5e8] px-3 py-1 text-xs font-extrabold text-[#355f3d]">{t("plantAnalysis.refreshUnchangedBadge")}</span>
+          ) : null}
+        </div>
+        {recommendationRefreshState?.status === "error" ? (
+          <p className="mx-1 mt-2 rounded-[16px] bg-[#fff0e6] p-3 text-sm font-bold leading-5 text-[#8a5b24]">{recommendationRefreshState.error ?? t("plantAnalysis.refreshFailedInline")}</p>
+        ) : null}
+        {hasPendingBaselineQuestions ? (
+          <p className="mx-1 mt-2 rounded-[16px] bg-[#eef5e8] p-3 text-sm font-bold leading-5 text-[#4f6946]">{t("plantAnalysis.pendingBaselineQuestions")}</p>
+        ) : null}
+
+        <div className="mt-3 grid gap-2">
+          {conversationalState.goodNews ? (
+            <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
+              <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.conversationGoodNews")}</p>
+              <p className="mt-1 text-sm font-extrabold leading-5 text-[#355f3d] [overflow-wrap:anywhere]">{conversationalState.goodNews}</p>
+            </div>
+          ) : null}
+
+          {conversationalState.concern ? (
+            <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
+              <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.conversationConcern")}</p>
+              <p className="mt-1 text-sm font-bold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{conversationalState.concern}</p>
+            </div>
+          ) : null}
+
+          {conversationalState.caution ? (
+            <div className="min-w-0 rounded-[20px] bg-[#fff8e8] p-3">
+              <p className="text-sm font-extrabold leading-5 text-[#8a6230] [overflow-wrap:anywhere]">{conversationalState.caution}</p>
+            </div>
+          ) : null}
+
+          {conversationalState.question ? (
+            <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
+              <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.conversationQuestion")}</p>
+              <p className="mt-2 text-sm font-extrabold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{conversationalState.question.question}</p>
+              <p className="mt-1 text-xs font-bold leading-4 text-[#8a8378] [overflow-wrap:anywhere]">{conversationalState.question.reason}</p>
+              <AnswerChips
+                options={conversationalState.question.options}
+                getKey={(option) => `${conversationalState.question!.hypothesis}:${option.result}`}
+                labelFor={(option) => option.label}
+                loadingKey={savingAnswerKey}
+                disabled={Boolean(savingAnswerKey)}
+                onSelect={(option) => void saveFollowUp(conversationalState.question!.hypothesis, option.status, option.result)}
+              />
+              {savingAnswerKey ? <p className="mt-3 text-xs font-bold text-[#8a8378]">{t("plantAnalysis.updatingRecommendations")}</p> : null}
+              {answerError ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{answerError}</p> : null}
+            </div>
+          ) : conversationalState.todayActions.length ? (
+            <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
+              <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.conversationToday")}</p>
+              <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f] [overflow-wrap:anywhere]">
+                {conversationalState.todayActions.map((action) => (
+                  <li key={action}>{action}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {conversationalState.guidedAction ? (
+            <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
+              <p className="text-sm font-extrabold leading-5 text-[#4f4940]">
+                {conversationalState.guidedAction.type === "pruning" ? t("plantAnalysis.guidedPruningIntro") : t("plantAnalysis.guidedRepottingIntro")}
+              </p>
+              <button
+                type="button"
+                onClick={() => setOpenGuide((current) => (current === conversationalState.guidedAction?.type ? null : conversationalState.guidedAction?.type ?? null))}
+                className="mt-3 min-h-11 rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]"
+              >
+                {conversationalState.guidedAction.type === "pruning" ? t("plantAnalysis.guidedPruningCta") : t("plantAnalysis.guidedRepottingCta")}
+              </button>
+              {openGuide === conversationalState.guidedAction.type ? (
+                <ol className="mt-3 grid list-decimal gap-1.5 pl-5 text-sm font-bold leading-5 text-[#5f594f]">
+                  {(conversationalState.guidedAction.type === "pruning"
+                    ? [
+                        t("plantAnalysis.guidedPruningStep1"),
+                        t("plantAnalysis.guidedPruningStep2"),
+                        t("plantAnalysis.guidedPruningStep3"),
+                        t("plantAnalysis.guidedPruningStep4"),
+                        t("plantAnalysis.guidedPruningStep5")
+                      ]
+                    : [
+                        t("plantAnalysis.guidedRepottingStep1"),
+                        t("plantAnalysis.guidedRepottingStep2"),
+                        t("plantAnalysis.guidedRepottingStep3"),
+                        t("plantAnalysis.guidedRepottingStep4"),
+                        t("plantAnalysis.guidedRepottingStep5")
+                      ]).map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+              ) : null}
+            </div>
+          ) : null}
+
+          <details className="min-w-0 rounded-[20px] bg-white/45 p-3">
+            <summary className="cursor-pointer text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.whyThisConclusion")}</summary>
+            <div className="mt-3 grid gap-2">
+              <p className="rounded-[18px] bg-[#eef5e8] p-3 text-sm font-extrabold leading-5 text-[#355f3d] [overflow-wrap:anywhere]">{view.keyTakeaway}</p>
+              {view.meaningfulObservations.length ? (
+                <ul className="grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f] [overflow-wrap:anywhere]">
+                  {view.meaningfulObservations.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {view.likelyExplanation ? <p className="text-sm font-bold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{view.likelyExplanation}</p> : null}
+            </div>
+          </details>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="mt-4 min-w-0 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">

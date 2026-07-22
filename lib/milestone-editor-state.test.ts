@@ -26,4 +26,4 @@ const existing: PlantMilestone = {
 const existingDraft = initialMilestoneEditorDraft(existing, today);
 assert.equal(existingDraft.type, "watered");
 assert.equal(existingDraft.eventDate, "2026-07-18");
-assert.equal(existingDraft.note, "After soil check");
+assert.equal("note" in existingDraft, false);
