@@ -6,6 +6,7 @@ import { Loader2, X } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
 import { clearAddPlantDraft, createAddPlantDraftId, createAnalysisRequestId, loadAddPlantDraft, saveAddPlantDraft, type AddPlantDraft } from "@/lib/add-plant-draft";
+import { deriveAddPlantConfirmationPresentation } from "@/lib/add-plant-confirmation-presentation";
 import {
   addPlantPerformanceSummaryEvent,
   endAddPlantPerformanceStage,
@@ -22,7 +23,7 @@ import { INITIAL_ADD_FAST_ANALYSIS_MODE } from "@/lib/plant-analysis-pipeline";
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
 import { plantCreationDiagnosticFromError, type PlantCreationDiagnostic, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
-import { isUnknownPlantName, shouldShowRescueEntry } from "@/lib/rescue-entry";
+import { shouldShowRescueEntry } from "@/lib/rescue-entry";
 import { isStillLearningSpecies, speciesLearningStateFromAnalysis } from "@/lib/species-learning";
 import { useScreenWakeLock } from "@/lib/use-screen-wake-lock";
 import { MultiPhotoPicker, PhotoPickerDebugPanel, type PhotoPickerDiagnostic } from "./MultiPhotoPicker";
@@ -338,7 +339,6 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   const [analysis, setAnalysis] = useState<PlantAnalysis | null>(null);
   const [analysisFailed, setAnalysisFailed] = useState(false);
   const [analysisFailureKind, setAnalysisFailureKind] = useState<AnalysisFailureKind>(null);
-  const [rescueStarted, setRescueStarted] = useState(false);
   const [analysisDiagnostics, setAnalysisDiagnostics] = useState<ImageAnalysisDiagnostic[]>([]);
   const [clientPreparationDiagnostics, setClientPreparationDiagnostics] = useState<ClientImagePreparationDiagnostic[]>([]);
   const [analysisErrorCode, setAnalysisErrorCode] = useState<string | null>(null);
@@ -1020,7 +1020,6 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
           rawResult: payload.analysis
         } as PlantAnalysis;
         setAnalysis(nextAnalysis);
-        setRescueStarted(false);
         const renderToken = startAddPlantPerformanceStage("ui_render_after_response", {
           condition: nextAnalysis.condition,
           confidence: nextAnalysis.confidence
@@ -1282,12 +1281,16 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
   );
   const speciesStillLearning = isStillLearningSpecies(speciesLearningState);
   const rescueEntryActive = shouldShowRescueEntry({ analysis, commonName: speciesName, scientificName });
-  const confirmationTitle =
-    rescueEntryActive && isUnknownPlantName(displayCommonName)
-      ? t("addPlant.rescuePlantName")
-      : speciesStillLearning && isUnknownPlantName(displayCommonName)
-        ? speciesLearningState?.currentLabel ?? t("addPlant.learningPlantName")
-        : displayCommonName;
+  const isTechnicalAnalysisFailure = analysisFailed && analysisFailureKind === "technical";
+  const isLowConfidenceAnalysis = Boolean(analysis && analysis.confidence < 0.55);
+  const confirmationPresentation = deriveAddPlantConfirmationPresentation({
+    displayCommonName,
+    hasAnalysis: Boolean(analysis),
+    isTechnicalFailure: isTechnicalAnalysisFailure,
+    isRecoveryEligible: rescueEntryActive,
+    speciesLearningState
+  });
+  const confirmationTitle = confirmationPresentation.titleKey ? t(confirmationPresentation.titleKey) : confirmationPresentation.titleText ?? displayCommonName;
   const conditionSummary =
     analysis?.condition === "needs_attention"
       ? {
@@ -1303,15 +1306,12 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             title: t("addPlant.conditionHealthyTitle"),
             text: t("addPlant.conditionHealthyText")
           };
-  const isTechnicalAnalysisFailure = analysisFailed && analysisFailureKind === "technical";
-  const isLowConfidenceAnalysis = Boolean(analysis && analysis.confidence < 0.55);
 
   const openPicker = (picker: ConfirmationPicker) => {
     setActivePicker(picker);
   };
 
   const retryAnalysis = () => {
-    setRescueStarted(false);
     setAnalysisAttempt((current) => current + 1);
     setStep("analysis");
   };
@@ -1425,7 +1425,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         savedNickname = generateNicknameOnce();
         setHomeName(savedNickname);
       }
-      const savedCommonName = cleanPlantName(speciesName) || commonNameFromScientificName(displayScientificName) || (rescueStarted ? t("addPlant.rescuePlantName") : speciesStillLearning ? t("addPlant.learningPlantName") : "");
+      const savedCommonName = cleanPlantName(speciesName) || commonNameFromScientificName(displayScientificName) || (speciesStillLearning ? t("addPlant.learningPlantName") : "");
       if (!savedCommonName && !displayScientificName && (analysisFailed || rescueEntryActive)) {
         const shouldSaveManualPlant = window.confirm(t("addPlant.manualEmptyConfirm"));
         if (!shouldSaveManualPlant) {
@@ -1650,40 +1650,14 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             <div className="pt-5">
               <h3 className="font-rounded text-[30px] font-black leading-tight text-ink">{confirmationTitle}</h3>
               {displayScientificName ? <p className="mt-1 text-sm italic leading-5 text-[#8e867b]">{displayScientificName}</p> : null}
-              {speciesStillLearning ? (
-                <div className="mt-4 rounded-[22px] bg-[#eef7ed] p-4">
-                  <p className="font-rounded text-lg font-extrabold text-[#2d7a4f]">{t("addPlant.learningSpeciesTitle")}</p>
-                  <p className="mt-2 text-sm font-bold leading-5 text-[#5f594f]">{t("addPlant.learningSpeciesText")}</p>
-                  {speciesLearningState?.currentLabel ? (
-                    <p className="mt-3 text-sm font-extrabold leading-5 text-[#6f675d]">
-                      {t("addPlant.learningCurrentUnderstanding")}: {speciesLearningState.currentLabel}
-                    </p>
-                  ) : null}
-                </div>
+              {confirmationPresentation.speciesDescriptionKey ? (
+                <p className="mt-2 text-sm font-bold leading-5 text-[#7a7166]">{t(confirmationPresentation.speciesDescriptionKey)}</p>
               ) : null}
               {rescueEntryActive ? (
                 <div className="mt-4 rounded-[22px] bg-[#fff8e8] p-4">
                   <p className="font-rounded text-lg font-extrabold text-[#8a6230]">{t("addPlant.rescueEntryTitle")}</p>
                   <p className="mt-2 text-sm font-bold leading-5 text-[#7a623d]">{t("addPlant.rescueEntryText")}</p>
-                  {rescueStarted ? (
-                    <div className="mt-4 rounded-[18px] bg-white/70 p-3">
-                      <p className="text-xs font-bold uppercase text-[#a09a90]">{t("addPlant.rescuePlanToday")}</p>
-                      <ul className="mt-2 grid gap-2 text-sm font-bold leading-5 text-[#5f594f]">
-                        <li>{t("addPlant.rescuePlanCheckSoil")}</li>
-                        <li>{t("addPlant.rescuePlanInspectStems")}</li>
-                        <li>{t("addPlant.rescuePlanClosePhoto")}</li>
-                      </ul>
-                      <p className="mt-3 text-sm font-bold leading-5 text-[#6f675d]">{t("addPlant.rescuePlanAfterSteps")}</p>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setRescueStarted(true)}
-                      className="mt-4 min-h-11 w-full rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]"
-                    >
-                      {t("addPlant.startRescue")}
-                    </button>
-                  )}
+                  {confirmationPresentation.speciesDescriptionKey ? <p className="mt-2 text-sm font-bold leading-5 text-[#7a623d]">{t("addPlant.recoverySpeciesStillLearning")}</p> : null}
                 </div>
               ) : isLowConfidenceAnalysis && !speciesStillLearning ? (
                 <div className="mt-4 rounded-[20px] bg-[#fff8e8] p-3">
@@ -1691,7 +1665,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                   <p className="mt-1 text-sm font-bold leading-5 text-[#7a623d]">{t("addPlant.lowConfidenceText")}</p>
                 </div>
               ) : null}
-              {analysis ? <div className="mt-4 rounded-[20px] bg-[#edf8ed] p-3">
+              {confirmationPresentation.showConditionSummary ? <div className="mt-4 rounded-[20px] bg-[#edf8ed] p-3">
                 <p className="font-rounded text-lg font-extrabold text-[#2d7a4f]">{conditionSummary.title}</p>
                 <p className="mt-1 text-sm font-bold leading-5 text-[#5f594f]">{conditionSummary.text}</p>
               </div> : null}
@@ -1860,9 +1834,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             onClick={
               isTechnicalAnalysisFailure && step === "confirm"
                 ? retryAnalysis
-                : rescueEntryActive && step === "confirm" && !rescueStarted
-                  ? () => setRescueStarted(true)
-                  : () => void save()
+                : () => void save()
             }
             disabled={isSaving}
             className="flex min-h-12 w-full items-center justify-center gap-2 rounded-[18px] bg-gradient-to-br from-[#92cc90] to-[#6ba369] px-4 text-sm font-extrabold text-white shadow-fab disabled:opacity-60"
@@ -1872,9 +1844,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
               ? t("addPlant.saving")
               : isTechnicalAnalysisFailure && step === "confirm"
                 ? t("addPlant.retryAnalysis")
-                : rescueEntryActive && step === "confirm" && !rescueStarted
-                  ? t("addPlant.startRescue")
-                  : t("addPlant.save")}
+                : t(confirmationPresentation.primaryActionKey)}
           </button>
           <button
             type="button"
