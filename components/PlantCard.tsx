@@ -92,8 +92,8 @@ export function PlantCard({
           <h2 className="font-rounded text-[22px] font-extrabold leading-[1.15] tracking-normal text-ink">
             {displayName}
           </h2>
-          {commonName ? <p className="mt-0.5 text-[13px] font-medium italic leading-5 text-[#8f8f98]">{commonName}</p> : null}
-          <p className="mt-2 line-clamp-3 text-[14.5px] font-medium leading-[1.55] text-[#4a4a54]">
+          {commonName ? <p className="mt-0.5 font-rounded text-[13px] font-semibold italic leading-5 text-[#8f8f98]">{commonName}</p> : null}
+          <p className="mt-2 line-clamp-3 font-rounded text-[15px] font-semibold leading-[1.55] text-[#4a4a54]">
             {!careAction.isActionable && (healthStatus.status === "needs_attention" || healthStatus.status === "action_needed") && highSeverityMessage ? highSeverityMessage : t(cardMessageKey, cardMessageParams)}
           </p>
         </div>

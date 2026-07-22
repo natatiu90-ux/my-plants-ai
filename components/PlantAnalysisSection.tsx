@@ -269,7 +269,7 @@ function SpeciesLearningCard({ analysis, plant, onKnowSpecies, onAddPhoto }: { a
       <p className="mt-2 text-[15px] font-bold leading-6 text-[#5f594f]">
         {presentation.isCompleted && presentation.displayName ? t("plantAnalysis.userSpeciesSaved", { name: presentation.displayName }) : t("plantAnalysis.learningIntro")}
       </p>
-      {presentation.isCompleted ? <p className="mt-2 text-[15px] font-semibold leading-6 text-[#756d62]">{t("plantAnalysis.userSpeciesHint")}</p> : null}
+      {presentation.isCompleted ? <p className="mt-2 text-[15px] font-bold leading-6 text-[#756d62]">{t("plantAnalysis.userSpeciesHint")}</p> : null}
       <div className="mt-4 flex flex-wrap gap-2.5">
         {presentation.showKnowNameAction && onKnowSpecies ? (
           <button type="button" onClick={onKnowSpecies} className="min-h-11 rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]">
@@ -598,7 +598,7 @@ export function PlantAnalysisSection({
           ) : null}
         </div>
         {recommendationRefreshState?.status === "error" ? (
-          <div className="mx-1 mt-3 rounded-[20px] bg-[#fff0e6] p-4 text-[15px] font-semibold leading-6 text-[#8a5b24]">
+          <div className="mx-1 mt-3 rounded-[20px] bg-[#fff0e6] p-4 text-[15px] font-bold leading-6 text-[#8a5b24]">
             <p>{recommendationRefreshState.error ?? t("plantAnalysis.refreshFailedInline")}</p>
             {onRetryRecommendationRefresh ? (
               <button type="button" onClick={onRetryRecommendationRefresh} className="mt-3 min-h-10 rounded-[16px] bg-white/80 px-4 text-sm font-extrabold text-[#6f4e20]">
@@ -615,8 +615,8 @@ export function PlantAnalysisSection({
           {conversationalState.question ? (
             <div className="min-w-0 rounded-[28px] bg-[#eef5e8] p-4">
               <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.conversationQuestion")}</p>
-              <p className="mt-2.5 text-[17px] font-extrabold leading-7 text-[#3f3b35] [overflow-wrap:anywhere]">{conversationalState.question.question}</p>
-              <p className="mt-2 text-[15px] font-semibold leading-6 text-[#5f7a54] [overflow-wrap:anywhere]">{conversationalState.question.reason}</p>
+              <p className="mt-2.5 text-base font-extrabold leading-6 text-[#3f3b35] [overflow-wrap:anywhere]">{conversationalState.question.question}</p>
+              <p className="mt-2 text-[15px] font-bold leading-6 text-[#5f7a54] [overflow-wrap:anywhere]">{conversationalState.question.reason}</p>
               <div className="mt-4">
                 <AnswerChips
                   options={conversationalState.question.options}
@@ -633,7 +633,7 @@ export function PlantAnalysisSection({
           ) : completedFact ? (
             <div className="min-w-0 rounded-[28px] bg-[#eef5e8] p-4">
               <p className="text-[15px] font-extrabold leading-6 text-[#355f3d]">✓ {completedFact.label}: {completedFact.value}</p>
-              <p className="mt-2 text-[15px] font-semibold leading-6 text-[#4f4940] [overflow-wrap:anywhere]">{completedFact.conclusion}</p>
+              <p className="mt-2 text-[15px] font-bold leading-6 text-[#4f4940] [overflow-wrap:anywhere]">{completedFact.conclusion}</p>
             </div>
           ) : (
             <div className="min-w-0 rounded-[28px] bg-[#eef5e8] p-4">
@@ -647,7 +647,7 @@ export function PlantAnalysisSection({
           {planActions.length ? (
             <div className="min-w-0 rounded-[24px] bg-white/70 p-4">
               <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.conversationToday")}</p>
-              <ul className="mt-2.5 grid gap-2 text-[15px] font-semibold leading-6 text-[#5f594f] [overflow-wrap:anywhere]">
+              <ul className="mt-2.5 grid gap-2 text-[15px] font-bold leading-6 text-[#5f594f] [overflow-wrap:anywhere]">
                 {planActions.map((action) => (
                   <li key={action}>{action}</li>
                 ))}
@@ -658,7 +658,7 @@ export function PlantAnalysisSection({
           {conversationalState.concern ? (
             <div className="min-w-0 rounded-[24px] bg-white/70 p-4">
               <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.conversationConcern")}</p>
-              <p className="mt-2 text-[15px] font-semibold leading-6 text-[#4f4940] [overflow-wrap:anywhere]">{conversationalState.concern}</p>
+              <p className="mt-2 text-[15px] font-bold leading-6 text-[#4f4940] [overflow-wrap:anywhere]">{conversationalState.concern}</p>
             </div>
           ) : null}
 
@@ -672,7 +672,7 @@ export function PlantAnalysisSection({
 
           {conversationalState.guidedAction ? (
             <div className="min-w-0 rounded-[24px] bg-white/70 p-4">
-              <p className="text-[15px] font-semibold leading-6 text-[#4f4940]">
+              <p className="text-[15px] font-bold leading-6 text-[#4f4940]">
                 {conversationalState.guidedAction.type === "pruning" ? t("plantAnalysis.guidedPruningIntro") : t("plantAnalysis.guidedRepottingIntro")}
               </p>
               <button
@@ -683,7 +683,7 @@ export function PlantAnalysisSection({
                 {conversationalState.guidedAction.type === "pruning" ? t("plantAnalysis.guidedPruningCta") : t("plantAnalysis.guidedRepottingCta")}
               </button>
               {openGuide === conversationalState.guidedAction.type ? (
-                <ol className="mt-4 grid list-decimal gap-2 pl-5 text-[15px] font-semibold leading-6 text-[#5f594f]">
+                <ol className="mt-4 grid list-decimal gap-2 pl-5 text-[15px] font-bold leading-6 text-[#5f594f]">
                   {(conversationalState.guidedAction.type === "pruning"
                     ? [
                         t("plantAnalysis.guidedPruningStep1"),
@@ -711,13 +711,13 @@ export function PlantAnalysisSection({
             <div className="mt-4 grid gap-3">
               <p className="rounded-[20px] bg-[#eef5e8] p-4 text-[15px] font-bold leading-6 text-[#355f3d] [overflow-wrap:anywhere]">{view.keyTakeaway}</p>
               {view.meaningfulObservations.length ? (
-                <ul className="grid gap-2 text-[15px] font-semibold leading-6 text-[#5f594f] [overflow-wrap:anywhere]">
+                <ul className="grid gap-2 text-[15px] font-bold leading-6 text-[#5f594f] [overflow-wrap:anywhere]">
                   {view.meaningfulObservations.map((item) => (
                     <li key={item}>{item}</li>
                   ))}
                 </ul>
               ) : null}
-              {view.likelyExplanation ? <p className="text-[15px] font-semibold leading-6 text-[#4f4940] [overflow-wrap:anywhere]">{view.likelyExplanation}</p> : null}
+              {view.likelyExplanation ? <p className="text-[15px] font-bold leading-6 text-[#4f4940] [overflow-wrap:anywhere]">{view.likelyExplanation}</p> : null}
             </div>
           </details>
         </div>
@@ -740,7 +740,7 @@ export function PlantAnalysisSection({
         ) : null}
       </div>
       {recommendationRefreshState?.status === "error" ? (
-        <div className="mx-1 mt-3 rounded-[20px] bg-[#fff0e6] p-4 text-[15px] font-semibold leading-6 text-[#8a5b24]">
+        <div className="mx-1 mt-3 rounded-[20px] bg-[#fff0e6] p-4 text-[15px] font-bold leading-6 text-[#8a5b24]">
           <p>{recommendationRefreshState.error ?? t("plantAnalysis.refreshFailedInline")}</p>
           {onRetryRecommendationRefresh ? (
             <button type="button" onClick={onRetryRecommendationRefresh} className="mt-3 min-h-10 rounded-[16px] bg-white/80 px-4 text-sm font-extrabold text-[#6f4e20]">
@@ -760,7 +760,7 @@ export function PlantAnalysisSection({
         {view.meaningfulObservations.length ? (
           <div className="min-w-0 rounded-[24px] bg-white/70 p-4">
             <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.observations")}</p>
-            <ul className="mt-2.5 grid gap-2 text-[15px] font-semibold leading-6 text-[#5f594f] [overflow-wrap:anywhere]">
+            <ul className="mt-2.5 grid gap-2 text-[15px] font-bold leading-6 text-[#5f594f] [overflow-wrap:anywhere]">
               {view.meaningfulObservations.map((item) => (
                 <li key={item}>{item}</li>
               ))}
@@ -771,13 +771,13 @@ export function PlantAnalysisSection({
         {view.likelyExplanation ? (
           <div className="min-w-0 rounded-[24px] bg-white/70 p-4">
             <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.mostLikelyCause")}</p>
-            <p className="mt-2.5 text-[15px] font-semibold leading-6 text-[#4f4940] [overflow-wrap:anywhere]">{view.likelyExplanation}</p>
+            <p className="mt-2.5 text-[15px] font-bold leading-6 text-[#4f4940] [overflow-wrap:anywhere]">{view.likelyExplanation}</p>
           </div>
         ) : null}
 
         <div className="min-w-0 rounded-[24px] bg-white/70 p-4">
           <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.currentAction")}</p>
-          <ul className="mt-2.5 grid gap-2 text-[15px] font-semibold leading-6 text-[#5f594f] [overflow-wrap:anywhere]">
+          <ul className="mt-2.5 grid gap-2 text-[15px] font-bold leading-6 text-[#5f594f] [overflow-wrap:anywhere]">
             {view.activeActions.map((action) => (
               <li key={action}>{action}</li>
             ))}
@@ -787,7 +787,7 @@ export function PlantAnalysisSection({
         {view.whatNotToDo.length ? (
           <div className="min-w-0 rounded-[24px] bg-white/70 p-4">
             <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.whatNotToDo")}</p>
-            <ul className="mt-2.5 grid gap-2 text-[15px] font-semibold leading-6 text-[#5f594f] [overflow-wrap:anywhere]">
+            <ul className="mt-2.5 grid gap-2 text-[15px] font-bold leading-6 text-[#5f594f] [overflow-wrap:anywhere]">
               {view.whatNotToDo.map((action) => (
                 <li key={action}>{action}</li>
               ))}
@@ -797,8 +797,8 @@ export function PlantAnalysisSection({
 
         {view.followUp ? (
           <div className="min-w-0 rounded-[24px] bg-white/70 p-4">
-            <p className="text-[17px] font-extrabold leading-7 text-[#4f4940] [overflow-wrap:anywhere]">{view.followUp.question}</p>
-            <p className="mt-2 text-[15px] font-semibold leading-6 text-[#756d62] [overflow-wrap:anywhere]">{view.followUp.reason}</p>
+            <p className="text-base font-extrabold leading-6 text-[#4f4940] [overflow-wrap:anywhere]">{view.followUp.question}</p>
+            <p className="mt-2 text-[15px] font-bold leading-6 text-[#756d62] [overflow-wrap:anywhere]">{view.followUp.reason}</p>
             <div className="mt-4">
               <AnswerChips
                 options={view.followUp.options}
@@ -817,7 +817,7 @@ export function PlantAnalysisSection({
         {view.answerConclusions.length ? (
           <details className="min-w-0 rounded-[24px] bg-[#eef5e8] p-4">
             <summary className="cursor-pointer text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.checkedFacts")}</summary>
-            <ul className="mt-3 grid gap-2 text-[15px] font-semibold leading-6 text-[#4f6946] [overflow-wrap:anywhere]">
+            <ul className="mt-3 grid gap-2 text-[15px] font-bold leading-6 text-[#4f6946] [overflow-wrap:anywhere]">
               {view.answerConclusions.map((fact) => (
                 <li key={fact} className="flex gap-2">
                   <Check aria-hidden="true" size={16} className="mt-0.5 shrink-0" />
@@ -839,7 +839,7 @@ export function PlantAnalysisSection({
               <ChevronDown aria-hidden="true" size={16} className={showOtherCauses ? "rotate-180 transition-transform" : "transition-transform"} />
             </button>
             {showOtherCauses ? (
-              <ul className="mt-3 grid gap-2 text-[15px] font-semibold leading-6 text-[#7a7166] [overflow-wrap:anywhere]">
+              <ul className="mt-3 grid gap-2 text-[15px] font-bold leading-6 text-[#7a7166] [overflow-wrap:anywhere]">
                 {view.lowConfidenceHypotheses.map((hypothesis) => (
                   <li key={hypothesis.id}>{hypothesis.text}</li>
                 ))}

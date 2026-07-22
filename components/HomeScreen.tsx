@@ -30,11 +30,12 @@ function HomeSkeleton() {
     <section className="grid gap-4 px-5 pt-6">
       {[0, 1, 2].map((item) => (
         <div key={item} className="overflow-hidden rounded-[28px] border border-white/60 bg-[#fffaf3] shadow-soft">
-          <div className="h-[204px] animate-pulse bg-[#e5dfd4]" />
-          <div className="space-y-3 p-5">
-            <div className="h-5 w-1/2 rounded-full bg-[#e5dfd4]" />
-            <div className="h-4 w-3/4 rounded-full bg-[#eee7dc]" />
-            <div className="h-4 w-2/3 rounded-full bg-[#eee7dc]" />
+          <div className="h-[224px] animate-pulse bg-[#e5dfd4]" />
+          <div className="space-y-3 px-5 pb-5 pt-3.5">
+            <div className="h-7 w-1/2 rounded-full bg-[#e5dfd4]" />
+            <div className="h-4 w-1/3 rounded-full bg-[#eee7dc]" />
+            <div className="h-5 w-5/6 rounded-full bg-[#eee7dc]" />
+            <div className="h-5 w-2/3 rounded-full bg-[#eee7dc]" />
           </div>
         </div>
       ))}
