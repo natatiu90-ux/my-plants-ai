@@ -5,16 +5,20 @@ import { useI18n } from "@/i18n/I18nProvider";
 import type { DerivedCareActionState } from "@/lib/plant-action-eligibility";
 import { derivePlantHealthStatus } from "@/lib/plant-health-status";
 import { plantCommonName } from "@/lib/plant-display";
+import { speciesDetailLabel } from "@/lib/plant-detail-recovery-presentation";
+import { speciesLearningStateFromAnalysis } from "@/lib/species-learning";
 import type { Plant, PlantAnalysisRecord, PlantMilestone } from "@/types/plant";
 
 export function PlantStatusSection({ plant, careActionState, analysis, milestones }: { plant: Plant; careActionState: DerivedCareActionState | null; analysis?: PlantAnalysisRecord; milestones: PlantMilestone[] }) {
   const { locale, t } = useI18n();
-  const commonName = plantCommonName(plant);
+  const speciesLearningState = speciesLearningStateFromAnalysis(analysis);
+  const speciesLabel = speciesDetailLabel({ fallbackName: plantCommonName(plant), speciesLearningState });
+  const commonName = speciesLabel.labelKey ? t(speciesLabel.labelKey) : speciesLabel.labelText ?? "";
   const healthStatus = derivePlantHealthStatus({ plant, analysis, milestones, careActionState });
   const primaryAction = analysis?.rawResult?.primaryAction?.[locale] || analysis?.rawResult?.primaryAction?.en || analysis?.rawResult?.primaryAction?.ru || "";
   const actionTimeframe = analysis?.rawResult?.actionTimeframe?.[locale] || analysis?.rawResult?.actionTimeframe?.en || analysis?.rawResult?.actionTimeframe?.ru || "";
   const highSeverityMessage = primaryAction && actionTimeframe ? `${primaryAction} ${actionTimeframe}` : primaryAction;
-  const message = careActionState?.isActionable
+  const message = careActionState && (careActionState.isActionable || careActionState.status === "completed" || careActionState.status === "upcoming")
     ? t(careActionState.detailMessageKey, careActionState.detailMessageParams)
     : healthStatus.status === "needs_attention" || healthStatus.status === "action_needed"
       ? highSeverityMessage || t(healthStatus.messageKey)

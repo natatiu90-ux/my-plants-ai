@@ -25,7 +25,7 @@ export function CareSummary({ plant }: { plant: Plant }) {
   const rows = [
     {
       label: t("plantDetail.lastWatered"),
-      value: formatRelativeDate(plant.lastWateredAt, locale, t("plantDetail.notYet")),
+      value: formatRelativeDate(plant.lastWateredAt, locale, t("plantDetail.notSpecified")),
       icon: <Droplets aria-hidden="true" size={18} />
     },
     ...(structuredRoom || plant.roomKey

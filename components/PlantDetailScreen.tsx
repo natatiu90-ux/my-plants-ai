@@ -817,6 +817,9 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         onResolveHypothesis={completeClarificationAnswer}
         recommendationRefreshState={recommendationRefreshState}
         hasPendingBaselineQuestions={Boolean(baselineQuestion)}
+        careActionState={careActionState}
+        onKnowSpecies={() => router.push(`/plants/${plant.id}/edit`)}
+        onAddPhoto={() => setSheet("add_photo")}
       />
       {currentRecommendationRevision?.reasonText && !recommendationsAreStale && recommendationRefreshState.status === "success" && currentRecommendationRevision.impactLevel && currentRecommendationRevision.impactLevel !== "none" ? (
         <section className="mt-4 rounded-[24px] bg-[#eef5e8] p-4 shadow-soft">

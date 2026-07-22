@@ -7,6 +7,8 @@ import { deriveConversationalCareState } from "@/lib/conversational-care";
 import { isStillLearningSpecies, speciesLearningStateFromAnalysis } from "@/lib/species-learning";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
+import type { DerivedCareActionState } from "@/lib/plant-action-eligibility";
+import { completedFactLabel } from "@/lib/plant-detail-recovery-presentation";
 import type { Plant, PlantAnalysisRecord, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone } from "@/types/plant";
 import { AnswerChips } from "./AnswerChips";
 import type { RecommendationRefreshState } from "@/lib/recommendation-refresh-state";
@@ -254,51 +256,33 @@ function recommendationDensity(analysis: PlantAnalysisRecord, activeHypotheses: 
   return "healthy";
 }
 
-function SpeciesLearningCard({ analysis }: { analysis?: PlantAnalysisRecord }) {
+function SpeciesLearningCard({ analysis, onKnowSpecies, onAddPhoto }: { analysis?: PlantAnalysisRecord; onKnowSpecies?: () => void; onAddPhoto?: () => void }) {
   const { t } = useI18n();
   const state = speciesLearningStateFromAnalysis(analysis);
   if (!isStillLearningSpecies(state)) return null;
 
-  const confidencePercent = typeof state?.confidence === "number" ? Math.round(state.confidence * 100) : null;
-  const candidates = state?.candidates?.filter((candidate) => candidate.label && candidate.label !== state.currentLabel).slice(0, 3) ?? [];
-  const evidence = state?.evidence?.map((item) => item.label).filter(Boolean).slice(0, 3) ?? [];
-
   return (
-    <div className="min-w-0 rounded-[22px] bg-[#eef7ed] p-3">
+    <div className="min-w-0 rounded-[20px] bg-white/50 p-3">
       <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.learningTitle")}</p>
-      <p className="mt-2 text-sm font-extrabold leading-5 text-[#355f3d]">{t("plantAnalysis.learningIntro")}</p>
-      {state?.currentLabel ? (
-        <div className="mt-3 rounded-[18px] bg-white/65 p-3">
-          <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.learningCurrentUnderstanding")}</p>
-          <p className="mt-1 font-rounded text-lg font-extrabold leading-6 text-[#3f3b35] [overflow-wrap:anywhere]">{state.currentLabel}</p>
-          {confidencePercent != null ? <p className="mt-1 text-xs font-bold text-[#8a8378]">{t("plantAnalysis.learningConfidence")}: {confidencePercent}%</p> : null}
-        </div>
-      ) : null}
-      {candidates.length ? (
-        <div className="mt-2 rounded-[18px] bg-white/50 p-3">
-          <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.learningPossibleMatches")}</p>
-          <ul className="mt-1 grid gap-1 text-sm font-bold text-[#5f594f]">
-            {candidates.map((candidate) => (
-              <li key={candidate.label}>{candidate.label}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {evidence.length ? (
-        <p className="mt-2 text-xs font-bold leading-4 text-[#6f675d] [overflow-wrap:anywhere]">
-          {t("plantAnalysis.learningEvidence")}: {evidence.join(", ")}
-        </p>
-      ) : null}
-      <div className="mt-2 rounded-[18px] bg-white/50 p-3">
-        <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.learningHelpImprove")}</p>
-        <ul className="mt-1 grid gap-1 text-sm font-bold leading-5 text-[#5f594f]">
-          <li>{t("plantAnalysis.learningAddClosePhoto")}</li>
-          <li>{t("plantAnalysis.learningAddStemPhoto")}</li>
-          <li>{t("plantAnalysis.learningTellName")}</li>
-        </ul>
+      <p className="mt-1 text-sm font-bold leading-5 text-[#5f594f]">{t("plantAnalysis.learningIntro")}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {onKnowSpecies ? (
+          <button type="button" onClick={onKnowSpecies} className="min-h-10 rounded-[16px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
+            {t("plantAnalysis.learningKnowName")}
+          </button>
+        ) : null}
+        {onAddPhoto ? (
+          <button type="button" onClick={onAddPhoto} className="min-h-10 rounded-[16px] bg-white/80 px-3 text-sm font-extrabold text-[#5f594f]">
+            {t("plantAnalysis.learningAddPhoto")}
+          </button>
+        ) : null}
       </div>
     </div>
   );
+}
+
+function latestResolution(resolutions: PlantHypothesisResolution[]) {
+  return [...resolutions].sort((a, b) => (b.resolvedAt ?? b.createdAt).localeCompare(a.resolvedAt ?? a.createdAt))[0];
 }
 
 export function PlantAnalysisSection({
@@ -308,7 +292,10 @@ export function PlantAnalysisSection({
   hypothesisResolutions,
   onResolveHypothesis,
   recommendationRefreshState,
-  hasPendingBaselineQuestions = false
+  hasPendingBaselineQuestions = false,
+  careActionState,
+  onKnowSpecies,
+  onAddPhoto
 }: {
   analysis?: PlantAnalysisRecord;
   plant: Plant;
@@ -317,6 +304,9 @@ export function PlantAnalysisSection({
   onResolveHypothesis: (hypothesis: PlantHypothesis, status: PlantHypothesisStatus, result: string) => Promise<void>;
   recommendationRefreshState?: RecommendationRefreshState;
   hasPendingBaselineQuestions?: boolean;
+  careActionState?: DerivedCareActionState | null;
+  onKnowSpecies?: () => void;
+  onAddPhoto?: () => void;
 }) {
   const { locale, t } = useI18n();
   const [savingAnswerKey, setSavingAnswerKey] = useState<string | null>(null);
@@ -328,6 +318,12 @@ export function PlantAnalysisSection({
     () => deriveConversationalCareState({ analysis, plant, milestones, hypothesisResolutions, locale }),
     [analysis, hypothesisResolutions, locale, milestones, plant]
   );
+  const completedFact = completedFactLabel({
+    resolution: latestResolution(hypothesisResolutions),
+    translate: t,
+    conclusionFor: (resolution) => conclusionForResolution(resolution, t)
+  });
+  const canonicalActionText = careActionState ? t(careActionState.detailMessageKey, careActionState.detailMessageParams) : "";
 
   const view = useMemo(() => {
     if (!analysis) return null;
@@ -562,6 +558,16 @@ export function PlantAnalysisSection({
   };
 
   if (conversationalState.enabled) {
+    const todayActions =
+      careActionState?.isActionable && careActionState.actionType !== "check_soil" && canonicalActionText
+        ? [canonicalActionText]
+        : conversationalState.todayActions.filter((action) => {
+            if (careActionState?.actionType === "water") {
+              return !includesAny(action, ["check soil", "soil before watering", "проверь почву", "почву перед поливом"]);
+            }
+            return true;
+          });
+
     return (
       <section className="mt-4 min-w-0 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-1">
@@ -584,27 +590,12 @@ export function PlantAnalysisSection({
         ) : null}
 
         <div className="mt-3 grid gap-2">
-          <SpeciesLearningCard analysis={analysis} />
-
-          {conversationalState.goodNews ? (
-            <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
-              <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.conversationGoodNews")}</p>
-              <p className="mt-1 text-sm font-extrabold leading-5 text-[#355f3d] [overflow-wrap:anywhere]">{conversationalState.goodNews}</p>
-            </div>
-          ) : null}
-
-          {conversationalState.concern ? (
-            <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
-              <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.conversationConcern")}</p>
-              <p className="mt-1 text-sm font-bold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{conversationalState.concern}</p>
-            </div>
-          ) : null}
-
-          {conversationalState.caution ? (
-            <div className="min-w-0 rounded-[20px] bg-[#fff8e8] p-3">
-              <p className="text-sm font-extrabold leading-5 text-[#8a6230] [overflow-wrap:anywhere]">{conversationalState.caution}</p>
-            </div>
-          ) : null}
+          <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
+            <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.conversationNow")}</p>
+            <p className="mt-1 text-sm font-extrabold leading-5 text-[#355f3d] [overflow-wrap:anywhere]">
+              {conversationalState.question ? t("plantAnalysis.firstAnswerQuestion") : canonicalActionText || todayActions[0] || t("careAction.noAction")}
+            </p>
+          </div>
 
           {conversationalState.question ? (
             <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
@@ -622,16 +613,38 @@ export function PlantAnalysisSection({
               {savingAnswerKey ? <p className="mt-3 text-xs font-bold text-[#8a8378]">{t("plantAnalysis.updatingRecommendations")}</p> : null}
               {answerError ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{answerError}</p> : null}
             </div>
-          ) : conversationalState.todayActions.length ? (
+          ) : completedFact ? (
+            <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
+              <p className="text-sm font-extrabold leading-5 text-[#355f3d]">✓ {completedFact.label}: {completedFact.value}</p>
+              <p className="mt-1 text-sm font-bold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{completedFact.conclusion}</p>
+            </div>
+          ) : null}
+
+          {conversationalState.concern ? (
+            <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
+              <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.conversationConcern")}</p>
+              <p className="mt-1 text-sm font-bold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{conversationalState.concern}</p>
+            </div>
+          ) : null}
+
+          {conversationalState.caution ? (
+            <div className="min-w-0 rounded-[20px] bg-[#fff8e8] p-3">
+              <p className="text-sm font-extrabold leading-5 text-[#8a6230] [overflow-wrap:anywhere]">{conversationalState.caution}</p>
+            </div>
+          ) : null}
+
+          {todayActions.length ? (
             <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
               <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.conversationToday")}</p>
               <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f] [overflow-wrap:anywhere]">
-                {conversationalState.todayActions.map((action) => (
+                {todayActions.map((action) => (
                   <li key={action}>{action}</li>
                 ))}
               </ul>
             </div>
           ) : null}
+
+          <SpeciesLearningCard analysis={analysis} onKnowSpecies={onKnowSpecies} onAddPhoto={onAddPhoto} />
 
           {conversationalState.guidedAction ? (
             <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
@@ -709,8 +722,6 @@ export function PlantAnalysisSection({
         <p className="mx-1 mt-2 rounded-[16px] bg-[#eef5e8] p-3 text-sm font-bold leading-5 text-[#4f6946]">{t("plantAnalysis.pendingBaselineQuestions")}</p>
       ) : null}
       <div className="mt-3 grid gap-2">
-        <SpeciesLearningCard analysis={analysis} />
-
         <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
           <p className="text-sm font-extrabold leading-5 text-[#355f3d] [overflow-wrap:anywhere]">{view.keyTakeaway}</p>
         </div>
