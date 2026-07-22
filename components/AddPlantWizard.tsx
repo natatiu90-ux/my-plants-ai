@@ -1759,20 +1759,20 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                 {shouldExplainFirstHome ? (
                   <p className="rounded-[18px] bg-white/70 p-3 text-sm font-bold leading-5 text-[#6f675d]">{t("addPlant.firstHomeHint")}</p>
                 ) : null}
-                <button type="button" onClick={() => openPicker("room")} className="rounded-[20px] bg-white/70 p-3 text-left">
+                <button type="button" onClick={() => openPicker("room")} className="rounded-[28px] bg-white/80 p-4 text-left">
                   <p className="text-xs font-bold uppercase text-[#a09a90]">{t("homeContext.home")}</p>
-                  <div className="mt-1 flex items-center justify-between gap-3">
-                    <p className="font-bold text-[#3f3b35]">{selectedHomeName}</p>
-                    <span className="shrink-0 text-sm font-bold text-[#2d7a4f]">
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <p className="text-[18px] font-extrabold leading-6 text-[#3f3b35]">{selectedHomeName}</p>
+                    <span className="shrink-0 text-sm font-extrabold text-[#2d7a4f]">
                       {homeId ? t("addPlant.change") : t("addPlant.select")}
                     </span>
                   </div>
                 </button>
-                <button type="button" onClick={() => openPicker("room")} className="rounded-[20px] bg-white/70 p-3 text-left">
+                <button type="button" onClick={() => openPicker("room")} className="rounded-[28px] bg-white/80 p-4 text-left">
                   <p className="text-xs font-bold uppercase text-[#a09a90]">{t("homeContext.room")}</p>
-                  <div className="mt-1 flex items-center justify-between gap-3">
-                    <p className="font-bold text-[#3f3b35]">{selectedRoomName}</p>
-                    <span className="shrink-0 text-sm font-bold text-[#2d7a4f]">
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <p className="text-[18px] font-extrabold leading-6 text-[#3f3b35]">{selectedRoomName}</p>
+                    <span className="shrink-0 text-sm font-extrabold text-[#2d7a4f]">
                       {roomId || roomKey ? t("addPlant.change") : t("addPlant.select")}
                     </span>
                   </div>

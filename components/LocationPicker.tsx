@@ -22,8 +22,8 @@ export function LocationPicker({
   const { homes, rooms } = usePlantStore();
   const filteredRooms = rooms.filter((room) => (homeId ? room.homeId === homeId : !room.homeId));
   const effectiveRoomId = homeId && !filteredRooms.some((room) => room.id === roomId) ? filteredRooms[0]?.id : roomId;
-  const fieldClassName = "mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base font-semibold text-[#4f4940] outline-none focus:bg-white";
-  const labelClassName = "block min-w-0 text-sm font-bold text-[#4f4940]";
+  const fieldClassName = "mt-2 min-h-[58px] w-full rounded-[22px] bg-white/85 px-4 text-[17px] font-bold text-[#4f4940] outline-none focus:bg-white";
+  const labelClassName = "block min-w-0 text-sm font-extrabold text-[#4f4940]";
 
   useEffect(() => {
     if (homeId && effectiveRoomId && effectiveRoomId !== roomId) {
@@ -32,7 +32,7 @@ export function LocationPicker({
   }, [effectiveRoomId, homeId, onChange, positionInRoom, roomId]);
 
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-5">
       <label className={labelClassName}>
         {t("homeContext.home")}
         <select

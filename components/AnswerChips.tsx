@@ -38,7 +38,7 @@ export function AnswerChips<T>({
             onClick={() => onSelect(option)}
             disabled={disabled}
             aria-busy={isLoading}
-            className={`flex min-h-10 max-w-full min-w-0 items-center justify-center gap-2 rounded-[15px] px-3 text-center text-sm font-extrabold leading-4 disabled:opacity-60 ${isLong ? "basis-full" : "basis-auto"} ${isSelected ? selectedClass : idleClass}`}
+            className={`flex min-h-11 max-w-full min-w-0 items-center justify-center gap-2 rounded-[20px] px-4 text-center text-sm font-extrabold leading-4 disabled:opacity-60 ${isLong ? "basis-full" : "basis-auto"} ${isSelected ? selectedClass : idleClass}`}
           >
             {isLoading ? <Loader2 aria-hidden="true" size={14} className="animate-spin" /> : null}
             <span className="min-w-0 whitespace-normal break-words">{label}</span>
