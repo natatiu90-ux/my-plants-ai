@@ -6,6 +6,7 @@ import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
 import { addDays, toDateKey } from "@/lib/date-format";
 import { recordAddPlantPerformanceStage } from "@/lib/add-plant-performance";
+import { deriveConversationalCareState } from "@/lib/conversational-care";
 import { buildPlantEnvironmentContext, formatEnvironmentContextForPrompt } from "@/lib/home-room-context";
 import { plantDisplayName } from "@/lib/plant-display";
 import { deriveCareActionState } from "@/lib/plant-action-eligibility";
@@ -361,6 +362,13 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     hasAssignedRoom: Boolean(assignedRoom),
     roomDirectSun: assignedRoom?.directSun,
     analysis: displayAnalysis?.rawResult
+  });
+  const conversationalState = deriveConversationalCareState({
+    analysis: displayAnalysis,
+    plant,
+    milestones,
+    hypothesisResolutions,
+    locale
   });
   const recommendationContextSnapshot = buildRecommendationContextSnapshot({
     plant,
@@ -730,7 +738,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           logNavigationEvent("detail", plant.id, fullCoverUrl ? "cover_full_image_ready" : "cover_thumbnail_ready");
         }}
       />
-      <PlantStatusSection plant={plant} careActionState={careActionState} analysis={displayAnalysis} milestones={milestones} />
+      <PlantStatusSection plant={plant} careActionState={careActionState} analysis={displayAnalysis} milestones={milestones} hasActiveQuestion={Boolean(conversationalState.question)} />
       {baselineQuestion ? (
         <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
           <p className="text-xs font-bold uppercase text-[#a09a90]">{baselineQuestion === "watering" ? t("baseline.welcome") : t("baseline.thanks")}</p>

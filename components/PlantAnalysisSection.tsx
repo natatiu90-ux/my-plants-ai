@@ -567,6 +567,8 @@ export function PlantAnalysisSection({
             }
             return true;
           });
+    const primaryConversationText = conversationalState.question ? t("plantAnalysis.firstAnswerQuestion") : canonicalActionText || todayActions[0] || t("careAction.noAction");
+    const planActions = conversationalState.question || completedFact ? todayActions : todayActions.filter((action) => action !== primaryConversationText);
 
     return (
       <section className="mt-4 min-w-0 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
@@ -590,18 +592,11 @@ export function PlantAnalysisSection({
         ) : null}
 
         <div className="mt-3 grid gap-2">
-          <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
-            <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.conversationNow")}</p>
-            <p className="mt-1 text-sm font-extrabold leading-5 text-[#355f3d] [overflow-wrap:anywhere]">
-              {conversationalState.question ? t("plantAnalysis.firstAnswerQuestion") : canonicalActionText || todayActions[0] || t("careAction.noAction")}
-            </p>
-          </div>
-
           {conversationalState.question ? (
-            <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
-              <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.conversationQuestion")}</p>
+            <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
+              <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.conversationQuestion")}</p>
               <p className="mt-2 text-sm font-extrabold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{conversationalState.question.question}</p>
-              <p className="mt-1 text-xs font-bold leading-4 text-[#8a8378] [overflow-wrap:anywhere]">{conversationalState.question.reason}</p>
+              <p className="mt-1 text-xs font-bold leading-4 text-[#5f7a54] [overflow-wrap:anywhere]">{conversationalState.question.reason}</p>
               <AnswerChips
                 options={conversationalState.question.options}
                 getKey={(option) => `${conversationalState.question!.hypothesis}:${option.result}`}
@@ -614,14 +609,32 @@ export function PlantAnalysisSection({
               {answerError ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{answerError}</p> : null}
             </div>
           ) : completedFact ? (
-            <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
+            <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
               <p className="text-sm font-extrabold leading-5 text-[#355f3d]">✓ {completedFact.label}: {completedFact.value}</p>
               <p className="mt-1 text-sm font-bold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{completedFact.conclusion}</p>
+            </div>
+          ) : (
+            <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
+              <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.conversationNow")}</p>
+              <p className="mt-1 text-sm font-extrabold leading-5 text-[#355f3d] [overflow-wrap:anywhere]">
+                {primaryConversationText}
+              </p>
+            </div>
+          )}
+
+          {planActions.length ? (
+            <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
+              <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.conversationToday")}</p>
+              <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f] [overflow-wrap:anywhere]">
+                {planActions.map((action) => (
+                  <li key={action}>{action}</li>
+                ))}
+              </ul>
             </div>
           ) : null}
 
           {conversationalState.concern ? (
-            <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
+            <div className="min-w-0 rounded-[20px] bg-white/50 p-3">
               <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.conversationConcern")}</p>
               <p className="mt-1 text-sm font-bold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{conversationalState.concern}</p>
             </div>
@@ -630,17 +643,6 @@ export function PlantAnalysisSection({
           {conversationalState.caution ? (
             <div className="min-w-0 rounded-[20px] bg-[#fff8e8] p-3">
               <p className="text-sm font-extrabold leading-5 text-[#8a6230] [overflow-wrap:anywhere]">{conversationalState.caution}</p>
-            </div>
-          ) : null}
-
-          {todayActions.length ? (
-            <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
-              <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.conversationToday")}</p>
-              <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f] [overflow-wrap:anywhere]">
-                {todayActions.map((action) => (
-                  <li key={action}>{action}</li>
-                ))}
-              </ul>
             </div>
           ) : null}
 

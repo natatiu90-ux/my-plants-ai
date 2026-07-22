@@ -9,20 +9,25 @@ import { speciesDetailLabel } from "@/lib/plant-detail-recovery-presentation";
 import { speciesLearningStateFromAnalysis } from "@/lib/species-learning";
 import type { Plant, PlantAnalysisRecord, PlantMilestone } from "@/types/plant";
 
-export function PlantStatusSection({ plant, careActionState, analysis, milestones }: { plant: Plant; careActionState: DerivedCareActionState | null; analysis?: PlantAnalysisRecord; milestones: PlantMilestone[] }) {
-  const { locale, t } = useI18n();
+export function PlantStatusSection({
+  plant,
+  careActionState,
+  analysis,
+  milestones,
+  hasActiveQuestion = false
+}: {
+  plant: Plant;
+  careActionState: DerivedCareActionState | null;
+  analysis?: PlantAnalysisRecord;
+  milestones: PlantMilestone[];
+  hasActiveQuestion?: boolean;
+}) {
+  const { t } = useI18n();
   const speciesLearningState = speciesLearningStateFromAnalysis(analysis);
   const speciesLabel = speciesDetailLabel({ fallbackName: plantCommonName(plant), speciesLearningState });
   const commonName = speciesLabel.labelKey ? t(speciesLabel.labelKey) : speciesLabel.labelText ?? "";
   const healthStatus = derivePlantHealthStatus({ plant, analysis, milestones, careActionState });
-  const primaryAction = analysis?.rawResult?.primaryAction?.[locale] || analysis?.rawResult?.primaryAction?.en || analysis?.rawResult?.primaryAction?.ru || "";
-  const actionTimeframe = analysis?.rawResult?.actionTimeframe?.[locale] || analysis?.rawResult?.actionTimeframe?.en || analysis?.rawResult?.actionTimeframe?.ru || "";
-  const highSeverityMessage = primaryAction && actionTimeframe ? `${primaryAction} ${actionTimeframe}` : primaryAction;
-  const message = careActionState && (careActionState.isActionable || careActionState.status === "completed" || careActionState.status === "upcoming")
-    ? t(careActionState.detailMessageKey, careActionState.detailMessageParams)
-    : healthStatus.status === "needs_attention" || healthStatus.status === "action_needed"
-      ? highSeverityMessage || t(healthStatus.messageKey)
-      : t(healthStatus.messageKey);
+  const message = hasActiveQuestion ? t("plantAnalysis.waitingForAnswer") : t(healthStatus.messageKey);
 
   return (
     <section className="mt-4 min-w-0 rounded-[28px] bg-[#fffaf3] p-5 shadow-soft">
