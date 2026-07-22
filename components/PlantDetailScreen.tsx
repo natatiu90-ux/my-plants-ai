@@ -13,6 +13,7 @@ import { deriveCareActionState } from "@/lib/plant-action-eligibility";
 import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
+import { recommendationSpeciesContextFromPlant } from "@/lib/plant-detail-recovery-presentation";
 import { nextPostCreationClarificationStep } from "@/lib/post-creation-clarifications";
 import { buildRecommendationContextSnapshot, changedContextSince, impactLabelKey, isRecommendationStale, isVisualEvidenceStale, reasonTypeFromChangedContext, sourceAnalysisAgeDays, type RecommendationChangedContext, type RecommendationContextSnapshot } from "@/lib/recommendation-refresh";
 import { recommendationRefreshReducer, type RecommendationRefreshStatus } from "@/lib/recommendation-refresh-state";
@@ -111,7 +112,7 @@ function analysisWithRecommendationRevision(analysis: PlantAnalysisRecord | unde
 
 function compactPreviousRecommendation(
   analysis: PlantAnalysisRecord | undefined,
-  input: { previousContextSnapshot?: Record<string, unknown>; changedContext?: RecommendationChangedContext; reasonType?: string } = {}
+  input: { previousContextSnapshot?: Record<string, unknown>; changedContext?: RecommendationChangedContext; reasonType?: string; userProvidedSpecies?: ReturnType<typeof recommendationSpeciesContextFromPlant> } = {}
 ) {
   return {
     status: analysis?.condition ?? null,
@@ -133,6 +134,7 @@ function compactPreviousRecommendation(
     visualEvidenceSnapshot: analysis?.rawResult?.visualEvidenceSnapshot ?? null,
     initialAnalysisMode: typeof analysis?.rawResult?.analysisMode === "string" ? analysis.rawResult.analysisMode : null,
     sourceAnalysis: analysis ? { id: analysis.id, createdAt: analysis.createdAt } : null,
+    userProvidedSpecies: input.userProvidedSpecies ?? null,
     previousContextSnapshot: input.previousContextSnapshot ?? null,
     changedContext: input.changedContext ?? null,
     reasonType: input.reasonType ?? null
@@ -512,6 +514,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       formData.append("currentCommonName", plant.speciesName ?? "");
       formData.append("currentScientificName", plant.scientificName ?? "");
       formData.append("currentDetectedSpecies", [plant.speciesName, plant.scientificName].filter(Boolean).join(" "));
+      formData.append("userProvidedSpecies", JSON.stringify(recommendationSpeciesContextFromPlant(plant)));
       formData.append("currentLightCondition", plant.lightConditionKey ? t(plant.lightConditionKey) : "");
       formData.append("environmentContext", formatEnvironmentContextForPrompt(buildPlantEnvironmentContext({ plant, homes, rooms })));
 
@@ -621,6 +624,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       formData.append("currentCommonName", plant.speciesName ?? "");
       formData.append("currentScientificName", plant.scientificName ?? "");
       formData.append("currentDetectedSpecies", [plant.speciesName, plant.scientificName].filter(Boolean).join(" "));
+      formData.append("userProvidedSpecies", JSON.stringify(recommendationSpeciesContextFromPlant(plant)));
       formData.append("currentLightCondition", plant.lightConditionKey ? t(plant.lightConditionKey) : "");
       formData.append("environmentContext", formatEnvironmentContextForPrompt(buildPlantEnvironmentContext({ plant, homes, rooms })));
       const changedContext = changedContextSince(currentRecommendationRevision?.contextSnapshot, recommendationContextSnapshot, {
@@ -636,7 +640,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           ...compactPreviousRecommendation(displayAnalysis, {
             previousContextSnapshot: currentRecommendationRevision?.contextSnapshot,
             changedContext,
-            reasonType
+            reasonType,
+            userProvidedSpecies: recommendationSpeciesContextFromPlant(plant)
           })
         })
       );

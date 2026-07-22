@@ -4,11 +4,11 @@ import { useMemo, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { formatRelativeDate } from "@/lib/date-format";
 import { deriveConversationalCareState } from "@/lib/conversational-care";
-import { isStillLearningSpecies, speciesLearningStateFromAnalysis } from "@/lib/species-learning";
+import { speciesLearningStateFromAnalysis } from "@/lib/species-learning";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
 import type { DerivedCareActionState } from "@/lib/plant-action-eligibility";
-import { completedFactLabel } from "@/lib/plant-detail-recovery-presentation";
+import { completedFactLabel, speciesLearningCardPresentation, userProvidedSpeciesFromPlant } from "@/lib/plant-detail-recovery-presentation";
 import type { Plant, PlantAnalysisRecord, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone } from "@/types/plant";
 import { AnswerChips } from "./AnswerChips";
 import type { RecommendationRefreshState } from "@/lib/recommendation-refresh-state";
@@ -256,19 +256,29 @@ function recommendationDensity(analysis: PlantAnalysisRecord, activeHypotheses: 
   return "healthy";
 }
 
-function SpeciesLearningCard({ analysis, onKnowSpecies, onAddPhoto }: { analysis?: PlantAnalysisRecord; onKnowSpecies?: () => void; onAddPhoto?: () => void }) {
+function SpeciesLearningCard({ analysis, plant, onKnowSpecies, onAddPhoto }: { analysis?: PlantAnalysisRecord; plant: Plant; onKnowSpecies?: () => void; onAddPhoto?: () => void }) {
   const { t } = useI18n();
   const state = speciesLearningStateFromAnalysis(analysis);
-  if (!isStillLearningSpecies(state)) return null;
+  const userProvidedSpecies = userProvidedSpeciesFromPlant(plant);
+  const presentation = speciesLearningCardPresentation({ speciesLearningState: state, userProvidedSpecies });
+  if (!presentation.shouldRender) return null;
 
   return (
     <div className="min-w-0 rounded-[20px] bg-white/50 p-3">
-      <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.learningTitle")}</p>
-      <p className="mt-1 text-sm font-bold leading-5 text-[#5f594f]">{t("plantAnalysis.learningIntro")}</p>
+      <p className="text-xs font-bold uppercase text-[#6f8c62]">{presentation.isCompleted ? t("plantAnalysis.userSpeciesTitle") : t("plantAnalysis.learningTitle")}</p>
+      <p className="mt-1 text-sm font-bold leading-5 text-[#5f594f]">
+        {presentation.isCompleted && presentation.displayName ? t("plantAnalysis.userSpeciesSaved", { name: presentation.displayName }) : t("plantAnalysis.learningIntro")}
+      </p>
+      {presentation.isCompleted ? <p className="mt-1 text-sm leading-5 text-[#7f776c]">{t("plantAnalysis.userSpeciesHint")}</p> : null}
       <div className="mt-3 flex flex-wrap gap-2">
-        {onKnowSpecies ? (
+        {presentation.showKnowNameAction && onKnowSpecies ? (
           <button type="button" onClick={onKnowSpecies} className="min-h-10 rounded-[16px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
             {t("plantAnalysis.learningKnowName")}
+          </button>
+        ) : null}
+        {presentation.showChangeAction && onKnowSpecies ? (
+          <button type="button" onClick={onKnowSpecies} className="min-h-10 rounded-[16px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
+            {t("plantAnalysis.userSpeciesChange")}
           </button>
         ) : null}
         {onAddPhoto ? (
@@ -646,7 +656,7 @@ export function PlantAnalysisSection({
             </div>
           ) : null}
 
-          <SpeciesLearningCard analysis={analysis} onKnowSpecies={onKnowSpecies} onAddPhoto={onAddPhoto} />
+          <SpeciesLearningCard analysis={analysis} plant={plant} onKnowSpecies={onKnowSpecies} onAddPhoto={onAddPhoto} />
 
           {conversationalState.guidedAction ? (
             <div className="min-w-0 rounded-[20px] bg-white/65 p-3">

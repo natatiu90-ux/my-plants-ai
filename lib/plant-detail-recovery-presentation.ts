@@ -1,9 +1,67 @@
 import type { TranslationKey } from "@/i18n/dictionaries";
-import type { PlantHypothesis, PlantHypothesisResolution } from "@/types/plant";
+import type { Plant, PlantHypothesis, PlantHypothesisResolution } from "@/types/plant";
+import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "./plant-display";
+import { isUnknownPlantName } from "./rescue-entry";
 import type { SpeciesLearningState } from "./species-learning";
 import { isStillLearningSpecies } from "./species-learning";
 
-export function speciesDetailLabel(input: { fallbackName: string; speciesLearningState?: SpeciesLearningState | null }) {
+export function userProvidedSpeciesFromPlant(plant: Pick<Plant, "speciesName" | "scientificName">) {
+  const commonName = cleanPlantName(plant.speciesName);
+  const scientificName = cleanScientificName(plant.scientificName);
+  const displayName = commonName || commonNameFromScientificName(scientificName);
+
+  if (!displayName || isUnknownPlantName(displayName)) {
+    return null;
+  }
+
+  return {
+    commonName: commonName || null,
+    scientificName: scientificName || null,
+    displayName
+  };
+}
+
+export function speciesLearningCardPresentation(input: {
+  speciesLearningState?: SpeciesLearningState | null;
+  userProvidedSpecies?: ReturnType<typeof userProvidedSpeciesFromPlant>;
+}) {
+  if (input.userProvidedSpecies) {
+    return {
+      shouldRender: true,
+      isCompleted: true,
+      showKnowNameAction: false,
+      showChangeAction: true,
+      displayName: input.userProvidedSpecies.displayName
+    };
+  }
+
+  return {
+    shouldRender: isStillLearningSpecies(input.speciesLearningState),
+    isCompleted: false,
+    showKnowNameAction: isStillLearningSpecies(input.speciesLearningState),
+    showChangeAction: false,
+    displayName: null
+  };
+}
+
+export function recommendationSpeciesContextFromPlant(plant: Pick<Plant, "speciesName" | "scientificName">) {
+  const userProvidedSpecies = userProvidedSpeciesFromPlant(plant);
+  if (!userProvidedSpecies) return null;
+
+  return {
+    source: "user_provided",
+    commonName: userProvidedSpecies.commonName,
+    scientificName: userProvidedSpecies.scientificName,
+    displayName: userProvidedSpecies.displayName,
+    note: "User-provided plant name; use as a helpful identification signal, but keep checking it against photo evidence."
+  };
+}
+
+export function speciesDetailLabel(input: { fallbackName: string; speciesLearningState?: SpeciesLearningState | null; userProvidedSpecies?: ReturnType<typeof userProvidedSpeciesFromPlant> }) {
+  if (input.userProvidedSpecies) {
+    return { labelKey: null, labelText: input.userProvidedSpecies.displayName };
+  }
+
   if (isStillLearningSpecies(input.speciesLearningState)) {
     return { labelKey: "addPlant.speciesLearningShortTitle" as TranslationKey, labelText: null };
   }

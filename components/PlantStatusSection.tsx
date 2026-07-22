@@ -5,7 +5,7 @@ import { useI18n } from "@/i18n/I18nProvider";
 import type { DerivedCareActionState } from "@/lib/plant-action-eligibility";
 import { derivePlantHealthStatus } from "@/lib/plant-health-status";
 import { plantCommonName } from "@/lib/plant-display";
-import { speciesDetailLabel } from "@/lib/plant-detail-recovery-presentation";
+import { speciesDetailLabel, userProvidedSpeciesFromPlant } from "@/lib/plant-detail-recovery-presentation";
 import { speciesLearningStateFromAnalysis } from "@/lib/species-learning";
 import type { Plant, PlantAnalysisRecord, PlantMilestone } from "@/types/plant";
 
@@ -24,7 +24,8 @@ export function PlantStatusSection({
 }) {
   const { t } = useI18n();
   const speciesLearningState = speciesLearningStateFromAnalysis(analysis);
-  const speciesLabel = speciesDetailLabel({ fallbackName: plantCommonName(plant), speciesLearningState });
+  const userProvidedSpecies = userProvidedSpeciesFromPlant(plant);
+  const speciesLabel = speciesDetailLabel({ fallbackName: plantCommonName(plant), speciesLearningState, userProvidedSpecies });
   const commonName = speciesLabel.labelKey ? t(speciesLabel.labelKey) : speciesLabel.labelText ?? "";
   const healthStatus = derivePlantHealthStatus({ plant, analysis, milestones, careActionState });
   const message = hasActiveQuestion ? t("plantAnalysis.waitingForAnswer") : t(healthStatus.messageKey);

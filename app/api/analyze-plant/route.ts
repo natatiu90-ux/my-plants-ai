@@ -892,6 +892,7 @@ export async function POST(request: Request) {
   const currentCommonName = String(formData.get("currentCommonName") ?? "");
   const currentScientificName = String(formData.get("currentScientificName") ?? "");
   const currentDetectedSpecies = String(formData.get("currentDetectedSpecies") ?? "");
+  const userProvidedSpecies = String(formData.get("userProvidedSpecies") ?? "");
   const currentLightCondition = String(formData.get("currentLightCondition") ?? "");
   const environmentContext = String(formData.get("environmentContext") ?? "");
   const analysisMode = String(formData.get("analysisMode") ?? "initial_or_photo_analysis");
@@ -1169,6 +1170,7 @@ export async function POST(request: Request) {
             ? "Initial add fast rule: this is the first onboarding analysis before the plant is saved. Return only compact primitive fields. Do not write primary action prose, timeframe prose, status reason prose, summary prose, recommendation prose, species education, full reasoning, alternative causes, multiple hypotheses, impact metadata, or detailed what-not-to-do advice. Choose primaryActionId, actionTimeframeId, and statusReasonCode carefully; the app will localize obvious text from those IDs. Use free text only for species/common names and up to 2 meaningful visibleObservations from the photo. Include a compact visualEvidenceSnapshot for later enrichment. Keep the full response ideally under 900 tokens."
             : "Follow-up analysis rule: include enough structured context to update recommendations clearly without repeating old advice. If previousAnalysis includes visualEvidenceSnapshot from an initial_add_fast result, treat it as the baseline visual snapshot and enrich care recommendations from current context instead of redoing unnecessary broad visual speculation. Do not contradict the initial visual snapshot unless the new photos or context clearly change confidence, and say so if confidence changed.",
           `Current plant context, if this is a follow-up photo analysis: commonName="${currentCommonName || "unknown"}", scientificName="${currentScientificName || "unknown"}", detectedSpecies="${currentDetectedSpecies || "unknown"}", light="${currentLightCondition || "unknown"}".`,
+          `User-provided species signal, if any: ${userProvidedSpecies && userProvidedSpecies !== "null" ? userProvidedSpecies : "No user-provided species was supplied. If supplied, treat it as a helpful signal from the owner, not automatic scientific confirmation; compare it with photo evidence and continue refining if needed."}`,
           `Structured home and room context: ${environmentContext || "No structured home or room context was provided."}`,
           `Previous analysis, if available: ${previousAnalysis || "No previous analysis was provided."}`,
           `Species care profiles: ${speciesProfilesPromptContext()}`

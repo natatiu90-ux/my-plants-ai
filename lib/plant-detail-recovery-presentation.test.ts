@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { completedFactLabel, speciesDetailLabel } from "./plant-detail-recovery-presentation";
+import { completedFactLabel, recommendationSpeciesContextFromPlant, speciesDetailLabel, speciesLearningCardPresentation, userProvidedSpeciesFromPlant } from "./plant-detail-recovery-presentation";
 import type { PlantHypothesisResolution } from "@/types/plant";
 import type { SpeciesLearningState } from "./species-learning";
 
@@ -17,6 +17,51 @@ assert.deepEqual(
   speciesDetailLabel({ fallbackName: "Unknown plant", speciesLearningState: learningState }),
   { labelKey: "addPlant.speciesLearningShortTitle", labelText: null },
   "unknown species should show a friendly learning label instead of raw currentLabel"
+);
+
+const userSpecies = userProvidedSpeciesFromPlant({ speciesName: "Сирень", scientificName: "" });
+assert.deepEqual(userSpecies, { commonName: "Сирень", scientificName: null, displayName: "Сирень" }, "manual species should be read from persisted plant state");
+
+assert.deepEqual(
+  speciesDetailLabel({ fallbackName: "Unknown plant", speciesLearningState: learningState, userProvidedSpecies: userSpecies }),
+  { labelKey: null, labelText: "Сирень" },
+  "persisted user species should replace the generic learning label after reload"
+);
+
+assert.deepEqual(
+  speciesLearningCardPresentation({ speciesLearningState: learningState, userProvidedSpecies: userSpecies }),
+  {
+    shouldRender: true,
+    isCompleted: true,
+    showKnowNameAction: false,
+    showChangeAction: true,
+    displayName: "Сирень"
+  },
+  "saved user species hides the active know-name CTA and shows a completed state"
+);
+
+assert.deepEqual(
+  speciesLearningCardPresentation({ speciesLearningState: learningState, userProvidedSpecies: userProvidedSpeciesFromPlant({ speciesName: "Syringa", scientificName: "" }) }).displayName,
+  "Syringa",
+  "editing the saved species updates the displayed completed value"
+);
+
+assert.equal(
+  speciesLearningCardPresentation({ speciesLearningState: learningState, userProvidedSpecies: userProvidedSpeciesFromPlant({ speciesName: "Растение, которое я изучаю", scientificName: "" }) }).showKnowNameAction,
+  true,
+  "placeholder learning names should not hide the know-name CTA after a failed or missing save"
+);
+
+assert.deepEqual(
+  recommendationSpeciesContextFromPlant({ speciesName: "Сирень", scientificName: "" }),
+  {
+    source: "user_provided",
+    commonName: "Сирень",
+    scientificName: null,
+    displayName: "Сирень",
+    note: "User-provided plant name; use as a helpful identification signal, but keep checking it against photo evidence."
+  },
+  "user species should be included in recommendation refresh context as a signal"
 );
 
 assert.deepEqual(

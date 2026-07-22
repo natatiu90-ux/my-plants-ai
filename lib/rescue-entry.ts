@@ -21,7 +21,18 @@ function nameFromUnknown(value: unknown): string {
 
 export function isUnknownPlantName(value: unknown) {
   const normalized = cleanPlantName(nameFromUnknown(value)).toLocaleLowerCase();
-  return !normalized || normalized === "unknown plant" || normalized === "unknown" || normalized === "неизвестное растение" || normalized === "неизвестно";
+  return (
+    !normalized ||
+    normalized === "unknown plant" ||
+    normalized === "unknown" ||
+    normalized === "plant i’m learning" ||
+    normalized === "plant i'm learning" ||
+    normalized === "plant in recovery" ||
+    normalized === "неизвестное растение" ||
+    normalized === "неизвестно" ||
+    normalized === "растение, которое я изучаю" ||
+    normalized === "растение на восстановлении"
+  );
 }
 
 export function shouldShowRescueEntry(input: {
