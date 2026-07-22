@@ -264,25 +264,25 @@ function SpeciesLearningCard({ analysis, plant, onKnowSpecies, onAddPhoto }: { a
   if (!presentation.shouldRender) return null;
 
   return (
-    <div className="min-w-0 rounded-[20px] bg-white/50 p-3">
-      <p className="text-xs font-bold uppercase text-[#6f8c62]">{presentation.isCompleted ? t("plantAnalysis.userSpeciesTitle") : t("plantAnalysis.learningTitle")}</p>
-      <p className="mt-1 text-sm font-bold leading-5 text-[#5f594f]">
+    <div className="min-w-0 rounded-[22px] bg-white/60 p-4">
+      <p className="text-[13px] font-bold text-[#6f8c62]">{presentation.isCompleted ? t("plantAnalysis.userSpeciesTitle") : t("plantAnalysis.learningTitle")}</p>
+      <p className="mt-2 text-[15px] font-semibold leading-6 text-[#5f594f]">
         {presentation.isCompleted && presentation.displayName ? t("plantAnalysis.userSpeciesSaved", { name: presentation.displayName }) : t("plantAnalysis.learningIntro")}
       </p>
-      {presentation.isCompleted ? <p className="mt-1 text-sm leading-5 text-[#7f776c]">{t("plantAnalysis.userSpeciesHint")}</p> : null}
-      <div className="mt-3 flex flex-wrap gap-2">
+      {presentation.isCompleted ? <p className="mt-2 text-[15px] font-medium leading-6 text-[#756d62]">{t("plantAnalysis.userSpeciesHint")}</p> : null}
+      <div className="mt-4 flex flex-wrap gap-2.5">
         {presentation.showKnowNameAction && onKnowSpecies ? (
-          <button type="button" onClick={onKnowSpecies} className="min-h-10 rounded-[16px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
+          <button type="button" onClick={onKnowSpecies} className="min-h-11 rounded-[17px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]">
             {t("plantAnalysis.learningKnowName")}
           </button>
         ) : null}
         {presentation.showChangeAction && onKnowSpecies ? (
-          <button type="button" onClick={onKnowSpecies} className="min-h-10 rounded-[16px] bg-[#ddf2dc] px-3 text-sm font-extrabold text-[#2d7a4f]">
+          <button type="button" onClick={onKnowSpecies} className="min-h-11 rounded-[17px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]">
             {t("plantAnalysis.userSpeciesChange")}
           </button>
         ) : null}
         {onAddPhoto ? (
-          <button type="button" onClick={onAddPhoto} className="min-h-10 rounded-[16px] bg-white/80 px-3 text-sm font-extrabold text-[#5f594f]">
+          <button type="button" onClick={onAddPhoto} className="min-h-11 rounded-[17px] bg-white/85 px-4 text-sm font-extrabold text-[#5f594f]">
             {t("plantAnalysis.learningAddPhoto")}
           </button>
         ) : null}
@@ -584,8 +584,8 @@ export function PlantAnalysisSection({
     const planActions = conversationalState.question ? [] : completedFact ? todayActions.filter((action) => action !== completedFact.conclusion) : todayActions.filter((action) => action !== primaryConversationText);
 
     return (
-      <section className="mt-4 min-w-0 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-1">
+      <section className="mt-5 min-w-0 rounded-[28px] bg-[#fffaf3] p-5 shadow-soft">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 px-1">
           <h2 className="font-rounded text-xl font-extrabold text-ink [overflow-wrap:anywhere]">{t("plantAnalysis.recoveryTitle")}</h2>
           {recommendationRefreshState?.status === "loading" ? (
             <span className="rounded-full bg-[#eef5e8] px-3 py-1 text-xs font-extrabold text-[#4f6946]">{userProvidedSpecies ? t("plantAnalysis.userSpeciesRefreshLoading") : t("plantAnalysis.refreshingInline")}</span>
@@ -598,25 +598,26 @@ export function PlantAnalysisSection({
           ) : null}
         </div>
         {recommendationRefreshState?.status === "error" ? (
-          <div className="mx-1 mt-2 rounded-[16px] bg-[#fff0e6] p-3 text-sm leading-5 text-[#8a5b24]">
+          <div className="mx-1 mt-3 rounded-[18px] bg-[#fff0e6] p-3.5 text-[15px] font-medium leading-6 text-[#8a5b24]">
             <p>{recommendationRefreshState.error ?? t("plantAnalysis.refreshFailedInline")}</p>
             {onRetryRecommendationRefresh ? (
-              <button type="button" onClick={onRetryRecommendationRefresh} className="mt-2 min-h-9 rounded-[14px] bg-white/75 px-3 text-xs font-extrabold text-[#6f4e20]">
+              <button type="button" onClick={onRetryRecommendationRefresh} className="mt-3 min-h-10 rounded-[15px] bg-white/80 px-3 text-sm font-extrabold text-[#6f4e20]">
                 {t("common.tryAgain")}
               </button>
             ) : null}
           </div>
         ) : null}
         {hasPendingBaselineQuestions && !conversationalState.question ? (
-          <p className="mx-1 mt-2 rounded-[16px] bg-[#eef5e8] p-3 text-sm font-bold leading-5 text-[#4f6946]">{t("plantAnalysis.pendingBaselineQuestions")}</p>
+          <p className="mx-1 mt-3 rounded-[18px] bg-[#eef5e8] p-3.5 text-[15px] font-semibold leading-6 text-[#4f6946]">{t("plantAnalysis.pendingBaselineQuestions")}</p>
         ) : null}
 
-        <div className="mt-3 grid gap-2">
+        <div className="mt-4 grid gap-3">
           {conversationalState.question ? (
-            <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
-              <p className="text-xs font-bold text-[#6f8c62]">{t("plantAnalysis.conversationQuestion")}</p>
-              <p className="mt-2 text-sm font-semibold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{conversationalState.question.question}</p>
-              <p className="mt-1 text-xs leading-4 text-[#5f7a54] [overflow-wrap:anywhere]">{conversationalState.question.reason}</p>
+            <div className="min-w-0 rounded-[24px] bg-[#eef5e8] p-4">
+              <p className="text-[13px] font-bold text-[#6f8c62]">{t("plantAnalysis.conversationQuestion")}</p>
+              <p className="mt-2.5 text-base font-extrabold leading-6 text-[#3f3b35] [overflow-wrap:anywhere]">{conversationalState.question.question}</p>
+              <p className="mt-2 text-[15px] font-medium leading-6 text-[#5f7a54] [overflow-wrap:anywhere]">{conversationalState.question.reason}</p>
+              <div className="mt-3">
               <AnswerChips
                 options={conversationalState.question.options}
                 getKey={(option) => `${conversationalState.question!.hypothesis}:${option.result}`}
@@ -625,27 +626,28 @@ export function PlantAnalysisSection({
                 disabled={Boolean(savingAnswerKey)}
                 onSelect={(option) => void saveFollowUp(conversationalState.question!.hypothesis, option.status, option.result)}
               />
-              {savingAnswerKey ? <p className="mt-3 text-xs font-bold text-[#8a8378]">{t("plantAnalysis.updatingRecommendations")}</p> : null}
-              {answerError ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{answerError}</p> : null}
+              </div>
+              {savingAnswerKey ? <p className="mt-3 text-sm font-semibold text-[#7b7469]">{t("plantAnalysis.updatingRecommendations")}</p> : null}
+              {answerError ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-semibold leading-5 text-[#9b2c3e]">{answerError}</p> : null}
             </div>
           ) : completedFact ? (
-            <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
-              <p className="text-sm font-semibold leading-5 text-[#355f3d]">✓ {completedFact.label}: {completedFact.value}</p>
-              <p className="mt-1 text-sm leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{completedFact.conclusion}</p>
+            <div className="min-w-0 rounded-[24px] bg-[#eef5e8] p-4">
+              <p className="text-[15px] font-extrabold leading-6 text-[#355f3d]">✓ {completedFact.label}: {completedFact.value}</p>
+              <p className="mt-2 text-[15px] font-medium leading-6 text-[#4f4940] [overflow-wrap:anywhere]">{completedFact.conclusion}</p>
             </div>
           ) : (
-            <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
-              <p className="text-xs font-bold text-[#6f8c62]">{t("plantAnalysis.conversationNow")}</p>
-              <p className="mt-1 text-sm font-semibold leading-5 text-[#355f3d] [overflow-wrap:anywhere]">
+            <div className="min-w-0 rounded-[24px] bg-[#eef5e8] p-4">
+              <p className="text-[13px] font-bold text-[#6f8c62]">{t("plantAnalysis.conversationNow")}</p>
+              <p className="mt-2 text-base font-extrabold leading-6 text-[#355f3d] [overflow-wrap:anywhere]">
                 {primaryConversationText}
               </p>
             </div>
           )}
 
           {planActions.length ? (
-            <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
-              <p className="text-xs font-bold text-[#a09a90]">{t("plantAnalysis.conversationToday")}</p>
-              <ul className="mt-2 grid gap-1.5 text-sm leading-5 text-[#5f594f] [overflow-wrap:anywhere]">
+            <div className="min-w-0 rounded-[22px] bg-white/70 p-4">
+              <p className="text-[13px] font-bold text-[#8f877c]">{t("plantAnalysis.conversationToday")}</p>
+              <ul className="mt-2.5 grid gap-2 text-[15px] font-medium leading-6 text-[#5f594f] [overflow-wrap:anywhere]">
                 {planActions.map((action) => (
                   <li key={action}>{action}</li>
                 ))}
@@ -654,34 +656,34 @@ export function PlantAnalysisSection({
           ) : null}
 
           {conversationalState.concern ? (
-            <div className="min-w-0 rounded-[20px] bg-white/50 p-3">
-              <p className="text-xs font-bold text-[#a09a90]">{t("plantAnalysis.conversationConcern")}</p>
-              <p className="mt-1 text-sm leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{conversationalState.concern}</p>
+            <div className="min-w-0 rounded-[22px] bg-white/60 p-4">
+              <p className="text-[13px] font-bold text-[#8f877c]">{t("plantAnalysis.conversationConcern")}</p>
+              <p className="mt-2 text-[15px] font-medium leading-6 text-[#4f4940] [overflow-wrap:anywhere]">{conversationalState.concern}</p>
             </div>
           ) : null}
 
           {conversationalState.caution ? (
-            <div className="min-w-0 rounded-[20px] bg-[#fff8e8] p-3">
-              <p className="text-sm font-extrabold leading-5 text-[#8a6230] [overflow-wrap:anywhere]">{conversationalState.caution}</p>
+            <div className="min-w-0 rounded-[22px] bg-[#fff8e8] p-4">
+              <p className="text-[15px] font-semibold leading-6 text-[#8a6230] [overflow-wrap:anywhere]">{conversationalState.caution}</p>
             </div>
           ) : null}
 
           <SpeciesLearningCard analysis={analysis} plant={plant} onKnowSpecies={onKnowSpecies} onAddPhoto={onAddPhoto} />
 
           {conversationalState.guidedAction ? (
-            <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
-              <p className="text-sm font-extrabold leading-5 text-[#4f4940]">
+            <div className="min-w-0 rounded-[22px] bg-white/70 p-4">
+              <p className="text-[15px] font-semibold leading-6 text-[#4f4940]">
                 {conversationalState.guidedAction.type === "pruning" ? t("plantAnalysis.guidedPruningIntro") : t("plantAnalysis.guidedRepottingIntro")}
               </p>
               <button
                 type="button"
                 onClick={() => setOpenGuide((current) => (current === conversationalState.guidedAction?.type ? null : conversationalState.guidedAction?.type ?? null))}
-                className="mt-3 min-h-11 rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]"
+                className="mt-4 min-h-11 rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]"
               >
                 {conversationalState.guidedAction.type === "pruning" ? t("plantAnalysis.guidedPruningCta") : t("plantAnalysis.guidedRepottingCta")}
               </button>
               {openGuide === conversationalState.guidedAction.type ? (
-                <ol className="mt-3 grid list-decimal gap-1.5 pl-5 text-sm font-bold leading-5 text-[#5f594f]">
+                <ol className="mt-4 grid list-decimal gap-2 pl-5 text-[15px] font-medium leading-6 text-[#5f594f]">
                   {(conversationalState.guidedAction.type === "pruning"
                     ? [
                         t("plantAnalysis.guidedPruningStep1"),
@@ -704,18 +706,18 @@ export function PlantAnalysisSection({
             </div>
           ) : null}
 
-          <details className="min-w-0 rounded-[20px] bg-white/45 p-3">
-            <summary className="cursor-pointer text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.whyThisConclusion")}</summary>
-            <div className="mt-3 grid gap-2">
-              <p className="rounded-[18px] bg-[#eef5e8] p-3 text-sm font-extrabold leading-5 text-[#355f3d] [overflow-wrap:anywhere]">{view.keyTakeaway}</p>
+          <details className="min-w-0 rounded-[22px] bg-white/50 p-4">
+            <summary className="cursor-pointer text-[13px] font-bold text-[#6f8c62]">{t("plantAnalysis.whyThisConclusion")}</summary>
+            <div className="mt-4 grid gap-3">
+              <p className="rounded-[18px] bg-[#eef5e8] p-3.5 text-[15px] font-semibold leading-6 text-[#355f3d] [overflow-wrap:anywhere]">{view.keyTakeaway}</p>
               {view.meaningfulObservations.length ? (
-                <ul className="grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f] [overflow-wrap:anywhere]">
+                <ul className="grid gap-2 text-[15px] font-medium leading-6 text-[#5f594f] [overflow-wrap:anywhere]">
                   {view.meaningfulObservations.map((item) => (
                     <li key={item}>{item}</li>
                   ))}
                 </ul>
               ) : null}
-              {view.likelyExplanation ? <p className="text-sm font-bold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{view.likelyExplanation}</p> : null}
+              {view.likelyExplanation ? <p className="text-[15px] font-medium leading-6 text-[#4f4940] [overflow-wrap:anywhere]">{view.likelyExplanation}</p> : null}
             </div>
           </details>
         </div>
@@ -724,8 +726,8 @@ export function PlantAnalysisSection({
   }
 
   return (
-    <section className="mt-4 min-w-0 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-1">
+    <section className="mt-5 min-w-0 rounded-[28px] bg-[#fffaf3] p-5 shadow-soft">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 px-1">
         <h2 className="font-rounded text-xl font-extrabold text-ink [overflow-wrap:anywhere]">{t("plantAnalysis.title")}</h2>
         {recommendationRefreshState?.status === "loading" ? (
           <span className="rounded-full bg-[#eef5e8] px-3 py-1 text-xs font-extrabold text-[#4f6946]">{userProvidedSpecies ? t("plantAnalysis.userSpeciesRefreshLoading") : t("plantAnalysis.refreshingInline")}</span>
@@ -738,27 +740,27 @@ export function PlantAnalysisSection({
         ) : null}
       </div>
       {recommendationRefreshState?.status === "error" ? (
-        <div className="mx-1 mt-2 rounded-[16px] bg-[#fff0e6] p-3 text-sm leading-5 text-[#8a5b24]">
+        <div className="mx-1 mt-3 rounded-[18px] bg-[#fff0e6] p-3.5 text-[15px] font-medium leading-6 text-[#8a5b24]">
           <p>{recommendationRefreshState.error ?? t("plantAnalysis.refreshFailedInline")}</p>
           {onRetryRecommendationRefresh ? (
-            <button type="button" onClick={onRetryRecommendationRefresh} className="mt-2 min-h-9 rounded-[14px] bg-white/75 px-3 text-xs font-extrabold text-[#6f4e20]">
+            <button type="button" onClick={onRetryRecommendationRefresh} className="mt-3 min-h-10 rounded-[15px] bg-white/80 px-3 text-sm font-extrabold text-[#6f4e20]">
               {t("common.tryAgain")}
             </button>
           ) : null}
         </div>
       ) : null}
       {hasPendingBaselineQuestions ? (
-        <p className="mx-1 mt-2 rounded-[16px] bg-[#eef5e8] p-3 text-sm font-bold leading-5 text-[#4f6946]">{t("plantAnalysis.pendingBaselineQuestions")}</p>
+        <p className="mx-1 mt-3 rounded-[18px] bg-[#eef5e8] p-3.5 text-[15px] font-semibold leading-6 text-[#4f6946]">{t("plantAnalysis.pendingBaselineQuestions")}</p>
       ) : null}
-      <div className="mt-3 grid gap-2">
-        <div className="min-w-0 rounded-[22px] bg-[#eef5e8] p-3">
-          <p className="text-sm font-extrabold leading-5 text-[#355f3d] [overflow-wrap:anywhere]">{view.keyTakeaway}</p>
+      <div className="mt-4 grid gap-3">
+        <div className="min-w-0 rounded-[24px] bg-[#eef5e8] p-4">
+          <p className="text-base font-extrabold leading-6 text-[#355f3d] [overflow-wrap:anywhere]">{view.keyTakeaway}</p>
         </div>
 
         {view.meaningfulObservations.length ? (
-          <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
-            <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.observations")}</p>
-            <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f] [overflow-wrap:anywhere]">
+          <div className="min-w-0 rounded-[22px] bg-white/70 p-4">
+            <p className="text-[13px] font-bold text-[#8f877c]">{t("plantAnalysis.observations")}</p>
+            <ul className="mt-2.5 grid gap-2 text-[15px] font-medium leading-6 text-[#5f594f] [overflow-wrap:anywhere]">
               {view.meaningfulObservations.map((item) => (
                 <li key={item}>{item}</li>
               ))}
@@ -767,15 +769,15 @@ export function PlantAnalysisSection({
         ) : null}
 
         {view.likelyExplanation ? (
-          <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
-            <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.mostLikelyCause")}</p>
-            <p className="mt-2 text-sm font-bold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{view.likelyExplanation}</p>
+          <div className="min-w-0 rounded-[22px] bg-white/70 p-4">
+            <p className="text-[13px] font-bold text-[#8f877c]">{t("plantAnalysis.mostLikelyCause")}</p>
+            <p className="mt-2.5 text-[15px] font-medium leading-6 text-[#4f4940] [overflow-wrap:anywhere]">{view.likelyExplanation}</p>
           </div>
         ) : null}
 
-        <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
-          <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.currentAction")}</p>
-          <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f] [overflow-wrap:anywhere]">
+        <div className="min-w-0 rounded-[22px] bg-white/70 p-4">
+          <p className="text-[13px] font-bold text-[#8f877c]">{t("plantAnalysis.currentAction")}</p>
+          <ul className="mt-2.5 grid gap-2 text-[15px] font-semibold leading-6 text-[#5f594f] [overflow-wrap:anywhere]">
             {view.activeActions.map((action) => (
               <li key={action}>{action}</li>
             ))}
@@ -783,9 +785,9 @@ export function PlantAnalysisSection({
         </div>
 
         {view.whatNotToDo.length ? (
-          <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
-            <p className="text-xs font-bold uppercase text-[#a09a90]">{t("plantAnalysis.whatNotToDo")}</p>
-            <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#5f594f] [overflow-wrap:anywhere]">
+          <div className="min-w-0 rounded-[22px] bg-white/70 p-4">
+            <p className="text-[13px] font-bold text-[#8f877c]">{t("plantAnalysis.whatNotToDo")}</p>
+            <ul className="mt-2.5 grid gap-2 text-[15px] font-medium leading-6 text-[#5f594f] [overflow-wrap:anywhere]">
               {view.whatNotToDo.map((action) => (
                 <li key={action}>{action}</li>
               ))}
@@ -794,9 +796,10 @@ export function PlantAnalysisSection({
         ) : null}
 
         {view.followUp ? (
-          <div className="min-w-0 rounded-[20px] bg-white/65 p-3">
-            <p className="text-sm font-extrabold leading-5 text-[#4f4940] [overflow-wrap:anywhere]">{view.followUp.question}</p>
-            <p className="mt-1 text-xs font-bold leading-4 text-[#8a8378] [overflow-wrap:anywhere]">{view.followUp.reason}</p>
+          <div className="min-w-0 rounded-[22px] bg-white/70 p-4">
+            <p className="text-base font-extrabold leading-6 text-[#4f4940] [overflow-wrap:anywhere]">{view.followUp.question}</p>
+            <p className="mt-2 text-[15px] font-medium leading-6 text-[#756d62] [overflow-wrap:anywhere]">{view.followUp.reason}</p>
+            <div className="mt-3">
             <AnswerChips
               options={view.followUp.options}
               getKey={(option) => `${view.followUp!.hypothesis}:${option.result}`}
@@ -805,15 +808,16 @@ export function PlantAnalysisSection({
               disabled={Boolean(savingAnswerKey)}
               onSelect={(option) => void saveFollowUp(view.followUp!.hypothesis, option.status, option.result)}
             />
-            {savingAnswerKey ? <p className="mt-3 text-xs font-bold text-[#8a8378]">{t("plantAnalysis.updatingRecommendations")}</p> : null}
-            {answerError ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-bold leading-5 text-[#9b2c3e]">{answerError}</p> : null}
+            </div>
+            {savingAnswerKey ? <p className="mt-3 text-sm font-semibold text-[#7b7469]">{t("plantAnalysis.updatingRecommendations")}</p> : null}
+            {answerError ? <p className="mt-3 rounded-[16px] bg-[#fdeaf0] p-3 text-sm font-semibold leading-5 text-[#9b2c3e]">{answerError}</p> : null}
           </div>
         ) : null}
 
         {view.answerConclusions.length ? (
-          <details className="min-w-0 rounded-[20px] bg-[#eef5e8] p-3">
-            <summary className="cursor-pointer text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.checkedFacts")}</summary>
-            <ul className="mt-2 grid gap-1.5 text-sm font-bold leading-5 text-[#4f6946] [overflow-wrap:anywhere]">
+          <details className="min-w-0 rounded-[22px] bg-[#eef5e8] p-4">
+            <summary className="cursor-pointer text-[13px] font-bold text-[#6f8c62]">{t("plantAnalysis.checkedFacts")}</summary>
+            <ul className="mt-3 grid gap-2 text-[15px] font-medium leading-6 text-[#4f6946] [overflow-wrap:anywhere]">
               {view.answerConclusions.map((fact) => (
                 <li key={fact} className="flex gap-2">
                   <Check aria-hidden="true" size={16} className="mt-0.5 shrink-0" />

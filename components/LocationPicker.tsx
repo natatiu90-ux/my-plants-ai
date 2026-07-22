@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import type { Plant } from "@/types/plant";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
@@ -20,41 +21,52 @@ export function LocationPicker({
   const { t } = useI18n();
   const { homes, rooms } = usePlantStore();
   const filteredRooms = rooms.filter((room) => (homeId ? room.homeId === homeId : !room.homeId));
+  const effectiveRoomId = homeId && !filteredRooms.some((room) => room.id === roomId) ? filteredRooms[0]?.id : roomId;
+  const fieldClassName = "mt-2 min-h-[56px] w-full rounded-[20px] border border-[#efe6d8] bg-white/85 px-4 text-base font-medium text-[#4f4940] outline-none focus:border-[#c7d9b8]";
+  const labelClassName = "block min-w-0 text-sm font-extrabold text-[#4f4940]";
+
+  useEffect(() => {
+    if (homeId && effectiveRoomId && effectiveRoomId !== roomId) {
+      onChange({ homeId, roomId: effectiveRoomId, positionInRoom });
+    }
+  }, [effectiveRoomId, homeId, onChange, positionInRoom, roomId]);
 
   return (
-    <div className="grid gap-3">
-      <label className="block min-w-0 text-sm font-extrabold text-[#4f4940]">
+    <div className="grid gap-5">
+      <label className={labelClassName}>
         {t("homeContext.home")}
         <select
           value={homeId ?? ""}
           onChange={(event) => {
             const nextHomeId = event.target.value || undefined;
             const nextRoom = roomId ? rooms.find((room) => room.id === roomId) : undefined;
+            const firstRoomInHome = nextHomeId ? rooms.find((room) => room.homeId === nextHomeId) : undefined;
             onChange({
               homeId: nextHomeId,
-              roomId: nextHomeId && nextRoom?.homeId === nextHomeId ? roomId : undefined,
-              positionInRoom: nextHomeId && nextRoom?.homeId === nextHomeId ? positionInRoom : undefined
+              roomId: nextHomeId ? (nextRoom?.homeId === nextHomeId ? roomId : firstRoomInHome?.id) : undefined,
+              positionInRoom: nextHomeId && (nextRoom?.homeId === nextHomeId || firstRoomInHome) ? positionInRoom : undefined
             });
           }}
-          className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none"
+          className={fieldClassName}
         >
           <option value="">{t("homeContext.noHome")}</option>
           {homes.map((home) => (
-            <option key={home.id} value={home.id}>
+            <option key={home.id} value={home.id} disabled={!rooms.some((room) => room.homeId === home.id)}>
               {home.name}
             </option>
           ))}
         </select>
       </label>
 
-      <label className="block min-w-0 text-sm font-extrabold text-[#4f4940]">
+      <label className={labelClassName}>
         {t("homeContext.room")}
         <select
-          value={roomId ?? ""}
+          value={effectiveRoomId ?? ""}
           onChange={(event) => onChange({ homeId, roomId: event.target.value || undefined, positionInRoom: event.target.value ? positionInRoom : undefined })}
-          className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none"
+          disabled={Boolean(homeId && !filteredRooms.length)}
+          className={`${fieldClassName} disabled:opacity-60`}
         >
-          <option value="">{t("homeContext.noRoom")}</option>
+          {!homeId ? <option value="">{t("homeContext.noRoom")}</option> : null}
           {filteredRooms.map((room) => (
             <option key={room.id} value={room.id}>
               {room.name}
@@ -63,13 +75,13 @@ export function LocationPicker({
         </select>
       </label>
 
-      <label className="block min-w-0 text-sm font-extrabold text-[#4f4940]">
+      <label className={labelClassName}>
         {t("homeContext.position")}
         <select
           value={positionInRoom ?? ""}
-          onChange={(event) => onChange({ homeId, roomId, positionInRoom: (event.target.value || undefined) as Plant["positionInRoom"] })}
-          disabled={!roomId}
-          className="mt-2 min-h-12 w-full rounded-[18px] bg-white/80 px-4 text-base outline-none disabled:opacity-60"
+          onChange={(event) => onChange({ homeId, roomId: effectiveRoomId, positionInRoom: (event.target.value || undefined) as Plant["positionInRoom"] })}
+          disabled={!effectiveRoomId}
+          className={`${fieldClassName} disabled:opacity-60`}
         >
           <option value="">{t("homeContext.noPosition")}</option>
           {positionOptions.map((option) => (

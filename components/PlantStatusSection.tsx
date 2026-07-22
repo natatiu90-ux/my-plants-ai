@@ -31,13 +31,13 @@ export function PlantStatusSection({
   const message = hasActiveQuestion ? t("plantAnalysis.needsOneFact") : t(healthStatus.messageKey);
 
   return (
-    <section className="mt-4 min-w-0 rounded-[28px] bg-[#fffaf3] p-5 shadow-soft">
-      {commonName ? <p className="text-[13px] italic leading-5 text-[#9a9aa3] [overflow-wrap:anywhere]">{commonName}</p> : null}
-      {plant.scientificName ? <p className="mt-0.5 text-[13px] italic leading-5 text-[#b0a89d] [overflow-wrap:anywhere]">{plant.scientificName}</p> : null}
-      <div className="mt-3">
+    <section className="mt-5 min-w-0 rounded-[30px] bg-[#fffaf3] p-5 shadow-soft">
+      {commonName ? <p className="text-[14px] font-medium italic leading-5 text-[#81796f] [overflow-wrap:anywhere]">{commonName}</p> : null}
+      {plant.scientificName ? <p className="mt-1 text-[13px] italic leading-5 text-[#8f877c] [overflow-wrap:anywhere]">{plant.scientificName}</p> : null}
+      <div className="mt-4">
         <StatusBadge label={t(healthStatus.labelKey)} status={healthStatus.status} />
       </div>
-      <p className="mt-4 text-[15px] leading-6 text-[#4a4a54] [overflow-wrap:anywhere]">{plant.notes || message}</p>
+      <p className="mt-4 text-[15px] font-medium leading-6 text-[#4a4a54] [overflow-wrap:anywhere]">{plant.notes || message}</p>
     </section>
   );
 }

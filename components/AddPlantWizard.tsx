@@ -1757,21 +1757,21 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                   )}
                 </div>
                 {shouldExplainFirstHome ? (
-                  <p className="rounded-[18px] bg-white/70 p-3 text-sm leading-5 text-[#6f675d]">{t("addPlant.firstHomeHint")}</p>
+                  <p className="rounded-[20px] bg-white/70 p-4 text-[15px] font-medium leading-6 text-[#6f675d]">{t("addPlant.firstHomeHint")}</p>
                 ) : null}
-                <button type="button" onClick={() => openPicker("room")} className="rounded-[20px] bg-white/70 p-3 text-left">
-                  <p className="text-xs font-bold text-[#a09a90]">{t("homeContext.home")}</p>
-                  <div className="mt-1 flex items-center justify-between gap-3">
-                    <p className="font-semibold text-[#3f3b35]">{selectedHomeName}</p>
+                <button type="button" onClick={() => openPicker("room")} className="rounded-[22px] bg-white/70 p-4 text-left">
+                  <p className="text-[13px] font-bold text-[#8f877c]">{t("homeContext.home")}</p>
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <p className="text-base font-semibold text-[#3f3b35]">{selectedHomeName}</p>
                     <span className="shrink-0 text-sm font-extrabold text-[#2d7a4f]">
                       {homeId ? t("addPlant.change") : t("addPlant.select")}
                     </span>
                   </div>
                 </button>
-                <button type="button" onClick={() => openPicker("room")} className="rounded-[20px] bg-white/70 p-3 text-left">
-                  <p className="text-xs font-bold text-[#a09a90]">{t("homeContext.room")}</p>
-                  <div className="mt-1 flex items-center justify-between gap-3">
-                    <p className="font-semibold text-[#3f3b35]">{selectedRoomName}</p>
+                <button type="button" onClick={() => openPicker("room")} className="rounded-[22px] bg-white/70 p-4 text-left">
+                  <p className="text-[13px] font-bold text-[#8f877c]">{t("homeContext.room")}</p>
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <p className="text-base font-semibold text-[#3f3b35]">{selectedRoomName}</p>
                     <span className="shrink-0 text-sm font-extrabold text-[#2d7a4f]">
                       {roomId || roomKey ? t("addPlant.change") : t("addPlant.select")}
                     </span>
@@ -1922,10 +1922,10 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
       ) : null}
       {activePicker === "room" ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#1c1c1e]/20 px-4 pb-4 backdrop-blur-[2px] sm:items-center sm:pb-0">
-          <div role="dialog" aria-modal="true" className="w-full max-w-[390px] rounded-[28px] bg-[#fffaf3] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]">
+          <div role="dialog" aria-modal="true" className="w-full max-w-[390px] rounded-[30px] bg-[#fffaf3] p-6 shadow-[0_20px_60px_rgba(0,0,0,0.16)]">
             <h2 className="font-rounded text-2xl font-extrabold text-ink">{t("addPlant.locationLabel")}</h2>
-            {shouldExplainFirstHome ? <p className="mt-2 text-sm leading-5 text-[#6f675d]">{t("addPlant.firstHomeHint")}</p> : null}
-            <div className="mt-4">
+            {shouldExplainFirstHome ? <p className="mt-3 text-[15px] font-medium leading-6 text-[#6f675d]">{t("addPlant.firstHomeHint")}</p> : null}
+            <div className="mt-6">
               <LocationPicker
                 homeId={homeId}
                 roomId={roomId}
@@ -1953,7 +1953,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             <button
               type="button"
               onClick={() => setActivePicker(null)}
-              className="mt-3 min-h-12 w-full rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]"
+              className="mt-5 min-h-12 w-full rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]"
             >
               {t("common.done")}
             </button>
