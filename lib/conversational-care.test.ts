@@ -130,6 +130,33 @@ const unknownHealthy = deriveConversationalCareState({
 });
 assert.equal(unknownHealthy.enabled, false, "unknown but visually healthy plants should not get an alarming plan");
 
+const localizedCommonNameShape = deriveConversationalCareState({
+  analysis: analysis(
+    { condition: "needs_attention" },
+    {
+      commonName: { en: "Unknown plant", ru: "Неизвестное растение" },
+      detectedSpecies: null,
+      scientificName: null,
+      confidence: 0.35,
+      plantStatus: "needs_attention",
+      urgency: "soon",
+      visualEvidenceSnapshot: {
+        concerns: ["dry branches"],
+        affectedParts: ["branches"],
+        severity: "moderate",
+        evidenceConfidence: "low",
+        imageRolesUsed: ["overview"],
+        speciesCandidates: ["Woody shrub"]
+      }
+    }
+  ),
+  plant: { ...plant, speciesName: "Растение, которое я изучаю", scientificName: undefined },
+  milestones: noMilestones,
+  hypothesisResolutions: noResolutions,
+  locale: "ru"
+});
+assert.equal(localizedCommonNameShape.enabled, true, "localized commonName objects from Stage 1 must not crash Plant Detail");
+
 const pruning = deriveConversationalCareState({
   analysis: analysis(
     { recommendations: [{ type: "care", en: "Prune only fully dry branches.", ru: "Обрежь только полностью сухие ветки." }] },

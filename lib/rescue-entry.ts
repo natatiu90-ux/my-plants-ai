@@ -9,8 +9,18 @@ export type RescueEntryAnalysisSignal = {
   rawResult?: unknown;
 };
 
-export function isUnknownPlantName(value: string | null | undefined) {
-  const normalized = cleanPlantName(value).toLocaleLowerCase();
+function nameFromUnknown(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const localized = value as { en?: unknown; ru?: unknown };
+    if (typeof localized.en === "string") return localized.en;
+    if (typeof localized.ru === "string") return localized.ru;
+  }
+  return "";
+}
+
+export function isUnknownPlantName(value: unknown) {
+  const normalized = cleanPlantName(nameFromUnknown(value)).toLocaleLowerCase();
   return !normalized || normalized === "unknown plant" || normalized === "unknown" || normalized === "неизвестное растение" || normalized === "неизвестно";
 }
 
