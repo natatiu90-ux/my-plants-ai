@@ -2,6 +2,8 @@ import type { HomeContext, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypo
 import type { RecommendationImpactLevel, RecommendationRevisionReasonType } from "@/types/plant";
 import { shouldStartRecommendationEnrichment } from "./plant-analysis-pipeline";
 import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION, VISUAL_EVIDENCE_STALE_DAYS } from "./recommendation-version";
+import type { HomeWeatherContext } from "./weather-context";
+import { summarizedWeatherForSnapshot, weatherChangedSubstantially } from "./weather-context";
 
 function timestamp(value: string | undefined | null) {
   if (!value) {
@@ -105,6 +107,7 @@ export type RecommendationContextSnapshot = {
     hasAirConditioning?: boolean;
     updatedAt?: string;
   };
+  weather?: ReturnType<typeof summarizedWeatherForSnapshot>;
   room?: {
     id: string;
     name: string;
@@ -131,6 +134,7 @@ export type RecommendationChangedContext = {
     type: boolean;
     humidity: boolean;
     airConditioning: boolean;
+    weather: boolean;
   };
   room: {
     assignment: boolean;
@@ -163,7 +167,7 @@ export type RecommendationRevisionSaveResult = {
 };
 
 const emptyChangedContext = (): RecommendationChangedContext => ({
-  home: { city: false, country: false, type: false, humidity: false, airConditioning: false },
+  home: { city: false, country: false, type: false, humidity: false, airConditioning: false, weather: false },
   room: { assignment: false, lightLevel: false, directSun: false, temperature: false, airConditioning: false },
   plant: { species: false, positionInRoom: false, lightCondition: false },
   care: { watering: false, repotting: false, soilCondition: false, history: false },
@@ -177,6 +181,7 @@ export function buildRecommendationContextSnapshot(input: {
   milestones: PlantMilestone[];
   careEvents: PlantCareEvent[];
   hypothesisResolutions: PlantHypothesisResolution[];
+  weather?: HomeWeatherContext | null;
 }): RecommendationContextSnapshot {
   const home = input.plant.homeId ? input.homes.find((item) => item.id === input.plant.homeId) : undefined;
   const room = input.plant.roomId ? input.rooms.find((item) => item.id === input.plant.roomId) : undefined;
@@ -206,6 +211,7 @@ export function buildRecommendationContextSnapshot(input: {
           updatedAt: home.updatedAt
         }
       : undefined,
+    weather: summarizedWeatherForSnapshot(input.weather),
     room: room
       ? {
           id: room.id,
@@ -250,6 +256,7 @@ export function changedContextSince(
   const previousHome = previous?.home && typeof previous.home === "object" ? (previous.home as Record<string, unknown>) : undefined;
   const previousPlant = previous?.plant && typeof previous.plant === "object" ? (previous.plant as Record<string, unknown>) : undefined;
   const previousHistory = previous?.history && typeof previous.history === "object" ? (previous.history as Record<string, unknown>) : undefined;
+  const previousWeather = previous?.weather && typeof previous.weather === "object" ? previous.weather : undefined;
   const changes = emptyChangedContext();
 
   changes.home.city = previousHome?.city !== current.home?.city;
@@ -257,6 +264,7 @@ export function changedContextSince(
   changes.home.type = previousHome?.type !== current.home?.type;
   changes.home.humidity = previousHome?.humidityLevel !== current.home?.humidityLevel;
   changes.home.airConditioning = previousHome?.hasAirConditioning !== current.home?.hasAirConditioning;
+  changes.home.weather = weatherChangedSubstantially(previousWeather, current.weather as HomeWeatherContext | null | undefined);
 
   changes.room.assignment = previousRoom?.id !== current.room?.id;
   changes.room.lightLevel = previousRoom?.lightLevel !== current.room?.lightLevel;
@@ -291,6 +299,7 @@ export function reasonTypeFromChangedContext(changedContext: RecommendationChang
   if (changedContext.room.directSun) matched.push("direct_sun_changed");
   if (changedContext.room.temperature) matched.push("temperature_changed");
   if (changedContext.home.humidity) matched.push("humidity_changed");
+  if (changedContext.home.weather) matched.push("temperature_changed");
   if (changedContext.home.airConditioning || changedContext.room.airConditioning) matched.push("air_conditioning_changed");
   if (changedContext.home.city || changedContext.home.country || changedContext.home.type) matched.push("home_changed");
   if (changedContext.care.soilCondition) matched.push("soil_changed");
@@ -315,6 +324,7 @@ export function staleReasonKeys(input: {
   if (input.changedContext.room.lightLevel) reasons.push("light_changed");
   if (input.changedContext.room.directSun) reasons.push("direct_sun_changed");
   if (input.changedContext.home.humidity || input.changedContext.home.city || input.changedContext.home.country || input.changedContext.home.type) reasons.push("home_changed");
+  if (input.changedContext.home.weather) reasons.push("temperature_changed");
   if (input.changedContext.care.soilCondition) reasons.push("soil_changed");
   if (input.changedContext.care.watering) reasons.push("watering_changed");
   if (input.changedContext.care.repotting || input.changedContext.care.history) reasons.push("care_history_changed");
@@ -433,6 +443,7 @@ export function isRecommendationStale(input: {
   milestones: PlantMilestone[];
   careEvents: PlantCareEvent[];
   hypothesisResolutions: PlantHypothesisResolution[];
+  weather?: HomeWeatherContext | null;
 }) {
   if (input.currentRevision?.isCurrent) {
     const currentSnapshot = buildRecommendationContextSnapshot(input);

@@ -28,6 +28,7 @@
   "homeContext.later": "Later",
   "homeContext.home": "Home",
   "homeContext.noHome": "No home selected",
+  "homeContext.weatherHint": "Choose a home so I can account for local weather and make care advice more precise.",
   "homeContext.room": "Room",
   "homeContext.rooms": "Rooms",
   "homeContext.noRoom": "No room selected",

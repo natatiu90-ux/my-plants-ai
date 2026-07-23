@@ -67,7 +67,16 @@ const snapshot = buildRecommendationContextSnapshot({
   rooms: [room],
   milestones: [],
   careEvents: [],
-  hypothesisResolutions: []
+  hypothesisResolutions: [],
+  weather: {
+    status: "available",
+    source: "open_meteo",
+    fetchedAt: "2026-07-23T08:00:00.000Z",
+    heatLevel: "hot",
+    forecastMaxTemperatureC: 35,
+    humidityPercent: 30,
+    hotDays: 2
+  }
 });
 
 const revision: PlantRecommendationRevision = {
@@ -79,7 +88,7 @@ const revision: PlantRecommendationRevision = {
   reasonType: "manual_refresh",
   reasonText: "Recommendations checked.",
   changedContext: {
-    home: { city: false, country: false, type: false, humidity: false, airConditioning: false },
+    home: { city: false, country: false, type: false, humidity: false, airConditioning: false, weather: false },
     room: { assignment: false, lightLevel: false, directSun: false, temperature: false, airConditioning: false },
     plant: { positionInRoom: false, lightCondition: false },
     care: { watering: false, repotting: false, soilCondition: false, history: false },
@@ -118,13 +127,62 @@ const changedSnapshot = buildRecommendationContextSnapshot({
   rooms: [darkerRoom],
   milestones: [],
   careEvents: [],
-  hypothesisResolutions: []
+  hypothesisResolutions: [],
+  weather: {
+    status: "available",
+    source: "open_meteo",
+    fetchedAt: "2026-07-23T08:00:00.000Z",
+    heatLevel: "hot",
+    forecastMaxTemperatureC: 35,
+    humidityPercent: 30,
+    hotDays: 2
+  }
 });
 const changedContext = changedContextSince(revision.contextSnapshot, changedSnapshot);
 assert.equal(changedContext.room.lightLevel, true);
 assert.equal(reasonTypeFromChangedContext(changedContext), "light_changed");
 assert.deepEqual(staleReasonKeys({ changedContext }), ["light_changed"]);
 assert.equal(impactLabelKey("minor"), "plantAnalysis.impactMinor");
+
+const smallWeatherChange = buildRecommendationContextSnapshot({
+  plant,
+  homes: [home],
+  rooms: [room],
+  milestones: [],
+  careEvents: [],
+  hypothesisResolutions: [],
+  weather: {
+    status: "available",
+    source: "open_meteo",
+    fetchedAt: "2026-07-23T10:00:00.000Z",
+    heatLevel: "hot",
+    forecastMaxTemperatureC: 36,
+    humidityPercent: 31,
+    hotDays: 2
+  }
+});
+assert.equal(changedContextSince(snapshot, smallWeatherChange).home.weather, false, "1-2 degree weather changes should not make recommendations stale");
+
+const majorWeatherChange = buildRecommendationContextSnapshot({
+  plant,
+  homes: [home],
+  rooms: [room],
+  milestones: [],
+  careEvents: [],
+  hypothesisResolutions: [],
+  weather: {
+    status: "available",
+    source: "open_meteo",
+    fetchedAt: "2026-07-23T10:00:00.000Z",
+    heatLevel: "extreme",
+    forecastMaxTemperatureC: 41,
+    humidityPercent: 22,
+    hotDays: 4
+  }
+});
+const weatherChangedContext = changedContextSince(snapshot, majorWeatherChange);
+assert.equal(weatherChangedContext.home.weather, true, "a heat-wave level change should make recommendations stale");
+assert.equal(reasonTypeFromChangedContext(weatherChangedContext), "temperature_changed");
 assert.equal(
   recommendationRevisionIsUnchanged({
     currentRevision: revision,

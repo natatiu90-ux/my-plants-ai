@@ -95,6 +95,23 @@ assert.equal(eveningContext?.room?.directSun, "evening");
 assert.equal(eveningContext?.room?.temperatureRelative, "warm");
 assert.equal(eveningContext?.room?.hasAirConditioning, "no");
 
+const hotEveningContext = buildPlantEnvironmentContext({
+  plant: { ...plant, roomId: eveningSunRoom.id, positionInRoom: "near_window" },
+  homes: [home],
+  rooms: [eveningSunRoom],
+  weather: {
+    status: "available",
+    source: "open_meteo",
+    fetchedAt: "2026-07-23T10:00:00.000Z",
+    heatLevel: "hot",
+    forecastMaxTemperatureC: 35,
+    humidityPercent: 30,
+    hotDays: 2
+  }
+});
+assert.equal(hotEveningContext?.weather?.heatLevel, "hot");
+assert.equal(hotEveningContext?.weather?.dryingRisk, "high");
+
 const legacyContext = buildPlantEnvironmentContext({
   plant: { ...plant, homeId: undefined, roomId: undefined, roomKey: "rooms.kitchen" },
   homes: [],

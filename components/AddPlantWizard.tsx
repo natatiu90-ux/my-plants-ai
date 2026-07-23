@@ -20,6 +20,7 @@ import {
 import { appBuildStorageKey, appBuildVersion, isStandalonePwa } from "@/lib/app-version";
 import { inspectImageDisplay, normalizeImageBlob, readJpegExifOrientation } from "@/lib/client-image-normalization";
 import { buildPlantEnvironmentContext, formatEnvironmentContextForPrompt } from "@/lib/home-room-context";
+import { loadHomeWeatherContext } from "@/lib/weather-context";
 import { INITIAL_ADD_FAST_ANALYSIS_MODE } from "@/lib/plant-analysis-pipeline";
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
 import { plantCreationDiagnosticFromError, type PlantCreationDiagnostic, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
@@ -952,6 +953,13 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
         formData.append("locale", locale);
         formData.append("analysisMode", INITIAL_ADD_FAST_ANALYSIS_MODE);
         const selectedRoom = roomKey && !roomKey.startsWith("rooms.") ? analysisContext.rooms.find((room) => room.id === roomKey) : undefined;
+        const selectedHome = selectedRoom?.homeId ? analysisContext.homes.find((home) => home.id === selectedRoom.homeId) : undefined;
+        const weather = selectedHome
+          ? await Promise.race([
+              loadHomeWeatherContext(selectedHome, abortController.signal),
+              new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 1200))
+            ]).catch(() => null)
+          : null;
         const environmentContext = buildPlantEnvironmentContext({
           plant: selectedRoom
             ? {
@@ -968,7 +976,8 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
             : undefined,
           homes: analysisContext.homes,
           rooms: analysisContext.rooms,
-          legacyRoomName: selectedRoom ? selectedRoom.name : undefined
+          legacyRoomName: selectedRoom ? selectedRoom.name : undefined,
+          weather
         });
         formData.append("environmentContext", formatEnvironmentContextForPrompt(environmentContext));
         requestStartedAt = Date.now();
@@ -1767,6 +1776,7 @@ export function AddPlantWizard({ onClose }: { onClose: () => void }) {
                       {homeId ? t("addPlant.change") : t("addPlant.select")}
                     </span>
                   </div>
+                  {!homeId ? <p className="mt-2 text-[13px] font-medium leading-5 text-[#7a7166]">{t("homeContext.weatherHint")}</p> : null}
                 </button>
                 <button type="button" onClick={() => openPicker("room")} className="rounded-[28px] bg-white/80 p-4 text-left">
                   <p className="text-xs font-bold uppercase text-[#a09a90]">{t("homeContext.room")}</p>

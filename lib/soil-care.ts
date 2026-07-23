@@ -1,5 +1,7 @@
 import { addDays, toDateKey } from "./date-format";
-import type { Plant, PlantHypothesisResolution, PlantMilestone, SoilCheckResult } from "@/types/plant";
+import type { Plant, PlantHypothesisResolution, PlantMilestone, Room, SoilCheckResult } from "@/types/plant";
+import type { HomeWeatherContext } from "./weather-context";
+import { adjustSoilCheckDaysForWeather, soilDryingRisk } from "./weather-context";
 
 export type SoilCareProfile = "drought_tolerant" | "balanced" | "moisture_loving";
 
@@ -81,11 +83,15 @@ export function deriveNextPlantAction(input: {
   profile?: SoilCareProfile;
   milestones?: PlantMilestone[];
   hypothesisResolutions?: PlantHypothesisResolution[];
+  room?: Room | null;
+  weather?: HomeWeatherContext | null;
 }): NextPlantActionResolution {
   const profile = input.profile ?? soilCareProfileForPlant(input.plant);
   const lastWateredDaysAgo = daysSince(input.plant.lastWateredAt);
   const recentRepotting = wasRepottedRecently(input.milestones ?? []);
   const drainageConcern = hasPoorDrainage(input.hypothesisResolutions ?? []);
+  const adjustCheckDays = (days: number | null) =>
+    adjustSoilCheckDaysForWeather(days, { weather: input.weather, plant: input.plant, room: input.room });
 
   if (input.soilResult === "dry") {
     const wateredVeryRecently = lastWateredDaysAgo != null && lastWateredDaysAgo <= 2;
@@ -102,7 +108,7 @@ export function deriveNextPlantAction(input: {
       return {
         status: "healthy",
         nextAction: null,
-        checkInDays: 5,
+        checkInDays: adjustCheckDays(5),
         replacementRecommendationId: "next_check_scheduled"
       };
     }
@@ -120,7 +126,7 @@ export function deriveNextPlantAction(input: {
     return {
       status: shouldWait ? "healthy" : "check_soon",
       nextAction: shouldWait ? null : "water",
-      checkInDays: shouldWait ? 2 : null,
+      checkInDays: shouldWait ? adjustCheckDays(2) : null,
       replacementRecommendationId: shouldWait ? "next_check_scheduled" : "water_after_soil_check"
     };
   }
@@ -129,7 +135,7 @@ export function deriveNextPlantAction(input: {
     return {
       status: "healthy",
       nextAction: null,
-      checkInDays: (profile === "drought_tolerant" ? 4 : profile === "moisture_loving" ? 2 : 3) + (recentRepotting ? 1 : 0),
+      checkInDays: adjustCheckDays((profile === "drought_tolerant" ? 4 : profile === "moisture_loving" ? 2 : 3) + (recentRepotting ? 1 : 0)),
       replacementRecommendationId: "next_check_scheduled"
     };
   }
@@ -138,7 +144,7 @@ export function deriveNextPlantAction(input: {
     return {
       status: drainageConcern || profile === "drought_tolerant" ? "check_soon" : "healthy",
       nextAction: null,
-      checkInDays: profile === "moisture_loving" && !drainageConcern ? 2 : 3,
+      checkInDays: adjustCheckDays(profile === "moisture_loving" && !drainageConcern ? 2 : 3),
       replacementRecommendationId: drainageConcern ? "check_drainage_after_wet_soil" : "next_check_scheduled"
     };
   }
@@ -146,7 +152,7 @@ export function deriveNextPlantAction(input: {
   return {
     status: "check_soon",
     nextAction: "check_soil",
-    checkInDays: null,
+    checkInDays: adjustCheckDays(2),
     replacementRecommendationId: "soil_check_guidance"
   };
 }
@@ -165,7 +171,15 @@ function displayName(plant: Plant, locale: "en" | "ru") {
   return locale === "ru" ? "этого растения" : "this plant";
 }
 
-function localizedMessage(plant: Plant, result: SoilCheckResult, days: number | null, nextAction: Plant["nextAction"], profile: SoilCareProfile, drainageConcern: boolean) {
+function localizedMessage(
+  plant: Plant,
+  result: SoilCheckResult,
+  days: number | null,
+  nextAction: Plant["nextAction"],
+  profile: SoilCareProfile,
+  drainageConcern: boolean,
+  heatRisk: ReturnType<typeof soilDryingRisk>
+) {
   const ruName = displayName(plant, "ru");
   const enName = displayName(plant, "en");
   const ruNext = days == null ? "" : ` Проверим снова через ${days} ${days === 1 ? "день" : days >= 2 && days <= 4 ? "дня" : "дней"}.`;
@@ -174,8 +188,14 @@ function localizedMessage(plant: Plant, result: SoilCheckResult, days: number | 
   if (result === "dry") {
     if (nextAction === "water") {
       return {
-        ru: `Для ${ruName} сухая почва означает, что пора полить.`,
-        en: `For ${enName}, dry soil means it is time to water.`
+        ru:
+          heatRisk === "high" || heatRisk === "elevated"
+            ? `Почва сухая, а жара ускоряет потерю влаги. Полей ${ruName} сейчас и убедись, что лишняя вода свободно уходит.`
+            : `Для ${ruName} сухая почва означает, что пора полить.`,
+        en:
+          heatRisk === "high" || heatRisk === "elevated"
+            ? `The soil is dry, and heat can make it lose moisture faster. Water ${enName} now and make sure excess water drains freely.`
+            : `For ${enName}, dry soil means it is time to water.`
       };
     }
     return {
@@ -185,6 +205,12 @@ function localizedMessage(plant: Plant, result: SoilCheckResult, days: number | 
   }
 
   if (result === "slightly_damp") {
+    if (heatRisk === "high" || heatRisk === "elevated") {
+      return {
+        ru: `Пока не поливай. Из-за жары проверь почву снова через ${days ?? 1} ${days === 1 ? "день" : days != null && days >= 2 && days <= 4 ? "дня" : "дней"}.`,
+        en: `Do not water yet. Because it is hot, check the soil again in ${days ?? 1} ${days === 1 ? "day" : "days"}.`
+      };
+    }
     if (profile === "drought_tolerant") {
       return {
         ru: `Для ${ruName} слегка влажная почва — пока рано для полива.${ruNext}`,
@@ -214,11 +240,13 @@ export function calculateSoilCheckCareResolution(
   plant: Plant,
   result: SoilCheckResult,
   milestones: PlantMilestone[],
-  hypothesisResolutions: PlantHypothesisResolution[]
+  hypothesisResolutions: PlantHypothesisResolution[],
+  context: { room?: Room | null; weather?: HomeWeatherContext | null } = {}
 ): SoilCheckCareResolution {
   const profile = soilCareProfileForPlant(plant);
   const drainageConcern = hasPoorDrainage(hypothesisResolutions);
-  const next = deriveNextPlantAction({ plant, soilResult: result, profile, milestones, hypothesisResolutions });
+  const next = deriveNextPlantAction({ plant, soilResult: result, profile, milestones, hypothesisResolutions, room: context.room, weather: context.weather });
+  const heatRisk = soilDryingRisk({ weather: context.weather, plant, room: context.room });
 
   return {
     profile,
@@ -228,6 +256,16 @@ export function calculateSoilCheckCareResolution(
     checkInDays: next.checkInDays,
     careScheduleStatus: "active",
     replacementRecommendationId: next.replacementRecommendationId,
-    message: localizedMessage(plant, result, next.checkInDays, next.nextAction, profile, drainageConcern)
+    message: localizedMessage(plant, result, next.checkInDays, next.nextAction, profile, drainageConcern, heatRisk)
   };
+}
+
+export function nextSoilCheckAfterWatering(input: {
+  plant: Plant;
+  room?: Room | null;
+  weather?: HomeWeatherContext | null;
+}) {
+  const profile = soilCareProfileForPlant(input.plant);
+  const baseDays = profile === "drought_tolerant" ? 5 : profile === "moisture_loving" ? 2 : 4;
+  return adjustSoilCheckDaysForWeather(baseDays, { weather: input.weather, plant: input.plant, room: input.room }) ?? baseDays;
 }

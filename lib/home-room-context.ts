@@ -1,4 +1,6 @@
 import type { HomeContext, Plant, Room } from "@/types/plant";
+import type { HomeWeatherContext } from "./weather-context";
+import { soilDryingRisk } from "./weather-context";
 
 export type LegacyRoomImportGroup = {
   id: string;
@@ -156,6 +158,7 @@ export function buildPlantEnvironmentContext(input: {
   homes: HomeContext[];
   rooms: Room[];
   legacyRoomName?: string;
+  weather?: HomeWeatherContext | null;
 }) {
   const plant = input.plant;
   const home = plant?.homeId ? input.homes.find((item) => item.id === plant.homeId) : undefined;
@@ -185,6 +188,20 @@ export function buildPlantEnvironmentContext(input: {
           directSun: room.directSun ?? null,
           temperatureRelative: room.temperatureRelative ?? null,
           hasAirConditioning: room.hasAirConditioning ?? null
+        }
+      : null,
+    weather: input.weather
+      ? {
+          status: input.weather.status,
+          heatLevel: input.weather.heatLevel,
+          forecastMaxTemperatureC: input.weather.forecastMaxTemperatureC ?? null,
+          humidityPercent: input.weather.humidityPercent ?? null,
+          hotDays: input.weather.hotDays ?? 0,
+          dryingRisk: soilDryingRisk({ weather: input.weather, plant, room }),
+          note:
+            input.weather.status === "available"
+              ? "Use weather as supporting context for soil-drying risk and check timing. Do not recommend watering from temperature alone."
+              : "Current weather unavailable; rely on room and care context."
         }
       : null,
     plantPosition: plant?.positionInRoom ?? null,

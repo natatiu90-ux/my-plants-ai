@@ -9,12 +9,13 @@ import { cleanPlantName, cleanScientificName, commonNameFromScientificName } fro
 import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION } from "@/lib/recommendation-version";
 import { recommendationRevisionIsUnchanged, type RecommendationChangedContext, type RecommendationContextSnapshot, type RecommendationRevisionSaveResult } from "@/lib/recommendation-refresh";
 import { PlantCreationError, plantCreationDiagnosticFromError, plantCreationError, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
-import { calculateSoilCheckCareResolution } from "@/lib/soil-care";
+import { calculateSoilCheckCareResolution, nextSoilCheckAfterWatering } from "@/lib/soil-care";
 import { baselineMilestoneType, findExistingBaselineMilestone } from "@/lib/care-baseline";
 import { soilCheckActionKey } from "@/lib/care-action-idempotency";
 import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
 import { shouldEnableRemindersForNewPlant } from "@/lib/new-plant-reminders";
 import { getNotificationSupport } from "@/lib/push-client";
+import { getCachedHomeWeatherContext } from "@/lib/weather-context";
 import type { HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, PlantRecommendationRevision, Room, SoilCheckResult } from "@/types/plant";
 import type { LegacyRoomImportGroup } from "@/lib/home-room-context";
 
@@ -1014,7 +1015,12 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
 
   const waterPlant = useCallback(
     async (plantId: string) => {
-      const nextCheckAt = toDateKey(addDays(new Date(), 4));
+      const currentPlant = state.plants.find((plant) => plant.id === plantId);
+      const currentRoom = currentPlant?.roomId ? state.rooms.find((room) => room.id === currentPlant.roomId) : undefined;
+      const currentHome = currentPlant?.homeId ? state.homes.find((home) => home.id === currentPlant.homeId) : undefined;
+      const weather = getCachedHomeWeatherContext(currentHome);
+      const checkInDays = currentPlant ? nextSoilCheckAfterWatering({ plant: currentPlant, room: currentRoom, weather }) : 4;
+      const nextCheckAt = toDateKey(addDays(new Date(), checkInDays));
       await repositories?.plants.markWatered(plantId, nextCheckAt);
       await repositories?.analyses.resolveLatestActiveRecommendation(plantId, { action: "watered", result: "watered" });
       await repositories?.careEvents.addCareEvent(plantId, { type: "watered" });
@@ -1080,7 +1086,13 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       const checkedAt = toDateKey(new Date());
       const plantMilestones = state.milestones.filter((milestone) => milestone.plantId === plantId);
       const plantHypothesisResolutions = state.hypothesisResolutions.filter((resolution) => resolution.plantId === plantId);
-      const resolution = calculateSoilCheckCareResolution(currentPlant, result, plantMilestones, plantHypothesisResolutions);
+      const currentRoom = currentPlant.roomId ? state.rooms.find((room) => room.id === currentPlant.roomId) : undefined;
+      const currentHome = currentPlant.homeId ? state.homes.find((home) => home.id === currentPlant.homeId) : undefined;
+      const weather = getCachedHomeWeatherContext(currentHome);
+      const resolution = calculateSoilCheckCareResolution(currentPlant, result, plantMilestones, plantHypothesisResolutions, {
+        room: currentRoom,
+        weather
+      });
       const savedSoilResolution =
         result === "not_sure"
           ? null
@@ -1368,7 +1380,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           currentRevision,
           contextSnapshot: input.contextSnapshot,
           changedContext: input.changedContext ?? {
-            home: { city: false, country: false, type: false, humidity: false, airConditioning: false },
+            home: { city: false, country: false, type: false, humidity: false, airConditioning: false, weather: false },
             room: { assignment: false, lightLevel: false, directSun: false, temperature: false, airConditioning: false },
             plant: { species: false, positionInRoom: false, lightCondition: false },
             care: { watering: false, repotting: false, soilCondition: false, history: false },

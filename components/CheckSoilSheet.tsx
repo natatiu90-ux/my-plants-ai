@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, X } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 import { calculateSoilCheckCareResolution } from "@/lib/soil-care";
-import type { Plant, PlantHypothesisResolution, PlantMilestone, SoilCheckResult } from "@/types/plant";
+import type { HomeWeatherContext } from "@/lib/weather-context";
+import type { Plant, PlantHypothesisResolution, PlantMilestone, Room, SoilCheckResult } from "@/types/plant";
 
 const soilOptions = [
   { value: "dry", labelKey: "checkSoil.dry" },
@@ -20,7 +21,9 @@ export function CheckSoilSheet({
   isSaving,
   plant,
   milestones,
-  hypothesisResolutions
+  hypothesisResolutions,
+  room,
+  weather
 }: {
   onClose: () => void;
   onWatered: () => void;
@@ -29,6 +32,8 @@ export function CheckSoilSheet({
   plant: Plant;
   milestones: PlantMilestone[];
   hypothesisResolutions: PlantHypothesisResolution[];
+  room?: Room | null;
+  weather?: HomeWeatherContext | null;
 }) {
   const { locale, t } = useI18n();
   const [choice, setChoice] = useState<SoilCheckResult | null>(null);
@@ -48,9 +53,9 @@ export function CheckSoilSheet({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
-  const resolution = choice ? calculateSoilCheckCareResolution(plant, choice, milestones, hypothesisResolutions) : null;
+  const resolution = choice ? calculateSoilCheckCareResolution(plant, choice, milestones, hypothesisResolutions, { room, weather }) : null;
   const messageForChoice = (nextChoice: SoilCheckResult) => {
-    const nextResolution = calculateSoilCheckCareResolution(plant, nextChoice, milestones, hypothesisResolutions);
+    const nextResolution = calculateSoilCheckCareResolution(plant, nextChoice, milestones, hypothesisResolutions, { room, weather });
     return nextResolution.message[locale];
   };
 

@@ -61,6 +61,7 @@ export function LocationPicker({
           </select>
           <ChevronsUpDown aria-hidden="true" size={20} className="-ml-10 mr-4 shrink-0 text-[#1f1f22]" />
         </span>
+        {!homeId ? <span className="mt-2 block text-[13px] font-medium leading-5 text-[#7a7166]">{t("homeContext.weatherHint")}</span> : null}
       </label>
 
       <label className={labelClassName}>

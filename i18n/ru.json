@@ -28,6 +28,7 @@
   "homeContext.later": "Позже",
   "homeContext.home": "Дом",
   "homeContext.noHome": "Дом не выбран",
+  "homeContext.weatherHint": "Укажите дом. Тогда я смогу учитывать местную погоду и делать рекомендации точнее.",
   "homeContext.room": "Комната",
   "homeContext.rooms": "Комнаты",
   "homeContext.noRoom": "Комната не выбрана",

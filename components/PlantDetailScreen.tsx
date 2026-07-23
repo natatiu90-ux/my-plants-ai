@@ -19,6 +19,7 @@ import { buildRecommendationContextSnapshot, changedContextSince, impactLabelKey
 import { recommendationRefreshReducer, recommendationRefreshStateForPlant, type RecommendationRefreshStatus } from "@/lib/recommendation-refresh-state";
 import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION } from "@/lib/recommendation-version";
 import { soilCheckResultFromClarificationAnswer } from "@/lib/soil-check-completion";
+import { loadHomeWeatherContext, type HomeWeatherContext } from "@/lib/weather-context";
 import { CareHistory } from "./CareHistory";
 import { CareDateEditor } from "./CareDateEditor";
 import { CareSummary } from "./CareSummary";
@@ -169,6 +170,12 @@ function recommendationRefreshReason(
       : `The care guidance now fits the home humidity: ${humidity}.`;
   }
 
+  if (changedContext.home.weather) {
+    return locale === "ru"
+      ? "Теперь совет учитывает жару и то, что почва может высыхать быстрее."
+      : "The advice now accounts for heat and faster soil drying.";
+  }
+
   if (changedContext.room.assignment && currentSnapshot.room?.name) {
     return locale === "ru"
       ? `Теперь совет лучше соответствует месту, где стоит растение: ${currentSnapshot.room.name}.`
@@ -253,6 +260,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const [baselineSaving, setBaselineSaving] = useState(false);
   const [sunlightSavingKey, setSunlightSavingKey] = useState<string | null>(null);
   const [photoAssessment, setPhotoAssessment] = useState<PhotoAssessmentState>({ status: "idle" });
+  const [weatherContext, setWeatherContext] = useState<HomeWeatherContext | null>(null);
   const [recommendationRefreshState, dispatchRecommendationRefresh] = useReducer(recommendationRefreshReducer, { status: "idle" });
   const visibleRecommendationRefreshState = recommendationRefreshStateForPlant(recommendationRefreshState, plantId);
   const loggedEvents = useRef(new Set<string>());
@@ -288,6 +296,33 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     setToast(null);
     dispatchRecommendationRefresh({ type: "reset", plantId });
   }, [plantId]);
+
+  useEffect(() => {
+    if (!plant?.homeId) {
+      setWeatherContext(null);
+      return;
+    }
+
+    const home = homes.find((item) => item.id === plant.homeId);
+    if (!home?.city) {
+      setWeatherContext(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    loadHomeWeatherContext(home, controller.signal)
+      .then((context) => {
+        if (!controller.signal.aborted && activePlantIdRef.current === plant.id) {
+          setWeatherContext(context);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted && activePlantIdRef.current === plant.id) {
+          setWeatherContext(null);
+        }
+      });
+    return () => controller.abort();
+  }, [homes, plant?.homeId, plant?.id]);
 
   useEffect(() => {
     if (visibleRecommendationRefreshState.status !== "success" && visibleRecommendationRefreshState.status !== "unchanged") {
@@ -391,7 +426,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     rooms,
     milestones,
     careEvents,
-    hypothesisResolutions
+    hypothesisResolutions,
+    weather: weatherContext
   });
   const currentChangedContext = changedContextSince(currentRecommendationRevision?.contextSnapshot, recommendationContextSnapshot, {
     previousPromptVersion: currentRecommendationRevision?.promptVersion,
@@ -408,7 +444,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           rooms,
           milestones,
           careEvents,
-          hypothesisResolutions
+          hypothesisResolutions,
+          weather: weatherContext
         })
     : false;
   const recommendationRefreshKey = JSON.stringify({
@@ -530,7 +567,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       formData.append("currentDetectedSpecies", [plant.speciesName, plant.scientificName].filter(Boolean).join(" "));
       formData.append("userProvidedSpecies", JSON.stringify(userProvidedSpeciesContext));
       formData.append("currentLightCondition", plant.lightConditionKey ? t(plant.lightConditionKey) : "");
-      formData.append("environmentContext", formatEnvironmentContextForPrompt(buildPlantEnvironmentContext({ plant, homes, rooms })));
+      formData.append("environmentContext", formatEnvironmentContextForPrompt(buildPlantEnvironmentContext({ plant, homes, rooms, weather: weatherContext })));
 
       const response = await fetch("/api/analyze-plant", { method: "POST", body: formData });
       const payload = await response.json().catch(() => null);
@@ -648,7 +685,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       formData.append("currentDetectedSpecies", [plant.speciesName, plant.scientificName].filter(Boolean).join(" "));
       formData.append("userProvidedSpecies", JSON.stringify(userProvidedSpeciesContext));
       formData.append("currentLightCondition", plant.lightConditionKey ? t(plant.lightConditionKey) : "");
-      formData.append("environmentContext", formatEnvironmentContextForPrompt(buildPlantEnvironmentContext({ plant, homes, rooms })));
+      formData.append("environmentContext", formatEnvironmentContextForPrompt(buildPlantEnvironmentContext({ plant, homes, rooms, weather: weatherContext })));
       const changedContext = changedContextSince(currentRecommendationRevision?.contextSnapshot, recommendationContextSnapshot, {
         previousPromptVersion: currentRecommendationRevision?.promptVersion,
         currentPromptVersion: RECOMMENDATION_PROMPT_VERSION,
@@ -908,6 +945,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           plant={plant}
           milestones={milestones}
           hypothesisResolutions={hypothesisResolutions}
+          room={assignedRoom}
+          weather={weatherContext}
           onSoilChecked={async (result: SoilCheckResult, note, actionSessionId) => {
             if (isCompletingAction) {
               return;
