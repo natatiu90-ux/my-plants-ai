@@ -159,7 +159,6 @@ export function summarizedWeatherForSnapshot(weather: HomeWeatherContext | null 
     forecastMaxTemperatureC: weather.forecastMaxTemperatureC ?? null,
     humidityPercent: weather.humidityPercent ?? null,
     hotDays: weather.hotDays ?? 0,
-    source: weather.source,
-    fetchedAt: weather.fetchedAt
+    source: weather.source
   };
 }

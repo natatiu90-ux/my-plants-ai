@@ -56,7 +56,7 @@ function isoTimestamp(value: number | null) {
 }
 
 function latestMilestoneTimestamp(items: PlantMilestone[]) {
-  return latestTimestamp(items.filter(isCareContextMilestone).map((item) => item.updatedAt ?? item.eventDate ?? item.createdAt));
+  return latestTimestamp(items.filter(isCareContextMilestone).map((item) => item.eventDate ?? item.createdAt));
 }
 
 function latestCareEventTimestamp(items: PlantCareEvent[]) {

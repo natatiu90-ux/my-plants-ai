@@ -1,6 +1,7 @@
 import type { Locale } from "@/i18n/dictionaries";
 import type { Plant, PlantAnalysisRecord, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone } from "@/types/plant";
 import { isUnknownPlantName } from "./rescue-entry";
+import { soilCheckResultFromClarificationAnswer } from "./soil-check-completion";
 
 type LocalizedText = { en?: string | null; ru?: string | null };
 type RawClarificationQuestion = {
@@ -95,6 +96,32 @@ function questionPriority(hypothesis: PlantHypothesis) {
   return priorities[hypothesis] ?? 0;
 }
 
+function canonicalClarificationOption(
+  hypothesis: PlantHypothesis,
+  option: { label?: LocalizedText; status?: PlantHypothesisStatus; result?: string },
+  locale: Locale
+) {
+  const label = localized(option.label, locale);
+  if (hypothesis === "soil_condition") {
+    try {
+      const result = soilCheckResultFromClarificationAnswer(option.result ?? label);
+      return {
+        label,
+        status: result === "not_sure" ? "unknown" : result === "slightly_damp" ? "ruled_out" : "confirmed",
+        result
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  return {
+    label,
+    status: option.status,
+    result: option.result
+  };
+}
+
 function questionFromRawQuestion(
   item: RawClarificationQuestion | undefined,
   locale: Locale
@@ -104,12 +131,8 @@ function questionFromRawQuestion(
   const reason = localized(item.reasonForAsking, locale);
   const options =
     item.options
-      ?.map((option) => ({
-        label: localized(option.label, locale),
-        status: option.status,
-        result: option.result
-      }))
-      .filter((option): option is { label: string; status: PlantHypothesisStatus; result: string } => Boolean(option.label && option.status && option.result)) ?? [];
+      ?.map((option) => canonicalClarificationOption(item.hypothesis!, option, locale))
+      .filter((option): option is { label: string; status: PlantHypothesisStatus; result: string } => Boolean(option?.label && option.status && option.result)) ?? [];
 
   return question && options.length ? { hypothesis: item.hypothesis, question, reason, options } : null;
 }
@@ -123,12 +146,8 @@ function questionFromHypothesis(
   const reason = localized(item.clarificationQuestion?.reasonForAsking, locale);
   const options =
     item.clarificationQuestion?.options
-      ?.map((option) => ({
-        label: localized(option.label, locale),
-        status: option.status,
-        result: option.result
-      }))
-      .filter((option): option is { label: string; status: PlantHypothesisStatus; result: string } => Boolean(option.label && option.status && option.result)) ?? [];
+      ?.map((option) => canonicalClarificationOption(item.type!, option, locale))
+      .filter((option): option is { label: string; status: PlantHypothesisStatus; result: string } => Boolean(option?.label && option.status && option.result)) ?? [];
 
   return question && options.length ? { hypothesis: item.type, question, reason, options } : null;
 }

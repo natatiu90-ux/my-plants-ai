@@ -8,6 +8,7 @@ import { addDays, toDateKey } from "@/lib/date-format";
 import { recordAddPlantPerformanceStage } from "@/lib/add-plant-performance";
 import { deriveConversationalCareState } from "@/lib/conversational-care";
 import { buildPlantEnvironmentContext, formatEnvironmentContextForPrompt } from "@/lib/home-room-context";
+import { findExistingBaselineMilestone } from "@/lib/care-baseline";
 import { plantDisplayName } from "@/lib/plant-display";
 import { deriveCareActionState } from "@/lib/plant-action-eligibility";
 import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
@@ -403,8 +404,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   }
 
   const plantName = plantDisplayName(plant, t("plants.unknownName"));
-  const hasWateringBaseline = milestones.some((milestone) => milestone.type === "watered" || milestone.type === "watering_unknown") || Boolean(plant.lastWateredAt);
-  const hasRepottingBaseline = milestones.some((milestone) => milestone.type === "repotted" || milestone.type === "repotting_unknown");
+  const hasWateringBaseline = Boolean(findExistingBaselineMilestone(milestones, plant.id, "watering")) || Boolean(plant.lastWateredAt);
+  const hasRepottingBaseline = Boolean(findExistingBaselineMilestone(milestones, plant.id, "repotting"));
   const assignedRoom = plant.roomId ? rooms.find((room) => room.id === plant.roomId) : undefined;
   const baselineQuestion = nextPostCreationClarificationStep({
     hasWateringBaseline,

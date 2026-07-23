@@ -1217,6 +1217,11 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         throw new Error("baseline_event_date_required");
       }
       const existingBaseline = findExistingBaselineMilestone(state.milestones, plantId, input.kind);
+      const requestedMilestoneType = baselineMilestoneType(input.kind, input.unknown);
+      const requestedEventDate = eventDate ?? null;
+      if (existingBaseline?.type === requestedMilestoneType && (existingBaseline.eventDate ?? null) === requestedEventDate) {
+        return;
+      }
       const upsertBaselineMilestone = async (type: PlantMilestone["type"], nextEventDate?: string) => {
         if (existingBaseline) {
           await repositories.milestones.updateMilestone(existingBaseline.id, { type, eventDate: nextEventDate ?? null });

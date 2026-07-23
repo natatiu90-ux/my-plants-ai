@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/i18n/I18nProvider";
 import { usePlantStore } from "@/data/PlantStore";
+import { findExistingBaselineMilestone } from "@/lib/care-baseline";
 import { cleanScientificName, plantCommonName, plantDisplayName } from "@/lib/plant-display";
 import { logNavigationEvent } from "@/lib/navigation-performance";
 import { DeletePlantDialog } from "./DeletePlantDialog";
@@ -33,7 +34,7 @@ export function PlantEditPage({ plantId }: { plantId: string }) {
   const plant = getPlant(plantId);
   const photos = getPlantPhotos(plantId);
   const milestones = getPlantMilestones(plantId);
-  const repottingBaseline = milestones.find((milestone) => milestone.type === "repotted" || milestone.type === "repotting_unknown");
+  const repottingBaseline = findExistingBaselineMilestone(milestones, plantId, "repotting");
   const [homeName, setHomeName] = useState(plant?.homeName ?? "");
   const [speciesName, setSpeciesName] = useState(plant ? plantCommonName(plant) : "");
   const [scientificName, setScientificName] = useState(plant?.scientificName ?? "");

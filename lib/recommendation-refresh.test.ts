@@ -11,7 +11,7 @@ import {
   staleReasonKeys
 } from "./recommendation-refresh";
 import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION } from "./recommendation-version";
-import type { HomeContext, Plant, PlantAnalysisRecord, PlantRecommendationRevision, Room } from "@/types/plant";
+import type { HomeContext, Plant, PlantAnalysisRecord, PlantMilestone, PlantRecommendationRevision, Room } from "@/types/plant";
 
 const plant: Plant = {
   id: "plant-1",
@@ -230,6 +230,40 @@ assert.equal(
     homes: [home],
     rooms: [room],
     milestones: [],
+    careEvents: [],
+    hypothesisResolutions: []
+  }),
+  false
+);
+const unknownRepottingMilestone: PlantMilestone = {
+  id: "milestone-1",
+  plantId: plant.id,
+  type: "repotting_unknown",
+  eventDate: null,
+  createdAt: "2026-07-14T10:00:00.000Z",
+  updatedAt: "2026-07-14T10:00:00.000Z"
+};
+const baselineUnknownSnapshot = buildRecommendationContextSnapshot({
+  plant,
+  homes: [home],
+  rooms: [room],
+  milestones: [unknownRepottingMilestone],
+  careEvents: [],
+  hypothesisResolutions: []
+});
+const baselineUnknownRevision: PlantRecommendationRevision = {
+  ...revision,
+  id: "revision-baseline-unknown",
+  contextSnapshot: baselineUnknownSnapshot
+};
+assert.equal(
+  isRecommendationStale({
+    plant,
+    analysis,
+    currentRevision: baselineUnknownRevision,
+    homes: [home],
+    rooms: [room],
+    milestones: [{ ...unknownRepottingMilestone, updatedAt: "2026-07-23T12:00:00.000Z" }],
     careEvents: [],
     hypothesisResolutions: []
   }),

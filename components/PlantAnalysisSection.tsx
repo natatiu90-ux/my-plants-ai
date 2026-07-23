@@ -5,6 +5,7 @@ import { Check, ChevronDown } from "lucide-react";
 import { formatRelativeDate } from "@/lib/date-format";
 import { deriveConversationalCareState } from "@/lib/conversational-care";
 import { speciesLearningStateFromAnalysis } from "@/lib/species-learning";
+import { soilCheckResultFromClarificationAnswer } from "@/lib/soil-check-completion";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
 import type { DerivedCareActionState } from "@/lib/plant-action-eligibility";
@@ -228,12 +229,28 @@ function structuredFollowUp(hypothesis: StructuredHypothesis | undefined, locale
   const reason = localized(hypothesis.clarificationQuestion.reasonForAsking, locale);
   const options =
     hypothesis.clarificationQuestion.options
-      ?.map((option) => ({
-        label: localized(option.label, locale),
-        status: option.status,
-        result: option.result
-      }))
-      .filter((option): option is { label: string; status: PlantHypothesisStatus; result: string } => Boolean(option.label && option.status && option.result)) ?? [];
+      ?.map((option) => {
+        const label = localized(option.label, locale);
+        if (hypothesis.type === "soil_condition") {
+          try {
+            const result = soilCheckResultFromClarificationAnswer(option.result ?? label);
+            return {
+              label,
+              status: result === "not_sure" ? "unknown" : result === "slightly_damp" ? "ruled_out" : "confirmed",
+              result
+            };
+          } catch {
+            return null;
+          }
+        }
+
+        return {
+          label,
+          status: option.status,
+          result: option.result
+        };
+      })
+      .filter((option): option is { label: string; status: PlantHypothesisStatus; result: string } => Boolean(option?.label && option.status && option.result)) ?? [];
 
   if (!question || !options.length) return null;
   return {
