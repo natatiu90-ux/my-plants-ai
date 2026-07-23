@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { addDays, toDateKey } from "@/lib/date-format";
+import { reminderDueCycleKey } from "@/lib/care-reminders";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
 import { isPermanentPushError, pushErrorCode, sendCarePush } from "@/lib/push-server";
 
@@ -37,15 +38,37 @@ type PushSubscriptionRow = {
   failure_count?: number | null;
 };
 
+type CareReminderRow = {
+  id: string;
+  user_id: string;
+  plant_id: string;
+  reminder_type: "soil_check";
+  action_key: string;
+  due_at: string;
+  due_cycle_key: string;
+  failure_count?: number | null;
+};
+
+type NotificationCandidate = {
+  source: "care_reminders" | "plant_schedule";
+  reminderId?: string;
+  plant: DuePlantRow;
+  scheduledFor: string;
+  dueCycleKey: string;
+  disabled?: boolean;
+};
+
 type CronStage =
   | "verify_schema"
   | "load_due_plants"
+  | "load_due_reminders"
   | "load_notification_preferences"
   | "load_push_subscriptions"
   | "check_existing_delivery"
   | "record_delivery"
   | "update_delivery"
   | "update_push_subscription"
+  | "update_care_reminder"
   | "update_plant_notification";
 
 type SupabaseSafeError = {
@@ -164,7 +187,7 @@ async function updateSubscriptionFailure(supabase: ReturnType<typeof createSupab
 
 async function verifySchema(supabase: ReturnType<typeof createSupabaseAdminClient>) {
   console.info("notification_supabase_query_started", { stage: "verify_schema" });
-  const [plantsCheck, settingsCheck, subscriptionsCheck, deliveriesCheck] = await Promise.all([
+  const [plantsCheck, settingsCheck, subscriptionsCheck, deliveriesCheck, remindersCheck] = await Promise.all([
     supabase
       .from("plants")
       .select("id, next_check_at, notification_enabled, notification_due_cycle_key, last_notification_sent_at, care_schedule_status")
@@ -180,6 +203,10 @@ async function verifySchema(supabase: ReturnType<typeof createSupabaseAdminClien
     supabase
       .from("notification_deliveries")
       .select("id, user_id, plant_id, subscription_id, notification_type, due_cycle_key, scheduled_for, status, sent_at, opened_at, error_code")
+      .limit(1),
+    supabase
+      .from("care_reminders")
+      .select("id, user_id, plant_id, reminder_type, due_at, due_cycle_key, status")
       .limit(1)
   ]);
 
@@ -188,8 +215,106 @@ async function verifySchema(supabase: ReturnType<typeof createSupabaseAdminClien
     return failed;
   }
 
-  console.info("notification_supabase_query_completed", { stage: "verify_schema" });
+  console.info("notification_supabase_query_completed", {
+    stage: "verify_schema",
+    careRemindersAvailable: !remindersCheck.error,
+    careRemindersErrorCode: remindersCheck.error?.code
+  });
   return null;
+}
+
+async function loadPlantScheduleCandidates(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  today: string,
+  excludedPlantIds: Set<string>
+) {
+  console.info("notification_supabase_query_started", { stage: "load_due_plants" });
+  const { data: plants, error: plantError } = await supabase
+    .from("plants")
+    .select("id, user_id, home_name, species_name, next_check_at, last_watered_at, notification_due_cycle_key")
+    .eq("notification_enabled", true)
+    .neq("care_schedule_status", "paused")
+    .lte("next_check_at", `${today}T23:59:59.999Z`);
+
+  if (plantError) {
+    return { candidates: [] as NotificationCandidate[], error: plantError };
+  }
+
+  const candidates: NotificationCandidate[] = (plants as DuePlantRow[] | null ?? [])
+    .filter((plant) => plant.next_check_at && !excludedPlantIds.has(plant.id))
+    .map((plant) => ({
+      source: "plant_schedule" as const,
+      plant,
+      scheduledFor: plant.next_check_at as string,
+      dueCycleKey: reminderDueCycleKey(plant.id, "soil_check", plant.next_check_at as string)
+    }));
+  console.info("notification_supabase_query_completed", { stage: "load_due_plants", count: candidates.length });
+  return { candidates, error: null };
+}
+
+async function loadExplicitReminderCandidates(supabase: ReturnType<typeof createSupabaseAdminClient>, now: string) {
+  console.info("notification_supabase_query_started", { stage: "load_due_reminders" });
+  const { data: reminders, error: reminderError } = await supabase
+    .from("care_reminders")
+    .select("id, user_id, plant_id, reminder_type, action_key, due_at, due_cycle_key, failure_count")
+    .eq("status", "scheduled")
+    .lte("due_at", now);
+
+  if (reminderError) {
+    if (reminderError.code === "42P01") {
+      console.info("notification_supabase_query_skipped", { stage: "load_due_reminders", reason: "care_reminders_missing" });
+      return { candidates: [] as NotificationCandidate[], missingTable: true, error: null };
+    }
+    return { candidates: [] as NotificationCandidate[], missingTable: false, error: reminderError };
+  }
+
+  const dueReminders = reminders as CareReminderRow[] | null ?? [];
+  if (!dueReminders.length) {
+    console.info("notification_supabase_query_completed", { stage: "load_due_reminders", count: 0 });
+    return { candidates: [] as NotificationCandidate[], missingTable: false, error: null };
+  }
+
+  const plantIds = Array.from(new Set(dueReminders.map((reminder) => reminder.plant_id)));
+  const { data: plants, error: plantError } = await supabase
+    .from("plants")
+    .select("id, user_id, home_name, species_name, next_check_at, last_watered_at, notification_due_cycle_key, notification_enabled, care_schedule_status")
+    .in("id", plantIds);
+
+  if (plantError) {
+    return { candidates: [] as NotificationCandidate[], missingTable: false, error: plantError };
+  }
+
+  const plantsById = new Map((plants as (DuePlantRow & { notification_enabled?: boolean | null; care_schedule_status?: string | null })[] | null ?? []).map((plant) => [plant.id, plant]));
+  const candidates = dueReminders.flatMap((reminder) => {
+    const plant = plantsById.get(reminder.plant_id);
+    if (!plant || plant.user_id !== reminder.user_id) {
+      return [];
+    }
+    if (!plant.notification_enabled || plant.care_schedule_status === "paused") {
+      return [{
+        source: "care_reminders" as const,
+        reminderId: reminder.id,
+        plant,
+        scheduledFor: reminder.due_at,
+        dueCycleKey: reminder.due_cycle_key,
+        disabled: true
+      }];
+    }
+    return [{
+      source: "care_reminders" as const,
+      reminderId: reminder.id,
+      plant,
+      scheduledFor: reminder.due_at,
+      dueCycleKey: reminder.due_cycle_key
+    }];
+  }) as (NotificationCandidate & { disabled?: boolean })[];
+
+  console.info("notification_supabase_query_completed", {
+    stage: "load_due_reminders",
+    count: candidates.length,
+    disabled: candidates.filter((candidate) => candidate.disabled).length
+  });
+  return { candidates, missingTable: false, error: null };
 }
 
 export async function GET(request: Request) {
@@ -200,6 +325,7 @@ export async function GET(request: Request) {
 
   console.info("notification_job_started");
   const supabase = createSupabaseAdminClient();
+  const now = new Date().toISOString();
   const today = toDateKey(new Date());
 
   const schemaError = await verifySchema(supabase);
@@ -207,25 +333,30 @@ export async function GET(request: Request) {
     return failureResponse("verify_schema", schemaError);
   }
 
-  console.info("notification_supabase_query_started", { stage: "load_due_plants" });
-  const { data: plants, error: plantError } = await supabase
-    .from("plants")
-    .select("id, user_id, home_name, species_name, next_check_at, last_watered_at, notification_due_cycle_key")
-    .eq("notification_enabled", true)
-    .neq("care_schedule_status", "paused")
-    .lte("next_check_at", `${today}T23:59:59.999Z`);
-
-  if (plantError) {
-    return failureResponse("load_due_plants", plantError);
+  const explicitReminderResult = await loadExplicitReminderCandidates(supabase, now);
+  if (explicitReminderResult.error) {
+    return failureResponse("load_due_reminders", explicitReminderResult.error);
   }
-  console.info("notification_supabase_query_completed", { stage: "load_due_plants", count: plants?.length ?? 0 });
-
-  const duePlants = (plants as DuePlantRow[] | null ?? []).filter((plant) => plant.next_check_at);
-  if (!duePlants.length) {
-    return NextResponse.json({ ok: true, candidates: 0, sent: 0, skipped: 0, failed: 0 });
+  const explicitPlantIds = new Set(explicitReminderResult.candidates.map((candidate) => candidate.plant.id));
+  const plantScheduleResult = await loadPlantScheduleCandidates(supabase, today, explicitPlantIds);
+  if (plantScheduleResult.error) {
+    return failureResponse("load_due_plants", plantScheduleResult.error);
   }
 
-  const userIds = Array.from(new Set(duePlants.map((plant) => plant.user_id)));
+  const candidates = [...explicitReminderResult.candidates, ...plantScheduleResult.candidates];
+  if (!candidates.length) {
+    console.info("notification_job_completed", {
+      candidates: 0,
+      due: 0,
+      sent: 0,
+      skipped: 0,
+      failed: 0,
+      skippedReasons: {}
+    });
+    return NextResponse.json({ ok: true, candidates: 0, due: 0, sent: 0, skipped: 0, failed: 0, skippedReasons: {} });
+  }
+
+  const userIds = Array.from(new Set(candidates.map((candidate) => candidate.plant.user_id)));
 
   console.info("notification_supabase_query_started", { stage: "load_notification_preferences", userCount: userIds.length });
   const { data: settingsRows, error: settingsError } = await supabase
@@ -257,28 +388,53 @@ export async function GET(request: Request) {
   let sent = 0;
   let skipped = 0;
   let failed = 0;
+  const skippedReasons: Record<string, number> = {};
+  const skip = (reason: string) => {
+    skipped += 1;
+    skippedReasons[reason] = (skippedReasons[reason] ?? 0) + 1;
+  };
 
-  for (const plant of duePlants) {
+  for (const candidate of candidates) {
+    const plant = candidate.plant;
+    if (candidate.disabled) {
+      if (candidate.reminderId) {
+        const { error: cancelError } = await supabase
+          .from("care_reminders")
+          .update({ status: "cancelled" })
+          .eq("id", candidate.reminderId);
+        if (cancelError) return failureResponse("update_care_reminder", cancelError);
+      }
+      skip("plant_notifications_disabled_or_paused");
+      continue;
+    }
+
     const settings = settingsByUser.get(plant.user_id);
     if (!settings?.care_notifications_enabled) {
-      skipped += 1;
+      skip("global_notifications_disabled");
       continue;
     }
 
     const subscriptions = subscriptionsByUser.get(plant.user_id) ?? [];
-    const dueCycleKey = `${plant.id}:${plant.next_check_at?.slice(0, 10) ?? today}`;
+    if (!subscriptions.length) {
+      skip("no_active_subscription");
+      continue;
+    }
+
+    const dueCycleKey = candidate.dueCycleKey;
     console.info("notification_candidate_found", { plantId: plant.id, userId: plant.user_id, dueCycleKey });
+    let candidateSent = 0;
+    let candidateFailed = 0;
 
     for (const subscription of subscriptions) {
       if (!shouldSendNow(settings, subscription)) {
-        skipped += 1;
+        skip("outside_preferred_time_or_quiet_hours");
         continue;
       }
 
       console.info("notification_supabase_query_started", { stage: "check_existing_delivery", plantId: plant.id, subscriptionId: subscription.id, dueCycleKey });
       const { data: existingDelivery, error: existingDeliveryError } = await supabase
         .from("notification_deliveries")
-        .select("id")
+        .select("id, status")
         .eq("plant_id", plant.id)
         .eq("subscription_id", subscription.id)
         .eq("notification_type", "soil_check_due")
@@ -288,25 +444,33 @@ export async function GET(request: Request) {
         return failureResponse("check_existing_delivery", existingDeliveryError);
       }
       console.info("notification_supabase_query_completed", { stage: "check_existing_delivery", exists: Boolean(existingDelivery?.id) });
-      if (existingDelivery?.id) {
+      if (existingDelivery?.id && existingDelivery.status === "sent") {
         console.info("notification_skipped_duplicate", { plantId: plant.id, subscriptionId: subscription.id, dueCycleKey });
-        skipped += 1;
+        skip("already_sent");
         continue;
       }
 
-      const { data: delivery, error: deliveryError } = await supabase
-        .from("notification_deliveries")
-        .insert({
-          user_id: plant.user_id,
-          plant_id: plant.id,
-          subscription_id: subscription.id,
-          notification_type: "soil_check_due",
-          due_cycle_key: dueCycleKey,
-          scheduled_for: plant.next_check_at,
-          status: "pending"
-        })
-        .select("id")
-        .single();
+      const deliveryResult = existingDelivery?.id
+        ? await supabase
+          .from("notification_deliveries")
+          .update({ status: "pending", error_code: null })
+          .eq("id", existingDelivery.id)
+          .select("id")
+          .single()
+        : await supabase
+          .from("notification_deliveries")
+          .insert({
+            user_id: plant.user_id,
+            plant_id: plant.id,
+            subscription_id: subscription.id,
+            notification_type: "soil_check_due",
+            due_cycle_key: dueCycleKey,
+            scheduled_for: candidate.scheduledFor,
+            status: "pending"
+          })
+          .select("id")
+          .single();
+      const { data: delivery, error: deliveryError } = deliveryResult;
 
       if (deliveryError) {
         return failureResponse("record_delivery", deliveryError);
@@ -334,6 +498,7 @@ export async function GET(request: Request) {
         if (plantUpdate.error) return failureResponse("update_plant_notification", plantUpdate.error);
         console.info("notification_sent", { plantId: plant.id, subscriptionId: subscription.id, dueCycleKey });
         sent += 1;
+        candidateSent += 1;
       } catch (sendError) {
         const [deliveryUpdate] = await Promise.all([
           supabase
@@ -347,16 +512,39 @@ export async function GET(request: Request) {
         }
         console.info("notification_delivery_failed", { plantId: plant.id, subscriptionId: subscription.id, errorCode: pushErrorCode(sendError) });
         failed += 1;
+        candidateFailed += 1;
       }
     }
 
-    if ((plant.notification_due_cycle_key ?? "") !== dueCycleKey && subscriptions.length === 0) {
-      const { error: plantUpdateError } = await supabase.from("plants").update({ next_check_at: toDateKey(addDays(new Date(), 1)) }).eq("id", plant.id);
-      if (plantUpdateError) {
-        return failureResponse("update_plant_notification", plantUpdateError);
+    if (candidate.reminderId) {
+      if (candidateSent > 0) {
+        const { error: reminderUpdateError } = await supabase
+          .from("care_reminders")
+          .update({ status: "sent", sent_at: new Date().toISOString(), last_error_code: null, last_error_message: null })
+          .eq("id", candidate.reminderId);
+        if (reminderUpdateError) return failureResponse("update_care_reminder", reminderUpdateError);
+      } else if (candidateFailed > 0) {
+        const { error: reminderUpdateError } = await supabase
+          .from("care_reminders")
+          .update({
+            failed_at: new Date().toISOString(),
+            failure_count: 1,
+            last_error_code: "delivery_failed",
+            last_error_message: "Push delivery failed."
+          })
+          .eq("id", candidate.reminderId);
+        if (reminderUpdateError) return failureResponse("update_care_reminder", reminderUpdateError);
       }
     }
   }
 
-  return NextResponse.json({ ok: true, candidates: duePlants.length, sent, skipped, failed });
+  console.info("notification_job_completed", {
+    candidates: candidates.length,
+    due: candidates.length,
+    sent,
+    skipped,
+    failed,
+    skippedReasons
+  });
+  return NextResponse.json({ ok: true, candidates: candidates.length, due: candidates.length, sent, skipped, failed, skippedReasons });
 }

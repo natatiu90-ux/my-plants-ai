@@ -8,6 +8,7 @@ import { temporaryPhotoStorageIdFromUrl } from "@/lib/temporary-photo-url";
 import type { CareScheduleStatus, HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
 import type { RecommendationImpactLevel, RecommendationRevisionReasonType } from "@/types/plant";
 import type { RecommendationChangedContext, RecommendationRevisionSaveResult } from "@/lib/recommendation-refresh";
+import { normalizeReminderDueAt, reminderDueCycleKey, shouldScheduleCareReminder } from "@/lib/care-reminders";
 import { mapAnalysis, mapCareEvent, mapHome, mapHypothesisResolution, mapMilestone, mapPhoto, mapPlant, mapRecommendationRevision, mapRoom, type PlantPhotoRow } from "./mappers";
 
 const photoBucket = "plant-photos";
@@ -148,6 +149,118 @@ async function withThumbnailPhotoUrls(supabase: SupabaseClient, rows: PlantPhoto
 export class PlantRepository {
   constructor(private supabase: SupabaseClient, private user: User) {}
 
+  private async syncSoilCheckReminder(plantId: string) {
+    const { data: plant, error: plantError } = await this.supabase
+      .from("plants")
+      .select("id, user_id, next_check_at, notification_enabled, care_schedule_status")
+      .eq("id", plantId)
+      .eq("user_id", this.user.id)
+      .maybeSingle();
+
+    if (plantError || !plant) {
+      console.info("care_reminder_sync_skipped", {
+        stage: "load_plant",
+        plantId,
+        code: plantError?.code,
+        message: plantError?.message ?? "plant_not_found"
+      });
+      return;
+    }
+
+    const { data: scheduledRows, error: scheduledError } = await this.supabase
+      .from("care_reminders")
+      .select("id, due_at, due_cycle_key")
+      .eq("plant_id", plantId)
+      .eq("reminder_type", "soil_check")
+      .eq("status", "scheduled");
+
+    if (scheduledError) {
+      console.info("care_reminder_sync_skipped", {
+        stage: "load_existing_reminders",
+        plantId,
+        code: scheduledError.code,
+        message: scheduledError.message
+      });
+      return;
+    }
+
+    const shouldSchedule = shouldScheduleCareReminder({
+      plantId,
+      reminderType: "soil_check",
+      nextCheckAt: plant.next_check_at,
+      notificationEnabled: Boolean(plant.notification_enabled),
+      careScheduleStatus: plant.care_schedule_status
+    });
+
+    const scheduled = scheduledRows ?? [];
+    if (!shouldSchedule) {
+      if (scheduled.length) {
+        const { error: cancelError } = await this.supabase
+          .from("care_reminders")
+          .update({ status: "cancelled" })
+          .in("id", scheduled.map((row) => row.id));
+        if (cancelError) {
+          console.info("care_reminder_sync_skipped", {
+            stage: "cancel_existing_reminders",
+            plantId,
+            code: cancelError.code,
+            message: cancelError.message
+          });
+        }
+      }
+      return;
+    }
+
+    const dueAt = normalizeReminderDueAt(plant.next_check_at);
+    const dueCycleKey = reminderDueCycleKey(plantId, "soil_check", dueAt);
+    const matchingReminder = scheduled.find((row) => row.due_cycle_key === dueCycleKey);
+    const staleReminderIds = scheduled.filter((row) => row.due_cycle_key !== dueCycleKey).map((row) => row.id);
+
+    if (staleReminderIds.length) {
+      const { error: cancelError } = await this.supabase
+        .from("care_reminders")
+        .update({ status: "cancelled" })
+        .in("id", staleReminderIds);
+      if (cancelError) {
+        console.info("care_reminder_sync_skipped", {
+          stage: "cancel_stale_reminders",
+          plantId,
+          code: cancelError.code,
+          message: cancelError.message
+        });
+      }
+    }
+
+    if (matchingReminder) {
+      return;
+    }
+
+    const { error: insertError } = await this.supabase.from("care_reminders").insert({
+      user_id: this.user.id,
+      plant_id: plantId,
+      reminder_type: "soil_check",
+      action_key: "check_soil",
+      due_at: dueAt,
+      due_cycle_key: dueCycleKey,
+      status: "scheduled"
+    });
+
+    if (insertError) {
+      console.info("care_reminder_sync_skipped", {
+        stage: "insert_reminder",
+        plantId,
+        dueCycleKey,
+        code: insertError.code,
+        message: insertError.message,
+        details: insertError.details,
+        hint: insertError.hint
+      });
+      return;
+    }
+
+    console.info("care_reminder_scheduled", { plantId, reminderType: "soil_check", dueCycleKey });
+  }
+
   private async assertCurrentAuthenticatedUser(stage: string) {
     const { data, error } = await this.supabase.auth.getUser();
     if (error) {
@@ -238,6 +351,7 @@ export class PlantRepository {
         insertedOwnerIdSuffix: idSuffix(this.user.id)
       });
     }
+    await this.syncSoilCheckReminder(data.id);
     return mapPlant(data);
   }
 
@@ -272,6 +386,7 @@ export class PlantRepository {
       .eq("user_id", this.user.id);
 
     assertNoError(error);
+    await this.syncSoilCheckReminder(plantId);
   }
 
   async deletePlant(plantId: string, storagePaths: string[]) {
@@ -298,6 +413,7 @@ export class PlantRepository {
       .eq("user_id", this.user.id);
 
     assertNoError(error);
+    await this.syncSoilCheckReminder(plantId);
   }
 
   async updateRecommendationState(
@@ -361,6 +477,7 @@ export class PlantRepository {
       .eq("user_id", this.user.id);
 
     assertNoError(error);
+    await this.syncSoilCheckReminder(plantId);
   }
 }
 
