@@ -579,6 +579,8 @@
   "plantAnalysis.guidedPruningStep3": "If it is green underneath, do not cut that branch yet.",
   "plantAnalysis.guidedPruningStep4": "If the tissue is dry and brown, cut back to living tissue.",
   "plantAnalysis.guidedPruningStep5": "If you are unsure, add a clear close-up photo of the branch.",
+  "plantAnalysis.guidedPruningNext": "After checking or pruning, add a photo. I can use it to see which parts are alive and how the plant is recovering.",
+  "plantAnalysis.guidedPruningPhotoCta": "Add photo after checking",
   "plantAnalysis.guidedRepottingIntro": "Repotting may help, but first check soil and roots so the plant does not get extra stress.",
   "plantAnalysis.guidedRepottingCta": "Help me repot",
   "plantAnalysis.guidedRepottingStep1": "Prepare a pot with a drainage hole.",

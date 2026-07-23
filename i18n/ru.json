@@ -579,6 +579,8 @@
   "plantAnalysis.guidedPruningStep3": "Если под корой зелёное — ветку пока не режь.",
   "plantAnalysis.guidedPruningStep4": "Если ткань сухая и коричневая — можно срезать до живой части.",
   "plantAnalysis.guidedPruningStep5": "Если сомневаешься — добавь крупное фото ветки.",
+  "plantAnalysis.guidedPruningNext": "После проверки или обрезки добавь фото. Так я смогу понять, какие участки живые и как растение восстанавливается.",
+  "plantAnalysis.guidedPruningPhotoCta": "Добавить фото после проверки",
   "plantAnalysis.guidedRepottingIntro": "Пересадка может помочь, но сначала нужно проверить почву и состояние корней, чтобы не добавить стресс.",
   "plantAnalysis.guidedRepottingCta": "Помоги мне с пересадкой",
   "plantAnalysis.guidedRepottingStep1": "Подготовь горшок с дренажным отверстием.",

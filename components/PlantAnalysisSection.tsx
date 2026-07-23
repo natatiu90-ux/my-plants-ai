@@ -279,23 +279,18 @@ function SpeciesLearningCard({ analysis, plant, onKnowSpecies, onAddPhoto }: { a
   const userProvidedSpecies = userProvidedSpeciesFromPlant(plant, analysis);
   const presentation = speciesLearningCardPresentation({ speciesLearningState: state, userProvidedSpecies });
   if (!presentation.shouldRender) return null;
+  if (presentation.isCompleted) return null;
 
   return (
     <div className="min-w-0 rounded-[24px] bg-white/70 p-4">
-      <p className="text-xs font-bold uppercase text-[#6f8c62]">{presentation.isCompleted ? t("plantAnalysis.userSpeciesTitle") : t("plantAnalysis.learningTitle")}</p>
+      <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.learningTitle")}</p>
       <p className="mt-2 text-[15px] font-bold leading-6 text-[#5f594f]">
-        {presentation.isCompleted && presentation.displayName ? t("plantAnalysis.userSpeciesSaved", { name: presentation.displayName }) : t("plantAnalysis.learningIntro")}
+        {t("plantAnalysis.learningIntro")}
       </p>
-      {presentation.isCompleted ? <p className="mt-2 text-[15px] font-bold leading-6 text-[#756d62]">{t("plantAnalysis.userSpeciesHint")}</p> : null}
       <div className="mt-4 flex flex-wrap gap-2.5">
         {presentation.showKnowNameAction && onKnowSpecies ? (
           <button type="button" onClick={onKnowSpecies} className="min-h-11 rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]">
             {t("plantAnalysis.learningKnowName")}
-          </button>
-        ) : null}
-        {presentation.showChangeAction && onKnowSpecies ? (
-          <button type="button" onClick={onKnowSpecies} className="min-h-11 rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]">
-            {t("plantAnalysis.userSpeciesChange")}
           </button>
         ) : null}
         {onAddPhoto ? (
@@ -719,6 +714,16 @@ export function PlantAnalysisSection({
                     <li key={step}>{step}</li>
                   ))}
                 </ol>
+              ) : null}
+              {openGuide === conversationalState.guidedAction.type && conversationalState.guidedAction.type === "pruning" ? (
+                <div className="mt-4 rounded-[20px] bg-[#eef5e8] p-4">
+                  <p className="text-[15px] font-bold leading-6 text-[#4f6946] [overflow-wrap:anywhere]">{t("plantAnalysis.guidedPruningNext")}</p>
+                  {onAddPhoto ? (
+                    <button type="button" onClick={onAddPhoto} className="mt-3 min-h-10 rounded-[16px] bg-white/85 px-4 text-sm font-extrabold text-[#2d7a4f]">
+                      {t("plantAnalysis.guidedPruningPhotoCta")}
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           ) : null}
