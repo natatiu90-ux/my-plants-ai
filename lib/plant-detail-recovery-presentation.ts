@@ -1,13 +1,34 @@
 import type { TranslationKey } from "@/i18n/dictionaries";
-import type { Plant, PlantHypothesis, PlantHypothesisResolution } from "@/types/plant";
+import type { Plant, PlantAnalysisRecord, PlantHypothesis, PlantHypothesisResolution } from "@/types/plant";
 import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "./plant-display";
 import { isUnknownPlantName } from "./rescue-entry";
 import type { SpeciesLearningState } from "./species-learning";
 import { isStillLearningSpecies } from "./species-learning";
 
-export function userProvidedSpeciesFromPlant(plant: Pick<Plant, "speciesName" | "scientificName">) {
-  const commonName = cleanPlantName(plant.speciesName);
-  const scientificName = cleanScientificName(plant.scientificName);
+type UserProvidedSpecies = {
+  commonName: string | null;
+  scientificName: string | null;
+  displayName: string;
+};
+
+type SpeciesConfirmation = NonNullable<NonNullable<NonNullable<PlantAnalysisRecord["rawResult"]>["speciesIdentification"]>["userConfirmation"]>;
+
+function manualSpeciesConfirmationFromAnalysis(analysis: Pick<PlantAnalysisRecord, "rawResult"> | undefined | null): SpeciesConfirmation | null {
+  const confirmation = analysis?.rawResult?.speciesIdentification?.userConfirmation;
+  return confirmation?.source === "manual" ? confirmation : null;
+}
+
+export function userProvidedSpeciesFromPlant(
+  plant: Pick<Plant, "speciesName" | "scientificName">,
+  analysis?: Pick<PlantAnalysisRecord, "rawResult"> | null
+): UserProvidedSpecies | null {
+  const confirmation = manualSpeciesConfirmationFromAnalysis(analysis);
+  if (!confirmation) {
+    return null;
+  }
+
+  const commonName = cleanPlantName(confirmation.commonName) || cleanPlantName(plant.speciesName);
+  const scientificName = cleanScientificName(confirmation.scientificName) || cleanScientificName(plant.scientificName);
   const displayName = commonName || commonNameFromScientificName(scientificName);
 
   if (!displayName || isUnknownPlantName(displayName)) {
@@ -44,8 +65,11 @@ export function speciesLearningCardPresentation(input: {
   };
 }
 
-export function recommendationSpeciesContextFromPlant(plant: Pick<Plant, "speciesName" | "scientificName">) {
-  const userProvidedSpecies = userProvidedSpeciesFromPlant(plant);
+export function recommendationSpeciesContextFromPlant(
+  plant: Pick<Plant, "speciesName" | "scientificName">,
+  analysis?: Pick<PlantAnalysisRecord, "rawResult"> | null
+) {
+  const userProvidedSpecies = userProvidedSpeciesFromPlant(plant, analysis);
   if (!userProvidedSpecies) return null;
 
   return {

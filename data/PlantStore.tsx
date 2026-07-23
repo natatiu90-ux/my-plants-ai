@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { addDays, toDateKey } from "@/lib/date-format";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/client";
 import { createRepositories } from "@/lib/repositories/supabase-repositories";
-import { commonNameFromScientificName } from "@/lib/plant-display";
+import { cleanPlantName, cleanScientificName, commonNameFromScientificName } from "@/lib/plant-display";
 import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION } from "@/lib/recommendation-version";
 import { recommendationRevisionIsUnchanged, type RecommendationChangedContext, type RecommendationContextSnapshot, type RecommendationRevisionSaveResult } from "@/lib/recommendation-refresh";
 import { PlantCreationError, plantCreationDiagnosticFromError, plantCreationError, type PlantCreationStage } from "@/lib/plant-save-diagnostics";
@@ -70,6 +70,48 @@ export type CompleteSoilCheckResult = {
     careScheduleStatus: Plant["careScheduleStatus"];
   };
 };
+
+function analysisWithUserSpeciesConfirmation(
+  analysis: PlantAnalysisRecord,
+  confirmation: { commonName?: string | null; scientificName?: string | null } | null
+): PlantAnalysisRecord {
+  const rawResult = analysis.rawResult ?? {};
+  const speciesIdentification =
+    rawResult.speciesIdentification && typeof rawResult.speciesIdentification === "object"
+      ? rawResult.speciesIdentification
+      : undefined;
+  const commonName = cleanPlantName(confirmation?.commonName);
+  const scientificName = cleanScientificName(confirmation?.scientificName);
+  const userConfirmation =
+    commonName || scientificName
+      ? {
+          commonName: commonName || null,
+          scientificName: scientificName || null,
+          confirmedAt: new Date().toISOString(),
+          source: "manual" as const
+        }
+      : null;
+
+  return {
+    ...analysis,
+    rawResult: {
+      ...rawResult,
+      speciesIdentification: {
+        ...(speciesIdentification ?? {
+          status: "learning" as const,
+          currentLabel: null,
+          confidence: null,
+          candidates: [],
+          evidence: [],
+          source: "analysis" as const
+        }),
+        userConfirmation,
+        updatedAt: new Date().toISOString(),
+        source: userConfirmation ? "combined" : speciesIdentification?.source ?? "analysis"
+      }
+    }
+  };
+}
 
 type PlantStoreValue = PlantState & {
   status: StoreStatus;
@@ -836,7 +878,17 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
 
   const updatePlant = useCallback(
     async (plantId: string, input: { homeId?: string; homeName?: string; speciesName?: string; scientificName?: string; roomKey?: Plant["roomKey"]; roomId?: Plant["roomId"]; positionInRoom?: Plant["positionInRoom"]; notes?: string }) => {
+      const existingPlant = state.plants.find((plant) => plant.id === plantId);
+      const speciesNameWasEdited = input.speciesName !== undefined && cleanPlantName(input.speciesName) !== cleanPlantName(existingPlant?.speciesName);
+      const scientificNameWasEdited = input.scientificName !== undefined && cleanScientificName(input.scientificName) !== cleanScientificName(existingPlant?.scientificName);
+      const shouldUpdateUserSpeciesConfirmation = Boolean(existingPlant && (speciesNameWasEdited || scientificNameWasEdited));
       await repositories?.plants.updatePlant(plantId, input);
+      if (shouldUpdateUserSpeciesConfirmation) {
+        await repositories?.analyses.updateLatestSpeciesConfirmation(plantId, {
+          commonName: input.speciesName ?? existingPlant?.speciesName ?? null,
+          scientificName: input.scientificName ?? existingPlant?.scientificName ?? null
+        });
+      }
       setState((current) => ({
         ...current,
         plants: current.plants.map((plant) =>
@@ -854,10 +906,23 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
                 updatedAt: new Date().toISOString()
               }
             : plant
-        )
+        ),
+        analyses: shouldUpdateUserSpeciesConfirmation
+          ? (() => {
+              const latestAnalysisId = current.analyses.find((analysis) => analysis.plantId === plantId)?.id;
+              return current.analyses.map((analysis) =>
+                analysis.id === latestAnalysisId
+                  ? analysisWithUserSpeciesConfirmation(analysis, {
+                      commonName: input.speciesName ?? existingPlant?.speciesName ?? null,
+                      scientificName: input.scientificName ?? existingPlant?.scientificName ?? null
+                    })
+                  : analysis
+              );
+            })()
+          : current.analyses
       }));
     },
-    [repositories]
+    [repositories, state.plants]
   );
 
   const addPlantPhoto = useCallback(

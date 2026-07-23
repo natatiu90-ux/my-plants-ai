@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { completedFactLabel, recommendationSpeciesContextFromPlant, speciesDetailLabel, speciesLearningCardPresentation, userProvidedSpeciesFromPlant } from "./plant-detail-recovery-presentation";
-import type { PlantHypothesisResolution } from "@/types/plant";
+import type { PlantAnalysisRecord, PlantHypothesisResolution } from "@/types/plant";
 import type { SpeciesLearningState } from "./species-learning";
 
 const learningState: SpeciesLearningState = {
@@ -13,13 +13,34 @@ const learningState: SpeciesLearningState = {
   source: "analysis"
 };
 
+const manualSpeciesAnalysis: Pick<PlantAnalysisRecord, "rawResult"> = {
+  rawResult: {
+    speciesIdentification: {
+      ...learningState,
+      userConfirmation: {
+        commonName: "Сирень",
+        scientificName: null,
+        confirmedAt: "2026-07-23T10:00:00.000Z",
+        source: "manual"
+      },
+      source: "combined"
+    }
+  }
+};
+
 assert.deepEqual(
   speciesDetailLabel({ fallbackName: "Unknown plant", speciesLearningState: learningState }),
   { labelKey: "addPlant.speciesLearningShortTitle", labelText: null },
   "unknown species should show a friendly learning label instead of raw currentLabel"
 );
 
-const userSpecies = userProvidedSpeciesFromPlant({ speciesName: "Сирень", scientificName: "" });
+assert.equal(
+  userProvidedSpeciesFromPlant({ speciesName: "Elephant bush / Dwarf jade", scientificName: "Portulacaria afra" }),
+  null,
+  "AI-identified species without a manual confirmation must not be treated as user-provided"
+);
+
+const userSpecies = userProvidedSpeciesFromPlant({ speciesName: "Сирень", scientificName: "" }, manualSpeciesAnalysis);
 assert.deepEqual(userSpecies, { commonName: "Сирень", scientificName: null, displayName: "Сирень" }, "manual species should be read from persisted plant state");
 
 assert.deepEqual(
@@ -41,7 +62,26 @@ assert.deepEqual(
 );
 
 assert.deepEqual(
-  speciesLearningCardPresentation({ speciesLearningState: learningState, userProvidedSpecies: userProvidedSpeciesFromPlant({ speciesName: "Syringa", scientificName: "" }) }).displayName,
+  speciesLearningCardPresentation({
+    speciesLearningState: learningState,
+    userProvidedSpecies: userProvidedSpeciesFromPlant(
+      { speciesName: "Syringa", scientificName: "" },
+      {
+        rawResult: {
+          speciesIdentification: {
+            ...learningState,
+            userConfirmation: {
+              commonName: "Syringa",
+              scientificName: null,
+              confirmedAt: "2026-07-23T10:05:00.000Z",
+              source: "manual"
+            },
+            source: "combined"
+          }
+        }
+      }
+    )
+  }).displayName,
   "Syringa",
   "editing the saved species updates the displayed completed value"
 );
@@ -53,7 +93,7 @@ assert.equal(
 );
 
 assert.deepEqual(
-  recommendationSpeciesContextFromPlant({ speciesName: "Сирень", scientificName: "" }),
+  recommendationSpeciesContextFromPlant({ speciesName: "Сирень", scientificName: "" }, manualSpeciesAnalysis),
   {
     source: "user_provided",
     commonName: "Сирень",
@@ -62,6 +102,12 @@ assert.deepEqual(
     note: "User-provided plant name; use as a helpful identification signal, but keep checking it against photo evidence."
   },
   "user species should be included in recommendation refresh context as a signal"
+);
+
+assert.equal(
+  recommendationSpeciesContextFromPlant({ speciesName: "Elephant bush / Dwarf jade", scientificName: "Portulacaria afra" }),
+  null,
+  "known AI species on Plant B should not inherit Plant A manual-name refresh context"
 );
 
 assert.deepEqual(

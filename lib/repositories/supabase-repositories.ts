@@ -1074,6 +1074,61 @@ export class AnalysisRepository {
     }
   }
 
+  async updateLatestSpeciesConfirmation(
+    plantId: string,
+    confirmation: { commonName?: string | null; scientificName?: string | null } | null
+  ) {
+    const { data: latest, error: selectError } = await this.supabase
+      .from("plant_analyses")
+      .select("id, raw_result")
+      .eq("user_id", this.user.id)
+      .eq("plant_id", plantId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    assertNoError(selectError);
+    if (!latest?.id) {
+      return null;
+    }
+
+    const rawResult = latest.raw_result && typeof latest.raw_result === "object" && !Array.isArray(latest.raw_result) ? (latest.raw_result as Record<string, unknown>) : {};
+    const existingSpecies =
+      rawResult.speciesIdentification && typeof rawResult.speciesIdentification === "object" && !Array.isArray(rawResult.speciesIdentification)
+        ? (rawResult.speciesIdentification as Record<string, unknown>)
+        : {};
+    const commonName = confirmation?.commonName?.trim() || null;
+    const scientificName = confirmation?.scientificName?.trim() || null;
+    const nextUserConfirmation =
+      commonName || scientificName
+        ? {
+            commonName,
+            scientificName,
+            confirmedAt: new Date().toISOString(),
+            source: "manual" as const
+          }
+        : null;
+    const nextRawResult = {
+      ...rawResult,
+      speciesIdentification: {
+        ...existingSpecies,
+        userConfirmation: nextUserConfirmation,
+        updatedAt: new Date().toISOString(),
+        source: nextUserConfirmation ? "combined" : existingSpecies.source ?? "analysis"
+      }
+    };
+
+    const { error } = await this.supabase
+      .from("plant_analyses")
+      .update({ raw_result: nextRawResult })
+      .eq("id", latest.id)
+      .eq("user_id", this.user.id)
+      .eq("plant_id", plantId);
+
+    assertNoError(error);
+    return latest.id as string;
+  }
+
   async resolveLatestActiveRecommendation(
     plantId: string,
     input: { action: string; result: string; replacementRecommendationId?: string | null }

@@ -1,15 +1,26 @@
 import assert from "node:assert/strict";
-import { recommendationRefreshReducer } from "./recommendation-refresh-state";
+import { recommendationRefreshReducer, recommendationRefreshStateForPlant } from "./recommendation-refresh-state";
 
-assert.deepEqual(recommendationRefreshReducer({ status: "idle" }, { type: "start" }), { status: "loading" });
-assert.deepEqual(recommendationRefreshReducer({ status: "loading" }, { type: "start" }), { status: "loading" });
-assert.deepEqual(recommendationRefreshReducer({ status: "loading" }, { type: "success" }), { status: "success" });
-assert.deepEqual(recommendationRefreshReducer({ status: "loading" }, { type: "unchanged" }), { status: "unchanged" });
-assert.deepEqual(recommendationRefreshReducer({ status: "loading" }, { type: "error", error: "timeout" }), { status: "error", error: "timeout" });
-assert.deepEqual(recommendationRefreshReducer({ status: "error", error: "timeout" }, { type: "start" }), { status: "loading" });
-assert.deepEqual(recommendationRefreshReducer({ status: "error", error: "timeout" }, { type: "success" }), { status: "success" });
-assert.deepEqual(recommendationRefreshReducer({ status: "success" }, { type: "error", error: "later_failure" }), { status: "error", error: "later_failure" });
-assert.deepEqual(recommendationRefreshReducer({ status: "success" }, { type: "unchanged" }), { status: "unchanged" });
-assert.deepEqual(recommendationRefreshReducer({ status: "success" }, { type: "reset" }), { status: "idle" });
+const plantA = "plant-a";
+const plantB = "plant-b";
 
-console.log("recommendation-refresh-state tests passed");
+let state = recommendationRefreshReducer({ status: "idle" }, { type: "start", plantId: plantA });
+state = recommendationRefreshReducer(state, { type: "error", plantId: plantA, error: "Название сохранено, но совет пока не обновился." });
+
+assert.equal(state.status, "error", "Plant A should keep its failed manual-name refresh state");
+assert.equal(state.plantId, plantA, "Refresh error should be scoped to Plant A");
+
+const visibleForPlantB = recommendationRefreshStateForPlant(state, plantB);
+assert.equal(visibleForPlantB.status, "idle", "Plant B must not inherit Plant A refresh error");
+assert.equal(visibleForPlantB.error, undefined, "Plant B must not show Plant A manual-name error copy");
+
+state = recommendationRefreshReducer(visibleForPlantB, { type: "error", plantId: plantA, error: "Название сохранено, но совет пока не обновился." });
+assert.equal(state.status, "idle", "Late Plant A refresh result must not re-open an error on Plant B");
+assert.equal(state.plantId, plantB, "The visible refresh state should remain scoped to Plant B");
+
+state = recommendationRefreshReducer(state, { type: "start", plantId: plantB });
+state = recommendationRefreshReducer(state, { type: "success", plantId: plantB });
+assert.equal(state.status, "success", "Plant B should still be able to refresh independently");
+assert.equal(state.plantId, plantB, "Plant B success should remain scoped to Plant B");
+
+console.log("recommendation refresh state scoping tests passed");

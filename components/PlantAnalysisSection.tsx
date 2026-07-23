@@ -259,7 +259,7 @@ function recommendationDensity(analysis: PlantAnalysisRecord, activeHypotheses: 
 function SpeciesLearningCard({ analysis, plant, onKnowSpecies, onAddPhoto }: { analysis?: PlantAnalysisRecord; plant: Plant; onKnowSpecies?: () => void; onAddPhoto?: () => void }) {
   const { t } = useI18n();
   const state = speciesLearningStateFromAnalysis(analysis);
-  const userProvidedSpecies = userProvidedSpeciesFromPlant(plant);
+  const userProvidedSpecies = userProvidedSpeciesFromPlant(plant, analysis);
   const presentation = speciesLearningCardPresentation({ speciesLearningState: state, userProvidedSpecies });
   if (!presentation.shouldRender) return null;
 
@@ -330,7 +330,7 @@ export function PlantAnalysisSection({
     () => deriveConversationalCareState({ analysis, plant, milestones, hypothesisResolutions, locale }),
     [analysis, hypothesisResolutions, locale, milestones, plant]
   );
-  const userProvidedSpecies = userProvidedSpeciesFromPlant(plant);
+  const userProvidedSpecies = userProvidedSpeciesFromPlant(plant, analysis);
   const completedFact = completedFactLabel({
     resolution: latestResolution(hypothesisResolutions),
     translate: t,

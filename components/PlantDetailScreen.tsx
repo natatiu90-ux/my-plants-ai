@@ -16,7 +16,7 @@ import { PhotoStorageRepository } from "@/lib/photo-storage";
 import { recommendationSpeciesContextFromPlant } from "@/lib/plant-detail-recovery-presentation";
 import { nextPostCreationClarificationStep } from "@/lib/post-creation-clarifications";
 import { buildRecommendationContextSnapshot, changedContextSince, impactLabelKey, isRecommendationStale, isVisualEvidenceStale, reasonTypeFromChangedContext, sourceAnalysisAgeDays, type RecommendationChangedContext, type RecommendationContextSnapshot } from "@/lib/recommendation-refresh";
-import { recommendationRefreshReducer, type RecommendationRefreshStatus } from "@/lib/recommendation-refresh-state";
+import { recommendationRefreshReducer, recommendationRefreshStateForPlant, type RecommendationRefreshStatus } from "@/lib/recommendation-refresh-state";
 import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION } from "@/lib/recommendation-version";
 import { soilCheckResultFromClarificationAnswer } from "@/lib/soil-check-completion";
 import { CareHistory } from "./CareHistory";
@@ -95,6 +95,7 @@ function analysisWithRecommendationRevision(analysis: PlantAnalysisRecord | unde
       ...structured,
       visibleObservations: analysis.rawResult?.visibleObservations ?? structured.visibleObservations,
       photoComparison: analysis.rawResult?.photoComparison ?? structured.photoComparison,
+      speciesIdentification: analysis.rawResult?.speciesIdentification ?? structured.speciesIdentification,
       recommendationRevision: {
         id: revision.id,
         reasonType: revision.reasonType,
@@ -253,9 +254,11 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const [sunlightSavingKey, setSunlightSavingKey] = useState<string | null>(null);
   const [photoAssessment, setPhotoAssessment] = useState<PhotoAssessmentState>({ status: "idle" });
   const [recommendationRefreshState, dispatchRecommendationRefresh] = useReducer(recommendationRefreshReducer, { status: "idle" });
+  const visibleRecommendationRefreshState = recommendationRefreshStateForPlant(recommendationRefreshState, plantId);
   const loggedEvents = useRef(new Set<string>());
   const openedActionRef = useRef<string | null>(null);
   const recommendationRefreshAbortRef = useRef<AbortController | null>(null);
+  const activePlantIdRef = useRef(plantId);
 
   useEffect(() => {
     if (!toast) {
@@ -277,15 +280,25 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   }, []);
 
   useEffect(() => {
-    if (recommendationRefreshState.status !== "success" && recommendationRefreshState.status !== "unchanged") {
+    activePlantIdRef.current = plantId;
+    recommendationRefreshAbortRef.current?.abort();
+    recommendationRefreshAbortRef.current = null;
+    setPhotoAssessment({ status: "idle" });
+    setSheet(null);
+    setToast(null);
+    dispatchRecommendationRefresh({ type: "reset", plantId });
+  }, [plantId]);
+
+  useEffect(() => {
+    if (visibleRecommendationRefreshState.status !== "success" && visibleRecommendationRefreshState.status !== "unchanged") {
       return;
     }
 
     const timeout = window.setTimeout(() => {
-      dispatchRecommendationRefresh({ type: "reset" });
+      dispatchRecommendationRefresh({ type: "reset", plantId });
     }, 3200);
     return () => window.clearTimeout(timeout);
-  }, [recommendationRefreshState.status]);
+  }, [plantId, visibleRecommendationRefreshState.status]);
 
   const careActionState = useMemo(
     () => (plant ? deriveCareActionState(plant, hypothesisResolutions, new Date(), { isCareDataReady: secondaryDataReady }) : null),
@@ -488,7 +501,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
 
     setPhotoAssessment({ status: "analyzing" });
     const startedAt = Date.now();
-    const userProvidedSpeciesContext = recommendationSpeciesContextFromPlant(plant);
+    const userProvidedSpeciesContext = recommendationSpeciesContextFromPlant(plant, analysis);
     try {
       const formData = new FormData();
       for (const photo of selectedPhotos) {
@@ -576,11 +589,11 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   };
 
   const updateRecommendations = async () => {
-    if (recommendationRefreshState.status === "loading" || !photos.length || !analysis) {
+    if (visibleRecommendationRefreshState.status === "loading" || !photos.length || !analysis) {
       return;
     }
 
-    dispatchRecommendationRefresh({ type: "start" });
+    dispatchRecommendationRefresh({ type: "start", plantId: plant.id });
     const abortController = new AbortController();
     recommendationRefreshAbortRef.current?.abort();
     recommendationRefreshAbortRef.current = abortController;
@@ -588,10 +601,12 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     const timeoutId = window.setTimeout(() => {
       didTimeout = true;
       abortController.abort();
-      dispatchRecommendationRefresh({ type: "error", error: t("plantAnalysis.refreshFailedInline") });
+      if (activePlantIdRef.current === plant.id) {
+        dispatchRecommendationRefresh({ type: "error", plantId: plant.id, error: t("plantAnalysis.refreshFailedInline") });
+      }
     }, recommendationRefreshTimeoutMs);
     const startedAt = Date.now();
-    const userProvidedSpeciesContext = recommendationSpeciesContextFromPlant(plant);
+    const userProvidedSpeciesContext = recommendationSpeciesContextFromPlant(plant, analysis);
     console.info("recommendation_refresh_started", {
       plantId: plant.id,
       revisionIdBefore: currentRecommendationRevision?.id ?? null,
@@ -631,7 +646,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       formData.append("currentCommonName", plant.speciesName ?? "");
       formData.append("currentScientificName", plant.scientificName ?? "");
       formData.append("currentDetectedSpecies", [plant.speciesName, plant.scientificName].filter(Boolean).join(" "));
-      formData.append("userProvidedSpecies", JSON.stringify(recommendationSpeciesContextFromPlant(plant)));
+      formData.append("userProvidedSpecies", JSON.stringify(userProvidedSpeciesContext));
       formData.append("currentLightCondition", plant.lightConditionKey ? t(plant.lightConditionKey) : "");
       formData.append("environmentContext", formatEnvironmentContextForPrompt(buildPlantEnvironmentContext({ plant, homes, rooms })));
       const changedContext = changedContextSince(currentRecommendationRevision?.contextSnapshot, recommendationContextSnapshot, {
@@ -706,8 +721,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         revisionIdAfter: revisionResult.revisionId,
         hasUserProvidedSpecies: Boolean(userProvidedSpeciesContext?.displayName)
       });
-      if (!didTimeout) {
-        dispatchRecommendationRefresh({ type: revisionResult.unchanged ? "unchanged" : "success" });
+      if (!didTimeout && activePlantIdRef.current === plant.id) {
+        dispatchRecommendationRefresh({ type: revisionResult.unchanged ? "unchanged" : "success", plantId: plant.id });
       }
     } catch (error) {
       const wasAborted = error instanceof DOMException && error.name === "AbortError";
@@ -718,8 +733,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         message: wasAborted ? "recommendation_refresh_timeout_or_abort" : error instanceof Error ? error.message : "Unknown error",
         durationMs: Date.now() - startedAt
       });
-      if (!didTimeout) {
-        dispatchRecommendationRefresh({ type: "error", error: userProvidedSpeciesContext ? t("plantAnalysis.userSpeciesRefreshFailed") : t("plantAnalysis.refreshFailedInline") });
+      if (!didTimeout && activePlantIdRef.current === plant.id) {
+        dispatchRecommendationRefresh({ type: "error", plantId: plant.id, error: userProvidedSpeciesContext ? t("plantAnalysis.userSpeciesRefreshFailed") : t("plantAnalysis.refreshFailedInline") });
       }
     } finally {
       window.clearTimeout(timeoutId);
@@ -734,9 +749,9 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       <RecommendationAutoRefresh
         shouldRefresh={recommendationsAreStale}
         refreshKey={recommendationRefreshKey}
-        status={recommendationRefreshState.status}
+        status={visibleRecommendationRefreshState.status}
         onRefresh={() => void updateRecommendations()}
-        onReset={() => dispatchRecommendationRefresh({ type: "reset" })}
+        onReset={() => dispatchRecommendationRefresh({ type: "reset", plantId: plant.id })}
       />
       <PlantDetailHeader
         title={plantName}
@@ -839,19 +854,20 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         </section>
       ) : null}
       <PlantAnalysisSection
+        key={plant.id}
         analysis={displayAnalysis}
         plant={plant}
         milestones={milestones}
         hypothesisResolutions={hypothesisResolutions}
         onResolveHypothesis={completeClarificationAnswer}
-        recommendationRefreshState={recommendationRefreshState}
+        recommendationRefreshState={visibleRecommendationRefreshState}
         hasPendingBaselineQuestions={Boolean(baselineQuestion)}
         careActionState={careActionState}
         onKnowSpecies={() => router.push(`/plants/${plant.id}/edit`)}
         onAddPhoto={() => setSheet("add_photo")}
         onRetryRecommendationRefresh={() => void updateRecommendations()}
       />
-      {currentRecommendationRevision?.reasonText && !recommendationsAreStale && recommendationRefreshState.status === "success" && currentRecommendationRevision.impactLevel && currentRecommendationRevision.impactLevel !== "none" ? (
+      {currentRecommendationRevision?.reasonText && !recommendationsAreStale && visibleRecommendationRefreshState.status === "success" && currentRecommendationRevision.impactLevel && currentRecommendationRevision.impactLevel !== "none" ? (
         <section className="mt-4 rounded-[24px] bg-[#eef5e8] p-4 shadow-soft">
           <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("plantAnalysis.revisionNoteTitle")}</p>
           <p className="mt-1 text-sm font-extrabold leading-5 text-[#355f3d]">{currentRecommendationRevision.reasonText}</p>

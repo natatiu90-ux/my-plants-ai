@@ -24,7 +24,7 @@ export function PlantStatusSection({
 }) {
   const { t } = useI18n();
   const speciesLearningState = speciesLearningStateFromAnalysis(analysis);
-  const userProvidedSpecies = userProvidedSpeciesFromPlant(plant);
+  const userProvidedSpecies = userProvidedSpeciesFromPlant(plant, analysis);
   const speciesLabel = speciesDetailLabel({ fallbackName: plantCommonName(plant), speciesLearningState, userProvidedSpecies });
   const commonName = speciesLabel.labelKey ? t(speciesLabel.labelKey) : speciesLabel.labelText ?? "";
   const healthStatus = derivePlantHealthStatus({ plant, analysis, milestones, careActionState });
