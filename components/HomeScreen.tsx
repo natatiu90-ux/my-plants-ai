@@ -26,16 +26,38 @@ function sortPlantsByPriority(plants: Plant[]) {
 }
 
 function HomeSkeleton() {
+  const { t } = useI18n();
+
   return (
-    <section className="grid gap-4 px-5 pt-6">
-      {[0, 1, 2].map((item) => (
-        <div key={item} className="overflow-hidden rounded-[28px] border border-white/60 bg-[#fffaf3] shadow-soft">
-          <div className="h-[224px] animate-pulse bg-[#e5dfd4]" />
-          <div className="space-y-3 px-5 pb-5 pt-3.5">
-            <div className="h-7 w-1/2 rounded-full bg-[#e5dfd4]" />
-            <div className="h-4 w-1/3 rounded-full bg-[#eee7dc]" />
-            <div className="h-5 w-5/6 rounded-full bg-[#eee7dc]" />
-            <div className="h-5 w-2/3 rounded-full bg-[#eee7dc]" />
+    <section className="grid gap-5 px-5 pt-6" aria-busy="true">
+      <div className="rounded-[30px] border border-[#f2dfbc] bg-[#fff8e8] px-4 py-3 shadow-[0_14px_34px_rgba(96,73,39,0.08)]">
+        <div className="flex items-center gap-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-[18px] bg-[#e2f3d9] text-[#5e9b57]">
+            <Leaf aria-hidden="true" size={24} />
+          </span>
+          <div>
+            <p className="font-rounded text-lg font-extrabold leading-6 text-[#3f3b35]">{t("home.loadingTitle")}</p>
+            <p className="mt-0.5 text-sm font-semibold leading-5 text-[#7a7166]">{t("home.loadingBody")}</p>
+          </div>
+        </div>
+      </div>
+
+      {[0, 1].map((item) => (
+        <div key={item} className="overflow-hidden rounded-[34px] border border-[#f1dfbd] bg-[#fffaf3] shadow-soft">
+          <div className="relative h-[248px] overflow-hidden bg-[#e9e1d5]">
+            <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-[#eee8dd] via-[#e1dbcF] to-[#f8f2e8]" />
+            <div className="absolute left-7 top-7 h-24 w-7 origin-bottom -rotate-6 rounded-full bg-[#c7d8b8]/70" />
+            <div className="absolute left-12 top-16 h-16 w-12 rotate-12 rounded-[50%] bg-[#b4ce9e]/80" />
+            <div className="absolute right-10 top-12 h-32 w-8 origin-bottom rotate-12 rounded-full bg-[#9fbc83]/70" />
+            <div className="absolute right-16 top-24 h-14 w-16 -rotate-12 rounded-[50%] bg-[#d4e5c2]/80" />
+            <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-[#fffaf3] to-transparent" />
+            <div className="absolute bottom-6 left-6 h-9 w-36 animate-pulse rounded-full bg-white/80 shadow-sm" />
+          </div>
+          <div className="space-y-3 px-5 pb-5 pt-4">
+            <div className="h-8 w-1/2 animate-pulse rounded-full bg-[#ded6ca]" />
+            <div className="h-5 w-1/3 animate-pulse rounded-full bg-[#eee7dc]" />
+            <div className="mt-4 h-5 w-5/6 animate-pulse rounded-full bg-[#eee7dc]" />
+            <div className="h-5 w-2/3 animate-pulse rounded-full bg-[#eee7dc]" />
           </div>
         </div>
       ))}

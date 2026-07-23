@@ -6,6 +6,8 @@
   "home.emptyBody": "Add your first plant. I’ll help identify it, understand how it’s doing, and remind you when it needs care.",
   "home.emptyCta": "Add your first plant",
   "home.loadError": "Your plants couldn’t be loaded.",
+  "home.loadingTitle": "Preparing your plants",
+  "home.loadingBody": "Gathering cards, reminders, and the latest care notes.",
   "common.tryAgain": "Try again",
   "common.done": "Done",
   "settings.title": "Settings",
