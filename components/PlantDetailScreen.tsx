@@ -277,7 +277,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useI18n();
-  const { addMilestone, addPlantPhotos, completePhotoFollowUp, completeSoilCheck, deletePlant, ensureFullPhotoUrl, getAllPlantFollowUps, getCoverPhoto, getCurrentRecommendationRevision, getLatestCompletedFollowUp, getPlant, getPlantAnalysis, getPlantAnalyses, getPlantCareEvents, getPlantFollowUps, getPlantHypothesisResolutions, getPlantMilestones, getPlantPhotos, homes, recordSoilChecked, resolvePlantHypothesis, rooms, saveBaselineHistory, savePlantAnalysis, saveRecommendationRevision, secondaryDataReady, updateRoom, waterPlant } =
+  const { addMilestone, addPlantPhotos, completePhotoFollowUp, completeSoilCheck, deletePlant, ensureFullPhotoUrl, getAllPlantFollowUps, getCoverPhoto, getCurrentRecommendationRevision, getLatestCompletedFollowUp, getPlant, getPlantAnalysis, getPlantAnalyses, getPlantCareEvents, getPlantFollowUps, getPlantHypothesisResolutions, getPlantMilestones, getPlantPhotos, homes, recordSoilChecked, resolvePlantHypothesis, rooms, saveBaselineHistory, savePlantAnalysis, saveRecommendationRevision, secondaryDataReady, secondaryDataStatus, secondaryLoadState, updateRoom, waterPlant } =
     usePlantStore();
   const { locale } = useI18n();
   const plant = getPlant(plantId);
@@ -422,6 +422,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         ? buildPlantDetailDebugData({
             plant,
             secondaryDataReady,
+            secondaryDataStatus,
+            secondaryLoadState,
             analyses,
             analysisContext,
             recommendationRevision: currentRecommendationRevision,
@@ -449,7 +451,9 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       photos,
       plant,
       plantDebugEnabled,
-      secondaryDataReady
+      secondaryDataReady,
+      secondaryDataStatus,
+      secondaryLoadState
     ]
   );
 

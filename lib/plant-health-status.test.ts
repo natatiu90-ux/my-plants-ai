@@ -149,6 +149,26 @@ assert.equal(
 
 assert.equal(
   derivePlantHealthStatus({
+    plant: { ...basePlant, status: "needs_attention" },
+    careActionState: {
+      actionType: "none",
+      status: "blocked",
+      isActionable: false,
+      dueAt: null,
+      cardVisualState: "healthy",
+      labelKey: null,
+      cardBadgeKey: null,
+      cardMessageKey: "careAction.noAction",
+      detailMessageKey: "careAction.noAction",
+      reason: "care_context_loading"
+    }
+  }).status,
+  "needs_attention",
+  "persisted needs_attention should not become healthy while secondary care context is loading"
+);
+
+assert.equal(
+  derivePlantHealthStatus({
     plant: { ...basePlant, status: "healthy" },
     analysis: healthyAnalysis,
     milestones: [

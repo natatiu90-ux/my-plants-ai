@@ -248,6 +248,15 @@ export function derivePlantHealthStatus(input: {
     return healthMeta("needs_attention", `due_${careActionState.actionType}`);
   }
 
+  if (careActionState?.status === "blocked" && careActionState.reason === "care_context_loading") {
+    if (plant.status === "needs_attention") {
+      return healthMeta("needs_attention", "persisted_status_during_care_context_loading");
+    }
+    if (plant.status === "check_soon") {
+      return healthMeta("watch", "persisted_status_during_care_context_loading");
+    }
+  }
+
   if (aiStatus === "healthy" && recoveryContext) {
     if (recentRecoveryCare || hasActiveRecoveryFollowUp(followUps)) {
       return healthMeta("adapting", "healthy_checkin_during_recovery");

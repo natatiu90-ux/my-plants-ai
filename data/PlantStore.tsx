@@ -41,9 +41,31 @@ type PlantState = {
   homes: HomeContext[];
   rooms: Room[];
   secondaryDataReady: boolean;
+  secondaryDataStatus: "idle" | "loading" | "ready" | "partial_error";
+  secondaryLoadState: SecondaryLoadState;
 };
 
 type StoreStatus = "loading" | "ready" | "error" | "unauthenticated";
+
+type SecondarySourceState = {
+  attempted: boolean;
+  loadedCount: number;
+  errorCode?: string;
+  errorMessage?: string;
+};
+
+export type SecondaryLoadState = {
+  startedAt?: string;
+  completedAt?: string;
+  authReady: boolean;
+  userIdPresent: boolean;
+  analyses: SecondarySourceState;
+  milestones: SecondarySourceState;
+  careEvents: SecondarySourceState;
+  followUps: SecondarySourceState;
+  recommendationRevisions: SecondarySourceState;
+  hypothesisResolutions: SecondarySourceState;
+};
 
 type AddPlantInput = {
   homeName?: string;
@@ -229,8 +251,55 @@ const emptyState: PlantState = {
   hypothesisResolutions: [],
   homes: [],
   rooms: [],
-  secondaryDataReady: false
+  secondaryDataReady: false,
+  secondaryDataStatus: "idle",
+  secondaryLoadState: emptySecondaryLoadState(false, false)
 };
+
+function emptySecondarySourceState(): SecondarySourceState {
+  return { attempted: false, loadedCount: 0 };
+}
+
+function emptySecondaryLoadState(authReady: boolean, userIdPresent: boolean): SecondaryLoadState {
+  return {
+    authReady,
+    userIdPresent,
+    analyses: emptySecondarySourceState(),
+    milestones: emptySecondarySourceState(),
+    careEvents: emptySecondarySourceState(),
+    followUps: emptySecondarySourceState(),
+    recommendationRevisions: emptySecondarySourceState(),
+    hypothesisResolutions: emptySecondarySourceState()
+  };
+}
+
+function errorCode(error: unknown) {
+  if (error && typeof error === "object" && "code" in error && typeof error.code === "string") {
+    return error.code;
+  }
+  return undefined;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error";
+}
+
+async function loadSecondarySource<T>(task: () => Promise<T[]>): Promise<{ data: T[]; state: SecondarySourceState }> {
+  try {
+    const data = await task();
+    return { data, state: { attempted: true, loadedCount: data.length } };
+  } catch (error) {
+    return {
+      data: [],
+      state: {
+        attempted: true,
+        loadedCount: 0,
+        errorCode: errorCode(error),
+        errorMessage: errorMessage(error)
+      }
+    };
+  }
+}
 
 function builtInRoomExists(name: string) {
   const normalized = name.trim().toLocaleLowerCase();
@@ -301,24 +370,75 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       }
     }
 
-    setState((current) => ({ ...current, plants, photos, homes, rooms, secondaryDataReady: false }));
+    const startedAt = new Date().toISOString();
+    setState((current) => ({
+      ...current,
+      plants,
+      photos,
+      homes,
+      rooms,
+      secondaryDataReady: false,
+      secondaryDataStatus: "loading",
+      secondaryLoadState: {
+        ...emptySecondaryLoadState(true, Boolean(nextRepositories.userId)),
+        startedAt
+      }
+    }));
 
     void Promise.all([
-      nextRepositories.milestones.listMilestones(),
-      nextRepositories.followUps.listFollowUps(),
-      nextRepositories.careEvents.listCareEvents(),
-      nextRepositories.analyses.listAnalyses(),
-      nextRepositories.recommendationRevisions.listRevisions(),
-      nextRepositories.hypothesisResolutions.listResolutions()
-    ])
-      .then(([milestones, followUps, careEvents, analyses, recommendationRevisions, hypothesisResolutions]) => {
-        setState((current) => ({ ...current, milestones, followUps, careEvents, analyses, recommendationRevisions, hypothesisResolutions, secondaryDataReady: true }));
-      })
-      .catch((nextError) => {
-        console.error("secondary_plant_data_load_failed", {
-          message: nextError instanceof Error ? nextError.message : "Unknown error"
-        });
+      loadSecondarySource(() => nextRepositories.milestones.listMilestones()),
+      loadSecondarySource(() => nextRepositories.followUps.listFollowUps()),
+      loadSecondarySource(() => nextRepositories.careEvents.listCareEvents()),
+      loadSecondarySource(() => nextRepositories.analyses.listAnalyses()),
+      loadSecondarySource(() => nextRepositories.recommendationRevisions.listRevisions()),
+      loadSecondarySource(() => nextRepositories.hypothesisResolutions.listResolutions())
+    ]).then(([milestonesResult, followUpsResult, careEventsResult, analysesResult, recommendationRevisionsResult, hypothesisResolutionsResult]) => {
+      const completedAt = new Date().toISOString();
+      const secondaryLoadState: SecondaryLoadState = {
+        startedAt,
+        completedAt,
+        authReady: true,
+        userIdPresent: Boolean(nextRepositories.userId),
+        analyses: analysesResult.state,
+        milestones: milestonesResult.state,
+        careEvents: careEventsResult.state,
+        followUps: followUpsResult.state,
+        recommendationRevisions: recommendationRevisionsResult.state,
+        hypothesisResolutions: hypothesisResolutionsResult.state
+      };
+      const hasErrors = [
+        milestonesResult.state,
+        followUpsResult.state,
+        careEventsResult.state,
+        analysesResult.state,
+        recommendationRevisionsResult.state,
+        hypothesisResolutionsResult.state
+      ].some((source) => source.errorMessage);
+
+      console.info("secondary_plant_data_loaded", {
+        userIdSuffix: nextRepositories.userId.slice(-6),
+        status: hasErrors ? "partial_error" : "ready",
+        milestones: milestonesResult.state,
+        followUps: followUpsResult.state,
+        careEvents: careEventsResult.state,
+        analyses: analysesResult.state,
+        recommendationRevisions: recommendationRevisionsResult.state,
+        hypothesisResolutions: hypothesisResolutionsResult.state
       });
+
+      setState((current) => ({
+        ...current,
+        milestones: milestonesResult.state.errorMessage ? current.milestones : milestonesResult.data,
+        followUps: followUpsResult.state.errorMessage ? current.followUps : followUpsResult.data,
+        careEvents: careEventsResult.state.errorMessage ? current.careEvents : careEventsResult.data,
+        analyses: analysesResult.state.errorMessage ? current.analyses : analysesResult.data,
+        recommendationRevisions: recommendationRevisionsResult.state.errorMessage ? current.recommendationRevisions : recommendationRevisionsResult.data,
+        hypothesisResolutions: hypothesisResolutionsResult.state.errorMessage ? current.hypothesisResolutions : hypothesisResolutionsResult.data,
+        secondaryDataReady: true,
+        secondaryDataStatus: hasErrors ? "partial_error" : "ready",
+        secondaryLoadState
+      }));
+    });
   }, []);
 
   const bootstrap = useCallback(async () => {
@@ -1763,7 +1883,9 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         hypothesisResolutions: current.hypothesisResolutions.filter((resolution) => resolution.plantId !== plantId),
         homes: current.homes,
         rooms: current.rooms,
-        secondaryDataReady: current.secondaryDataReady
+        secondaryDataReady: current.secondaryDataReady,
+        secondaryDataStatus: current.secondaryDataStatus,
+        secondaryLoadState: current.secondaryLoadState
       }));
     },
     [repositories, state.photos]

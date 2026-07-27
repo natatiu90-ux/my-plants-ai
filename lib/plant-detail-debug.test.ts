@@ -91,6 +91,17 @@ const timeline = buildPlantTimeline({
 const debugData = buildPlantDetailDebugData({
   plant,
   secondaryDataReady: true,
+  secondaryDataStatus: "ready",
+  secondaryLoadState: {
+    authReady: true,
+    userIdPresent: true,
+    analyses: { attempted: true, loadedCount: 2 },
+    milestones: { attempted: true, loadedCount: 1 },
+    careEvents: { attempted: true, loadedCount: 0 },
+    followUps: { attempted: true, loadedCount: 0 },
+    recommendationRevisions: { attempted: true, loadedCount: 0 },
+    hypothesisResolutions: { attempted: true, loadedCount: 0 }
+  },
   analyses,
   analysisContext,
   milestones: [milestone],

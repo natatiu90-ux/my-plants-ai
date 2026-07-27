@@ -4,6 +4,19 @@ import { plantDetailAnalysisMode, type PlantDetailAnalysisContext } from "./plan
 import type { Plant, PlantAnalysisRecord, PlantCareEvent, PlantFollowUp, PlantHypothesisResolution, PlantMilestone, PlantPhoto, PlantRecommendationRevision } from "@/types/plant";
 import type { PlantTimelineEvent } from "./plant-timeline";
 
+type SecondaryLoadState = {
+  startedAt?: string;
+  completedAt?: string;
+  authReady: boolean;
+  userIdPresent: boolean;
+  analyses: { attempted: boolean; loadedCount: number; errorCode?: string; errorMessage?: string };
+  milestones: { attempted: boolean; loadedCount: number; errorCode?: string; errorMessage?: string };
+  careEvents: { attempted: boolean; loadedCount: number; errorCode?: string; errorMessage?: string };
+  followUps: { attempted: boolean; loadedCount: number; errorCode?: string; errorMessage?: string };
+  recommendationRevisions: { attempted: boolean; loadedCount: number; errorCode?: string; errorMessage?: string };
+  hypothesisResolutions: { attempted: boolean; loadedCount: number; errorCode?: string; errorMessage?: string };
+};
+
 type AnalysisDebugRow = {
   id: string;
   createdAt: string;
@@ -19,6 +32,8 @@ export type PlantDetailDebugData = {
   plantId: string;
   plantStatus: string;
   secondaryDataReady: boolean;
+  secondaryDataStatus: string;
+  secondaryLoadState: SecondaryLoadState;
   analysesCount: number;
   analyses: AnalysisDebugRow[];
   latestAnalysisId: string | null;
@@ -110,6 +125,8 @@ export function canBuildPlantAnalysisView(analysis?: PlantAnalysisRecord) {
 
 function hiddenReason(input: {
   secondaryDataReady: boolean;
+  secondaryDataStatus: string;
+  secondaryLoadState: SecondaryLoadState;
   analysesCount: number;
   meaningfulAnalysis?: PlantAnalysisRecord;
   meaningfulAnalysisCanBuildView: boolean;
@@ -126,6 +143,8 @@ function hiddenReason(input: {
 export function buildPlantDetailDebugData(input: {
   plant: Plant;
   secondaryDataReady: boolean;
+  secondaryDataStatus: string;
+  secondaryLoadState: SecondaryLoadState;
   analyses: PlantAnalysisRecord[];
   analysisContext: PlantDetailAnalysisContext;
   recommendationRevision?: PlantRecommendationRevision;
@@ -147,6 +166,8 @@ export function buildPlantDetailDebugData(input: {
     plantId: input.plant.id,
     plantStatus: input.plant.status,
     secondaryDataReady: input.secondaryDataReady,
+    secondaryDataStatus: input.secondaryDataStatus,
+    secondaryLoadState: input.secondaryLoadState,
     analysesCount: input.analyses.length,
     analyses: input.analyses.map((analysis) => ({
       id: analysis.id,
@@ -188,6 +209,8 @@ export function buildPlantDetailDebugData(input: {
       ? "not_hidden"
       : hiddenReason({
           secondaryDataReady: input.secondaryDataReady,
+          secondaryDataStatus: input.secondaryDataStatus,
+          secondaryLoadState: input.secondaryLoadState,
           analysesCount: input.analyses.length,
           meaningfulAnalysis: input.analysisContext.meaningfulAnalysis,
           meaningfulAnalysisCanBuildView,
