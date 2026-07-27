@@ -1,6 +1,6 @@
 import type { TranslationKey } from "@/i18n/dictionaries";
 import type { DerivedCareActionState } from "@/lib/plant-action-eligibility";
-import type { Plant, PlantAnalysisRecord, PlantMilestone } from "@/types/plant";
+import type { Plant, PlantAnalysisRecord, PlantFollowUp, PlantMilestone } from "@/types/plant";
 
 export type PlantHealthStatus = "healthy" | "adapting" | "watch" | "needs_attention" | "action_needed";
 
@@ -30,6 +30,14 @@ function daysSince(dateKey?: string | null) {
 
 function recentMilestone(milestones: PlantMilestone[], types: PlantMilestone["type"][], maxDays: number) {
   return milestones.some((milestone) => types.includes(milestone.type) && milestone.eventDate && (daysSince(milestone.eventDate) ?? Number.POSITIVE_INFINITY) <= maxDays);
+}
+
+function hasRecoveryMilestone(milestones: PlantMilestone[]) {
+  return milestones.some((milestone) => milestone.type === "pruned" || milestone.type === "treatment_started" || milestone.type === "damaged" || milestone.type === "repotted");
+}
+
+function hasActiveRecoveryFollowUp(followUps: PlantFollowUp[]) {
+  return followUps.some((followUp) => followUp.status === "scheduled" || followUp.status === "due");
 }
 
 function rawPlantStatus(analysis?: PlantAnalysisRecord): PlantHealthStatus | null {
@@ -222,15 +230,29 @@ export function derivePlantHealthStatus(input: {
   analysis?: PlantAnalysisRecord;
   careActionState?: DerivedCareActionState | null;
   milestones?: PlantMilestone[];
+  followUps?: PlantFollowUp[];
 }): DerivedPlantHealthStatus {
-  const { plant, analysis, careActionState, milestones = [] } = input;
+  const { plant, analysis, careActionState, milestones = [], followUps = [] } = input;
   const aiStatus = rawPlantStatus(analysis);
+  const recoveryContext =
+    plant.status === "needs_attention" ||
+    plant.status === "check_soon" ||
+    hasActiveRecoveryFollowUp(followUps) ||
+    hasRecoveryMilestone(milestones);
+  const recentRecoveryCare = recentMilestone(milestones, ["repotted", "pruned", "treatment_started", "damaged"], 30);
 
   if (careActionState?.isActionable && careActionState.status === "due") {
     if (careActionState.actionType === "water") {
       return healthMeta("action_needed", "due_watering");
     }
     return healthMeta("needs_attention", `due_${careActionState.actionType}`);
+  }
+
+  if (aiStatus === "healthy" && recoveryContext) {
+    if (recentRecoveryCare || hasActiveRecoveryFollowUp(followUps)) {
+      return healthMeta("adapting", "healthy_checkin_during_recovery");
+    }
+    return healthMeta("watch", "healthy_checkin_after_recovery_context");
   }
 
   if (aiStatus) {

@@ -1,6 +1,13 @@
-import assert from "node:assert/strict";
 import { deriveRepeatedPhotoStatus, shouldSuppressHealthyCheckinStatus } from "./plant-status-transition";
 import type { Plant, PlantAnalysisRecord, PlantMilestone } from "@/types/plant";
+
+const assert = {
+  equal(actual: unknown, expected: unknown, message?: string) {
+    if (actual !== expected) {
+      throw new Error(`${message ?? "assert.equal failed"}: expected ${String(expected)}, got ${String(actual)}`);
+    }
+  }
+};
 
 const plant = (input: Partial<Plant> = {}): Plant => ({
   id: "plant-1",

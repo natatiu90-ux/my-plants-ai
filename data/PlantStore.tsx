@@ -1475,7 +1475,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         void scheduleFollowUp(plantId, followUpReason);
       }
     },
-    [repositories, scheduleFollowUp, state.plants]
+    [repositories, scheduleFollowUp, state.analyses, state.followUps, state.milestones, state.plants]
   );
 
   const completePhotoFollowUp = useCallback(

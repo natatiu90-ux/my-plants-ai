@@ -140,6 +140,12 @@ const wateringDeduped = buildPlantTimeline({
 assert.equal(wateringDeduped.filter((event) => event.kind === "watering").length, 1, "watering milestone + care_event on the same date should render once");
 assert.equal(wateringDeduped[0].origin, "plant_milestones", "milestone should win watering duplicate display");
 
+const pruningTimeline = buildPlantTimeline({
+  plantId,
+  milestones: [milestone({ id: "pruning-milestone", type: "pruned", eventDate: "2026-07-12" })]
+});
+assert.equal(pruningTimeline.filter((event) => event.kind === "pruning").length, 1, "pruning milestone should appear");
+
 const photoAndCheckin = buildPlantTimeline({
   plantId,
   photos: [photo({ id: "new-photo", createdAt: "2026-07-14T11:00:00.000Z" })],
@@ -179,7 +185,17 @@ const multiplePhotosTimeline = buildPlantTimeline({
     photo({ id: "photo-c", createdAt: "2026-07-15T11:02:00.000Z" })
   ]
 });
-assert.equal(multiplePhotosTimeline.filter((event) => event.kind === "photo_added").length, 3, "each persisted photo should create one photo_added event");
+assert.equal(multiplePhotosTimeline.filter((event) => event.kind === "photo_added").length, 1, "photos from one upload batch should become one photo_added event");
+assert.equal(multiplePhotosTimeline.find((event) => event.kind === "photo_added")?.payload?.photoCount, 3, "grouped photo event should keep photo count");
+
+const separatePhotoBatchesTimeline = buildPlantTimeline({
+  plantId,
+  photos: [
+    photo({ id: "photo-a", createdAt: "2026-07-15T11:00:00.000Z" }),
+    photo({ id: "photo-b", createdAt: "2026-07-15T11:20:00.000Z" })
+  ]
+});
+assert.equal(separatePhotoBatchesTimeline.filter((event) => event.kind === "photo_added").length, 2, "separate photo batches should remain separate events");
 
 const failedPhotoUploadTimeline = buildPlantTimeline({
   plantId,

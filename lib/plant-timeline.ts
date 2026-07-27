@@ -148,18 +148,49 @@ function careEventToEvent(event: PlantCareEvent): PlantTimelineEvent | null {
   };
 }
 
-function photoToEvent(photo: PlantPhoto): PlantTimelineEvent {
-  const occurredAt = dateKey(photo.createdAt);
+function photoToEvent(photos: PlantPhoto[]): PlantTimelineEvent | null {
+  const [firstPhoto] = photos;
+  if (!firstPhoto) return null;
+  const newestPhoto = photos.reduce((newest, photo) => (photo.createdAt.localeCompare(newest.createdAt) > 0 ? photo : newest), firstPhoto);
+  const occurredAt = dateKey(newestPhoto.createdAt);
+  const photoIds = photos.map((photo) => photo.id).sort();
   return {
-    id: `plant_photos:${photo.id}`,
-    plantId: photo.plantId,
+    id: `plant_photos:${photoIds.join("+")}`,
+    plantId: newestPhoto.plantId,
     kind: "photo_added",
     occurredAt,
-    sortAt: sortAt(photo.createdAt),
-    title: "history.photo_added",
+    sortAt: sortAt(newestPhoto.createdAt),
+    title: photos.length > 1 ? "history.photos_added" : "history.photo_added",
     origin: "plant_photos",
-    payload: { photoId: photo.id, photoType: photo.type, isCover: photo.isCover }
+    payload: { photoIds, photoCount: photos.length, photoType: newestPhoto.type, isCover: photos.some((photo) => photo.isCover) }
   };
+}
+
+function photoToEvents(photos: PlantPhoto[] = []): PlantTimelineEvent[] {
+  const sorted = [...photos].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const groups: PlantPhoto[][] = [];
+  const groupingWindowMs = 5 * 60 * 1000;
+
+  for (const photo of sorted) {
+    const lastGroup = groups[groups.length - 1];
+    const lastPhoto = lastGroup?.[lastGroup.length - 1];
+    const lastTime = lastPhoto ? new Date(lastPhoto.createdAt).getTime() : Number.NaN;
+    const currentTime = new Date(photo.createdAt).getTime();
+    const sameBatch =
+      lastGroup &&
+      lastPhoto?.plantId === photo.plantId &&
+      Number.isFinite(lastTime) &&
+      Number.isFinite(currentTime) &&
+      currentTime - lastTime <= groupingWindowMs;
+
+    if (sameBatch) {
+      lastGroup.push(photo);
+    } else {
+      groups.push([photo]);
+    }
+  }
+
+  return groups.map(photoToEvent).filter((event): event is PlantTimelineEvent => Boolean(event));
 }
 
 function followUpToEvents(followUp: PlantFollowUp): PlantTimelineEvent[] {
@@ -234,7 +265,7 @@ export function buildPlantTimeline(input: TimelineInput): PlantTimelineEvent[] {
     ...(input.careEvents ?? []).map(careEventToEvent),
     ...(input.analyses ?? []).map(analysisToEvent),
     ...(input.followUps ?? []).flatMap(followUpToEvents),
-    ...(input.photos ?? []).map(photoToEvent)
+    ...photoToEvents(input.photos)
   ].filter((event): event is PlantTimelineEvent => Boolean(event && event.plantId === input.plantId));
 
   const deduped = new Map<string, PlantTimelineEvent>();

@@ -1,7 +1,14 @@
-import assert from "node:assert/strict";
 import { deriveCareActionState } from "./plant-action-eligibility";
 import { alignPlantHealthStatusWithUrgency, derivePlantHealthStatus } from "./plant-health-status";
 import type { Plant, PlantAnalysisRecord, PlantMilestone } from "@/types/plant";
+
+const assert = {
+  equal(actual: unknown, expected: unknown, message?: string) {
+    if (actual !== expected) {
+      throw new Error(`${message ?? "assert.equal failed"}: expected ${String(expected)}, got ${String(actual)}`);
+    }
+  }
+};
 
 const basePlant: Plant = {
   id: "plant-1",
@@ -130,5 +137,55 @@ const hiddenUrgency = {
 } as PlantAnalysisRecord;
 
 assert.equal(alignPlantHealthStatusWithUrgency("healthy", hiddenUrgency), "action_needed");
+
+assert.equal(
+  derivePlantHealthStatus({
+    plant: { ...basePlant, status: "needs_attention" },
+    analysis: healthyAnalysis
+  }).status,
+  "watch",
+  "previous needs_attention should not become healthy from one healthy AI result"
+);
+
+assert.equal(
+  derivePlantHealthStatus({
+    plant: { ...basePlant, status: "healthy" },
+    analysis: healthyAnalysis,
+    milestones: [
+      {
+        id: "recent-repot",
+        plantId: "plant-1",
+        type: "repotted",
+        eventDate: new Date().toISOString().slice(0, 10),
+        createdAt: new Date().toISOString(),
+        isManual: true
+      }
+    ]
+  }).status,
+  "adapting",
+  "recent repotting should prevent generic healthy status"
+);
+
+assert.equal(
+  derivePlantHealthStatus({
+    plant: { ...basePlant, status: "healthy" },
+    analysis: healthyAnalysis,
+    followUps: [
+      {
+        id: "follow-up-1",
+        plantId: "plant-1",
+        reason: "recovery_monitoring",
+        taskType: "add_photo",
+        dueAt: new Date().toISOString(),
+        status: "scheduled",
+        completedPhotoIds: [],
+        result: null,
+        createdAt: new Date().toISOString()
+      }
+    ]
+  }).status,
+  "adapting",
+  "active follow-up should keep recovery context visible"
+);
 
 console.log("plant-health-status tests passed");

@@ -22,6 +22,10 @@ function hasActiveFollowUp(followUps: PlantFollowUp[]) {
   return followUps.some((followUp) => followUp.status === "scheduled" || followUp.status === "due");
 }
 
+function hasAnyRecoveryFollowUp(followUps: PlantFollowUp[]) {
+  return followUps.some((followUp) => followUp.reason === "after_repotting" || followUp.reason === "after_pruning" || followUp.reason === "recovery_monitoring");
+}
+
 function isRecoveryLikeStatus(status?: Plant["status"] | null) {
   return status === "needs_attention" || status === "check_soon";
 }
@@ -78,9 +82,10 @@ export function shouldSuppressHealthyCheckinStatus(input: {
   plant: Plant;
   analysis?: PlantAnalysisRecord | null;
   milestones?: PlantMilestone[];
+  followUps?: PlantFollowUp[];
 }) {
   const raw = input.analysis?.rawResult;
   const mode = raw && typeof raw === "object" ? (raw as Record<string, unknown>).analysisMode : undefined;
   const aiStatus = rawPlantStatus(input.analysis);
-  return mode === "plant_checkin" && aiStatus === "healthy" && (isRecoveryLikeStatus(input.plant.status) || hasRecentRecoveryMilestone(input.milestones ?? []));
+  return mode === "plant_checkin" && aiStatus === "healthy" && (isRecoveryLikeStatus(input.plant.status) || hasRecentRecoveryMilestone(input.milestones ?? []) || hasAnyRecoveryFollowUp(input.followUps ?? []));
 }

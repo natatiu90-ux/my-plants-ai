@@ -676,7 +676,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       const changes = photoAssessmentChanges(payload.analysis.condition, locale);
       if (followUp) {
         const checkinResult = payload.analysis.photoComparison?.reliableComparison === false ? "unclear" : payload.analysis.condition === "needs_attention" ? "worse" : payload.analysis.condition === "healthy" ? "improved" : "stable";
-        const completed = await completePhotoFollowUp(plant.id, followUp.id, savedPhotos, {
+        const checkinRawResult = {
           ...payload.analysis,
           analysisMode: progressReviewMode(),
           checkinResult,
@@ -694,6 +694,22 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
             reliableComparison: payload.analysis.photoComparison?.reliableComparison ?? false,
             message: payload.analysis.photoComparison?.message ?? { en: message, ru: message }
           }
+        };
+        await savePlantAnalysis(plant.id, {
+          sourcePhotoIds: savedPhotos.map((photo) => photo.id),
+          detectedSpecies: payload.analysis.detectedSpecies,
+          confidence: payload.analysis.confidence,
+          condition: payload.analysis.condition,
+          nextAction: payload.analysis.nextAction === "none" ? null : payload.analysis.nextAction,
+          nextCheckInDays: payload.analysis.nextCheckInDays,
+          summary: payload.analysis.summary,
+          recommendations: payload.analysis.recommendations,
+          rawResult: checkinRawResult,
+          model: payload.model,
+          analysisMode: progressReviewMode()
+        });
+        const completed = await completePhotoFollowUp(plant.id, followUp.id, savedPhotos, {
+          ...checkinRawResult
         });
         console.info("photo_follow_up_completed", { plantId: plant.id, followUpId: followUp.id, result: completed.result, photoCount: savedPhotos.length, durationMs: Date.now() - startedAt });
         setPhotoAssessment({ status: "complete", message: localized(completed.summary, locale) || message, changes: [t(followUpResultLabelKey(completed.result) as never)] });
@@ -929,7 +945,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           logNavigationEvent("detail", plant.id, fullCoverUrl ? "cover_full_image_ready" : "cover_thumbnail_ready");
         }}
       />
-      <PlantStatusSection plant={plant} careActionState={careActionState} analysis={displayAnalysis} milestones={milestones} hasActiveQuestion={Boolean(conversationalState.question)} />
+      <PlantStatusSection plant={plant} careActionState={careActionState} analysis={displayAnalysis} milestones={milestones} followUps={allFollowUps} hasActiveQuestion={Boolean(conversationalState.question)} />
       {baselineQuestion ? (
         <section className="mt-4 rounded-[28px] bg-[#fffaf3] p-4 shadow-soft">
           <p className="text-xs font-bold uppercase text-[#a09a90]">{baselineQuestion === "watering" ? t("baseline.welcome") : t("baseline.thanks")}</p>

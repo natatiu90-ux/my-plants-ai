@@ -8,19 +8,21 @@ import { plantCommonName } from "@/lib/plant-display";
 import { speciesDetailLabel, userProvidedSpeciesFromPlant } from "@/lib/plant-detail-recovery-presentation";
 import { shouldSuppressHealthyCheckinStatus } from "@/lib/plant-status-transition";
 import { speciesLearningStateFromAnalysis } from "@/lib/species-learning";
-import type { Plant, PlantAnalysisRecord, PlantMilestone } from "@/types/plant";
+import type { Plant, PlantAnalysisRecord, PlantFollowUp, PlantMilestone } from "@/types/plant";
 
 export function PlantStatusSection({
   plant,
   careActionState,
   analysis,
   milestones,
+  followUps = [],
   hasActiveQuestion = false
 }: {
   plant: Plant;
   careActionState: DerivedCareActionState | null;
   analysis?: PlantAnalysisRecord;
   milestones: PlantMilestone[];
+  followUps?: PlantFollowUp[];
   hasActiveQuestion?: boolean;
 }) {
   const { t } = useI18n();
@@ -29,10 +31,10 @@ export function PlantStatusSection({
   const speciesLabel = speciesDetailLabel({ fallbackName: plantCommonName(plant), speciesLearningState, userProvidedSpecies });
   const commonName = speciesLabel.labelKey ? t(speciesLabel.labelKey) : speciesLabel.labelText ?? "";
   const healthAnalysis =
-    analysis && shouldSuppressHealthyCheckinStatus({ plant, analysis, milestones })
+    analysis && shouldSuppressHealthyCheckinStatus({ plant, analysis, milestones, followUps })
       ? { ...analysis, rawResult: { ...analysis.rawResult, plantStatus: "watch" as const } }
       : analysis;
-  const healthStatus = derivePlantHealthStatus({ plant, analysis: healthAnalysis, milestones, careActionState });
+  const healthStatus = derivePlantHealthStatus({ plant, analysis: healthAnalysis, milestones, followUps, careActionState });
   const message = hasActiveQuestion ? t("plantAnalysis.needsOneFact") : t(healthStatus.messageKey);
 
   return (
