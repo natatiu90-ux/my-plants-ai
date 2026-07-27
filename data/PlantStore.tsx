@@ -25,6 +25,7 @@ import {
   reasonForAnalysis,
   reasonForMilestone
 } from "@/lib/plant-follow-ups";
+import { deriveRepeatedPhotoStatus } from "@/lib/plant-status-transition";
 import type { HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantFollowUp, PlantFollowUpReason, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, PlantRecommendationRevision, Room, SoilCheckResult } from "@/types/plant";
 import type { LegacyRoomImportGroup } from "@/lib/home-room-context";
 
@@ -184,6 +185,7 @@ type PlantStoreValue = PlantState & {
       recommendations?: unknown;
       rawResult?: unknown;
       model?: string | null;
+      analysisMode?: string | null;
     }
   ) => Promise<void>;
   completePhotoFollowUp: (plantId: string, followUpId: string, savedPhotos: PlantPhoto[], rawAnalysis: unknown) => Promise<PlantFollowUp>;
@@ -695,11 +697,13 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       const shouldAssignCover = photos.some((photo) => photo.isCover);
       const shouldResolvePhotoRecommendation = photos.length > 0 && state.plants.some((plant) => plant.id === plantId && plant.nextAction === "take_photo");
       if (shouldResolvePhotoRecommendation) {
+        const plant = state.plants.find((item) => item.id === plantId);
         await repositories.analyses.resolveLatestActiveRecommendation(plantId, { action: "photo_added", result: "photo_added" });
         await repositories.plants.updateRecommendationState(plantId, {
-          status: "healthy",
+          status: plant?.status ?? "unknown",
           nextAction: null,
-          nextCheckAt: toDateKey(addDays(new Date(), 4))
+          nextCheckAt: plant?.nextCheckAt ?? null,
+          careScheduleStatus: plant?.careScheduleStatus
         });
       }
 
@@ -709,11 +713,9 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           shouldResolvePhotoRecommendation && plant.id === plantId
             ? {
                 ...plant,
-                status: "healthy",
-                statusLabelKey: "status.doingGreat",
-                messageKey: "plants.afterWatering.message",
+                status: plant.status,
                 nextAction: null,
-                nextCheckAt: toDateKey(addDays(new Date(), 4))
+                nextCheckAt: plant.nextCheckAt
               }
             : plant
         ),
@@ -1390,6 +1392,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         recommendations?: unknown;
         rawResult?: unknown;
         model?: string | null;
+        analysisMode?: string | null;
       }
     ) => {
       if (!repositories) {
@@ -1410,13 +1413,28 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         model: input.model
       });
 
+      const previousPlant = state.plants.find((plant) => plant.id === plantId);
+      const previousAnalysis = state.analyses.find((analysis) => analysis.plantId === plantId);
+      const plantFollowUps = activeFollowUpsForPlant(state.followUps, plantId);
+      const plantMilestones = state.milestones.filter((milestone) => milestone.plantId === plantId);
+      const nextStatus =
+        previousPlant && input.analysisMode === "plant_checkin"
+          ? deriveRepeatedPhotoStatus({
+              previousPlant,
+              previousAnalysis,
+              incomingCondition: input.condition,
+              incomingRawResult: input.rawResult,
+              followUps: plantFollowUps,
+              milestones: plantMilestones
+            })
+          : input.condition;
       const nextCheckAt = input.nextCheckInDays != null ? toDateKey(addDays(new Date(), input.nextCheckInDays)) : undefined;
       if (input.condition || input.nextAction !== undefined || nextCheckAt) {
         await repositories.plants.updateRecommendationState(plantId, {
-          status: input.condition ?? state.plants.find((plant) => plant.id === plantId)?.status ?? "unknown",
+          status: nextStatus ?? previousPlant?.status ?? "unknown",
           nextAction: input.nextAction ?? null,
-          nextCheckAt: nextCheckAt ?? state.plants.find((plant) => plant.id === plantId)?.nextCheckAt ?? null,
-          careScheduleStatus: nextCheckAt ? "active" : state.plants.find((plant) => plant.id === plantId)?.careScheduleStatus,
+          nextCheckAt: nextCheckAt ?? previousPlant?.nextCheckAt ?? null,
+          careScheduleStatus: nextCheckAt ? "active" : previousPlant?.careScheduleStatus,
           notificationDueCycleKey: null
         });
       }
@@ -1439,7 +1457,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           plant.id === plantId
             ? {
                 ...plant,
-                status: input.condition ?? plant.status,
+                status: nextStatus ?? plant.status,
                 nextAction: input.nextAction ?? null,
                 nextCheckAt: nextCheckAt ?? plant.nextCheckAt,
                 careScheduleStatus: nextCheckAt ? "active" : plant.careScheduleStatus,

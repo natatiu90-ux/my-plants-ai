@@ -422,13 +422,15 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const hasWateringBaseline = Boolean(findExistingBaselineMilestone(milestones, plant.id, "watering")) || Boolean(plant.lastWateredAt);
   const hasRepottingBaseline = Boolean(findExistingBaselineMilestone(milestones, plant.id, "repotting"));
   const assignedRoom = plant.roomId ? rooms.find((room) => room.id === plant.roomId) : undefined;
-  const baselineQuestion = nextPostCreationClarificationStep({
-    hasWateringBaseline,
-    hasRepottingBaseline,
-    hasAssignedRoom: Boolean(assignedRoom),
-    roomDirectSun: assignedRoom?.directSun,
-    analysis: displayAnalysis?.rawResult
-  });
+  const baselineQuestion = secondaryDataReady
+    ? nextPostCreationClarificationStep({
+        hasWateringBaseline,
+        hasRepottingBaseline,
+        hasAssignedRoom: Boolean(assignedRoom),
+        roomDirectSun: assignedRoom?.directSun,
+        analysis: displayAnalysis?.rawResult
+      })
+    : null;
   const conversationalState = deriveConversationalCareState({
     analysis: displayAnalysis,
     plant,
@@ -558,6 +560,10 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     const isFollowUpAssessment = Boolean(followUp);
     const comparisonTargetPhotoIds = [coverPhoto?.id, ...photos.slice(0, 3).map((photo) => photo.id)].filter(Boolean) as string[];
     const userProvidedSpeciesContext = recommendationSpeciesContextFromPlant(plant, analysis);
+    const previousVisualSnapshot =
+      analysis?.rawResult?.visualEvidenceSnapshot && typeof analysis.rawResult.visualEvidenceSnapshot === "object"
+        ? (analysis.rawResult.visualEvidenceSnapshot as Record<string, unknown>)
+        : {};
     try {
       const formData = new FormData();
       for (const photo of selectedPhotos) {
@@ -580,35 +586,33 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         formData.append("clientOrientationSources", photo.orientation.orientationSource);
         formData.append("clientDebugIds", photo.debugId ?? photo.id);
       }
-      if (followUp) {
-        const comparisonPhotos = photos
-          .filter((photo) => !savedPhotos.some((savedPhoto) => savedPhoto.id === photo.id))
-          .slice(0, Math.max(0, 5 - selectedPhotos.length));
-        for (const previousPhoto of comparisonPhotos) {
-          const previousUrl = await ensureFullPhotoUrl(previousPhoto.id);
-          if (!previousUrl) {
-            continue;
-          }
-          const previousResponse = await fetch(previousUrl);
-          if (!previousResponse.ok) {
-            continue;
-          }
-          const blob = await previousResponse.blob();
-          formData.append("photos", new File([blob], `previous-${previousPhoto.id}.jpg`, { type: blob.type || "image/jpeg" }));
-          formData.append("photoTypes", previousPhoto.type);
-          formData.append("photoSources", "comparison_baseline");
-          formData.append("clientFileNames", `previous-${previousPhoto.id}.jpg`);
-          formData.append("clientMimeTypes", blob.type || "image/jpeg");
-          formData.append("clientExtensions", "jpg");
-          formData.append("clientByteSizes", String(blob.size));
-          formData.append("clientDecodeSucceeded", "");
-          formData.append("clientWidths", "");
-          formData.append("clientHeights", "");
-          formData.append("clientExifOrientations", "");
-          formData.append("clientPhysicallyRotated", "");
-          formData.append("clientOrientationSources", "stored_baseline");
-          formData.append("clientDebugIds", `comparison-${previousPhoto.id}`);
+      const comparisonPhotos = photos
+        .filter((photo) => !savedPhotos.some((savedPhoto) => savedPhoto.id === photo.id))
+        .slice(0, Math.max(0, 5 - selectedPhotos.length));
+      for (const previousPhoto of comparisonPhotos) {
+        const previousUrl = await ensureFullPhotoUrl(previousPhoto.id);
+        if (!previousUrl) {
+          continue;
         }
+        const previousResponse = await fetch(previousUrl);
+        if (!previousResponse.ok) {
+          continue;
+        }
+        const blob = await previousResponse.blob();
+        formData.append("photos", new File([blob], `previous-${previousPhoto.id}.jpg`, { type: blob.type || "image/jpeg" }));
+        formData.append("photoTypes", previousPhoto.type);
+        formData.append("photoSources", "comparison_baseline");
+        formData.append("clientFileNames", `previous-${previousPhoto.id}.jpg`);
+        formData.append("clientMimeTypes", blob.type || "image/jpeg");
+        formData.append("clientExtensions", "jpg");
+        formData.append("clientByteSizes", String(blob.size));
+        formData.append("clientDecodeSucceeded", "");
+        formData.append("clientWidths", "");
+        formData.append("clientHeights", "");
+        formData.append("clientExifOrientations", "");
+        formData.append("clientPhysicallyRotated", "");
+        formData.append("clientOrientationSources", "stored_baseline");
+        formData.append("clientDebugIds", `comparison-${previousPhoto.id}`);
       }
       formData.append("locale", locale);
       formData.append("currentCommonName", plant.speciesName ?? "");
@@ -617,16 +621,27 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       formData.append("userProvidedSpecies", JSON.stringify(userProvidedSpeciesContext));
       formData.append("currentLightCondition", plant.lightConditionKey ? t(plant.lightConditionKey) : "");
       formData.append("environmentContext", formatEnvironmentContextForPrompt(buildPlantEnvironmentContext({ plant, homes, rooms, weather: weatherContext })));
-      formData.append("analysisMode", isFollowUpAssessment ? progressReviewMode() : "new_photo_analysis");
-      if (followUp) {
-        formData.append("followUpReason", followUp.reason);
-        formData.append("followUpDueAt", followUp.dueAt);
-        formData.append("comparisonTargetPhotoIds", JSON.stringify(comparisonTargetPhotoIds));
-        formData.append("recentCareEvents", JSON.stringify([...milestones.slice(0, 6), ...careEvents.slice(0, 6)].map((item) => ({
-          type: item.type,
-          date: "eventDate" in item ? item.eventDate : item.createdAt
-        }))));
-      }
+      formData.append("analysisMode", progressReviewMode());
+      formData.append("followUpReason", followUp?.reason ?? "new_photo_checkin");
+      formData.append("followUpDueAt", followUp?.dueAt ?? "");
+      formData.append("comparisonTargetPhotoIds", JSON.stringify(comparisonTargetPhotoIds));
+      formData.append(
+        "previousAnalysis",
+        JSON.stringify({
+          condition: analysis?.condition ?? plant.status,
+          plantStatus: analysis?.rawResult?.plantStatus ?? null,
+          summary: analysis?.summary ?? null,
+          visibleObservations: analysis?.rawResult?.visibleObservations ?? [],
+          concerns: previousVisualSnapshot.concerns ?? [],
+          careRightNow: analysis?.rawResult?.careRightNow ?? [],
+          recommendations: analysis?.recommendations ?? [],
+          createdAt: analysis?.createdAt ?? null
+        })
+      );
+      formData.append("recentCareEvents", JSON.stringify([...milestones.slice(0, 6), ...careEvents.slice(0, 6)].map((item) => ({
+        type: item.type,
+        date: "eventDate" in item ? item.eventDate : item.createdAt
+      }))));
 
       const response = await fetch("/api/analyze-plant", { method: "POST", body: formData });
       const payload = await response.json().catch(() => null);
@@ -645,8 +660,11 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
             : t("photoAssessment.reviewed");
       const changes = photoAssessmentChanges(payload.analysis.condition, locale);
       if (followUp) {
+        const checkinResult = payload.analysis.photoComparison?.reliableComparison === false ? "unclear" : payload.analysis.condition === "needs_attention" ? "worse" : payload.analysis.condition === "healthy" ? "improved" : "stable";
         const completed = await completePhotoFollowUp(plant.id, followUp.id, savedPhotos, {
           ...payload.analysis,
+          analysisMode: progressReviewMode(),
+          checkinResult,
           photoComparison: {
             analyzedPhotoIds: savedPhotos.map((photo) => photo.id),
             analysisTimestamp: new Date().toISOString(),
@@ -677,6 +695,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         recommendations: payload.analysis.recommendations,
         rawResult: {
           ...payload.analysis,
+          analysisMode: progressReviewMode(),
+          checkinResult: payload.analysis.photoComparison?.reliableComparison === false ? "unclear" : payload.analysis.condition === "needs_attention" ? "worse" : payload.analysis.condition === "healthy" ? "improved" : "stable",
           photoComparison: {
             analyzedPhotoIds: savedPhotos.map((photo) => photo.id),
             analysisTimestamp: new Date().toISOString(),
@@ -692,7 +712,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
             message: { en: payload.analysis.condition === "needs_attention" ? "I found new signs, so the care plan should adjust." : "I reviewed the new photos. The plant looks stable.", ru: message }
           }
         },
-        model: payload.model
+        model: payload.model,
+        analysisMode: progressReviewMode()
       });
       console.info("photo_assessment_completed", { plantId: plant.id, photoCount: savedPhotos.length, durationMs: Date.now() - startedAt });
       setPhotoAssessment({ status: "complete", message, changes });
