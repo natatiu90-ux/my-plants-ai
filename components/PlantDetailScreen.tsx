@@ -10,6 +10,7 @@ import { deriveConversationalCareState } from "@/lib/conversational-care";
 import { buildPlantEnvironmentContext, formatEnvironmentContextForPrompt } from "@/lib/home-room-context";
 import { findExistingBaselineMilestone } from "@/lib/care-baseline";
 import { plantDetailAnalysisMode, selectPlantDetailAnalysisContext } from "@/lib/plant-analysis-context";
+import { buildPlantDetailDebugData, type PlantDetailDebugData } from "@/lib/plant-detail-debug";
 import { buildPlantTimeline } from "@/lib/plant-timeline";
 import { plantDisplayName } from "@/lib/plant-display";
 import { deriveCareActionState } from "@/lib/plant-action-eligibility";
@@ -53,6 +54,35 @@ type PhotoAssessmentState =
   | { status: "complete"; message: string; changes: string[] }
   | { status: "failed"; message: string; retryPhotos: PendingPhotoUpload[]; savedPhotos: PlantPhoto[] };
 
+function PlantDetailDebugPanel({ data }: { data: PlantDetailDebugData }) {
+  return (
+    <details className="mt-4 rounded-[20px] bg-[#1f2937] p-4 text-xs text-white/90 shadow-soft">
+      <summary className="cursor-pointer font-bold text-white">Plant debug</summary>
+      <div className="mt-3 grid gap-3">
+        <div className="grid grid-cols-2 gap-2">
+          <span>plantId</span>
+          <span className="break-all font-mono">{data.plantId}</span>
+          <span>plant.status</span>
+          <span className="font-mono">{data.plantStatus}</span>
+          <span>secondaryDataReady</span>
+          <span className="font-mono">{String(data.secondaryDataReady)}</span>
+          <span>derivedHealthStatus</span>
+          <span className="font-mono">{data.derivedHealthStatus ?? "null"}</span>
+          <span>shouldRenderAnalysis</span>
+          <span className="font-mono">{String(data.shouldRenderAnalysis)}</span>
+          <span>hiddenReason</span>
+          <span className="font-mono">{data.hiddenReason}</span>
+          <span>recoveryContext</span>
+          <span className="font-mono">{String(data.recoveryContext)}</span>
+        </div>
+        <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap rounded-[16px] bg-black/30 p-3 font-mono leading-5">
+          {JSON.stringify(data, null, 2)}
+        </pre>
+      </div>
+    </details>
+  );
+}
+
 function localized(value: { en?: string | null; ru?: string | null } | undefined, locale: "en" | "ru") {
   return value?.[locale] || value?.en || value?.ru || "";
 }
@@ -92,7 +122,7 @@ function daysUntilDate(date: string) {
 }
 
 function analysisWithRecommendationRevision(analysis: PlantAnalysisRecord | undefined, revision: PlantRecommendationRevision | undefined): PlantAnalysisRecord | undefined {
-  if (!analysis || !revision || revision.analysisId !== analysis.id) {
+  if (!analysis || !revision) {
     return analysis;
   }
 
@@ -281,6 +311,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     [allFollowUps, analyses, analysis, hypothesisResolutions, milestones, plant, secondaryDataReady]
   );
   const displayAnalysis = analysisWithRecommendationRevision(analysisContext.meaningfulAnalysis, currentRecommendationRevision);
+  const plantDebugEnabled = searchParams.get("plantDebug") === "1";
   const historyTimeline = useMemo(
     () =>
       buildPlantTimeline({
@@ -384,6 +415,42 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const derivedHealthStatus = useMemo(
     () => (plant ? derivePlantHealthStatus({ plant, analysis: displayAnalysis, milestones, followUps: allFollowUps, careActionState }) : null),
     [allFollowUps, careActionState, displayAnalysis, milestones, plant]
+  );
+  const plantDebugData = useMemo(
+    () =>
+      plant && plantDebugEnabled
+        ? buildPlantDetailDebugData({
+            plant,
+            secondaryDataReady,
+            analyses,
+            analysisContext,
+            recommendationRevision: currentRecommendationRevision,
+            milestones,
+            careEvents,
+            followUps: allFollowUps,
+            photos,
+            timeline: historyTimeline,
+            derivedHealthStatus,
+            careActionState,
+            hypothesisResolutions
+          })
+        : null,
+    [
+      allFollowUps,
+      analyses,
+      analysisContext,
+      careActionState,
+      careEvents,
+      currentRecommendationRevision,
+      derivedHealthStatus,
+      historyTimeline,
+      hypothesisResolutions,
+      milestones,
+      photos,
+      plant,
+      plantDebugEnabled,
+      secondaryDataReady
+    ]
   );
 
   useEffect(() => {
@@ -1154,6 +1221,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       <PlantNotificationControls plant={plant} />
       <PhotoGallery photos={photos} onAddPhoto={() => setSheet("add_photo")} />
       <CareHistory events={historyTimeline} onAddEvent={() => setSheet("add_event")} />
+      {plantDebugData ? <PlantDetailDebugPanel data={plantDebugData} /> : null}
 
       {careActionState?.isActionable ? <PrimaryCareAction plant={plant} actionState={careActionState} onAction={openPrimaryAction} disabled={isCompletingAction} /> : null}
       {sheet === "check_soil" ? (
