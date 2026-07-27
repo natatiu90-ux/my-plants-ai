@@ -6,7 +6,7 @@ export type PlantAction = "water" | "check_soil" | "take_photo" | null;
 
 export type PhotoType = "overview" | "leaf" | "pot" | "roots" | "problem" | "other";
 
-export type PlantCareEventType = "watered" | "soil_checked" | "photo_added";
+export type PlantCareEventType = "watered" | "soil_checked" | "photo_added" | "follow_up_completed";
 export type SoilCheckResult = "dry" | "slightly_damp" | "very_wet" | "not_sure";
 export type CareScheduleStatus = "active" | "paused" | "needs_first_check";
 export type PlantHypothesis = "soil_condition" | "repotting" | "root_condition" | "drainage" | "direct_sun" | "pests";
@@ -37,7 +37,13 @@ export type PlantMilestoneType =
   | "recovered"
   | "treatment_started"
   | "treatment_completed"
+  | "follow_up_completed"
   | "custom_note";
+
+export type PlantFollowUpReason = "after_repotting" | "after_pruning" | "recovery_monitoring" | "species_uncertain" | "stable";
+export type PlantFollowUpTaskType = "add_photo" | "check_moisture" | "rotate_plant" | "inspect_new_growth" | "inspect_roots";
+export type PlantFollowUpStatus = "scheduled" | "due" | "completed" | "skipped";
+export type PlantFollowUpResult = "improved" | "stable" | "worse" | "unclear";
 
 export interface Plant {
   id: string;
@@ -98,6 +104,48 @@ export interface PlantCareEvent {
   type: PlantCareEventType;
   createdAt: string;
   metadata?: Record<string, string>;
+}
+
+export interface PlantFollowUp {
+  id: string;
+  plantId: string;
+  reason: PlantFollowUpReason;
+  taskType: PlantFollowUpTaskType;
+  dueAt: string;
+  status: PlantFollowUpStatus;
+  sourceEventId?: string | null;
+  sourceMilestoneId?: string | null;
+  requiredInputs?: {
+    type: PlantFollowUpTaskType;
+    label?: string;
+    optional?: boolean;
+  }[];
+  completedPhotoIds: string[];
+  result?: PlantFollowUpResult | null;
+  completedInputIds?: {
+    photos?: string[];
+    events?: string[];
+    milestones?: string[];
+  };
+  summary?: {
+    en?: string | null;
+    ru?: string | null;
+  };
+  timelineEntry?: {
+    title?: { en?: string | null; ru?: string | null };
+    body?: { en?: string | null; ru?: string | null };
+  };
+  comparison?: {
+    observationsAdded?: string[];
+    observationsUnchanged?: string[];
+    observationsImproved?: string[];
+    observationsWorsened?: string[];
+    recommendationChanges?: string[];
+    reliableComparison?: boolean;
+  };
+  nextFollowUpAt?: string | null;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface PlantAnalysisRecord {

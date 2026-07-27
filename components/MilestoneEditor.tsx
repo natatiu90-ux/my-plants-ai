@@ -37,6 +37,7 @@ const milestoneTitleKeys: Record<PlantMilestoneType, TranslationKey> = {
   recovered: "milestones.recovered.title",
   treatment_started: "milestones.treatment_started.title",
   treatment_completed: "milestones.treatment_completed.title",
+  follow_up_completed: "milestones.follow_up_completed.title",
   custom_note: "milestones.custom_note.title"
 };
 

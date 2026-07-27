@@ -15,6 +15,7 @@ import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
 import { recommendationSpeciesContextFromPlant } from "@/lib/plant-detail-recovery-presentation";
+import { followUpIsDue, followUpResultLabelKey, progressReviewMode } from "@/lib/plant-follow-ups";
 import { nextPostCreationClarificationStep } from "@/lib/post-creation-clarifications";
 import { buildRecommendationContextSnapshot, changedContextSince, impactLabelKey, isRecommendationStale, isVisualEvidenceStale, reasonTypeFromChangedContext, sourceAnalysisAgeDays, type RecommendationChangedContext, type RecommendationContextSnapshot } from "@/lib/recommendation-refresh";
 import { recommendationRefreshReducer, recommendationRefreshStateForPlant, type RecommendationRefreshStatus } from "@/lib/recommendation-refresh-state";
@@ -37,7 +38,7 @@ import { PlantNotificationControls } from "./PlantNotificationControls";
 import { PlantStatusSection } from "./PlantStatusSection";
 import { PrimaryCareAction } from "./PrimaryCareAction";
 import { Toast } from "./Toast";
-import type { PlantAnalysisRecord, PlantHypothesis, PlantHypothesisStatus, PlantPhoto, PlantRecommendationRevision, Room, SoilCheckResult } from "@/types/plant";
+import type { PlantAnalysisRecord, PlantFollowUp, PlantHypothesis, PlantHypothesisStatus, PlantPhoto, PlantRecommendationRevision, Room, SoilCheckResult } from "@/types/plant";
 import type { PendingPhotoUpload } from "./photo-upload-types";
 
 type Sheet = "check_soil" | "add_photo" | "add_event" | null;
@@ -79,6 +80,12 @@ function photoAssessmentChanges(condition: string | undefined, locale: "en" | "r
   return locale === "ru"
     ? ["Фото сохранены. Для уверенного сравнения нужен похожий ракурс."]
     : ["Photos saved. A similar angle would help compare changes with confidence."];
+}
+
+function daysUntilDate(date: string) {
+  const today = new Date(`${toDateKey(new Date())}T12:00:00`);
+  const target = new Date(`${date.slice(0, 10)}T12:00:00`);
+  return Math.ceil((target.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
 }
 
 function analysisWithRecommendationRevision(analysis: PlantAnalysisRecord | undefined, revision: PlantRecommendationRevision | undefined): PlantAnalysisRecord | undefined {
@@ -237,7 +244,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useI18n();
-  const { addMilestone, addPlantPhotos, completeSoilCheck, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getCurrentRecommendationRevision, getPlant, getPlantAnalysis, getPlantCareEvents, getPlantHypothesisResolutions, getPlantMilestones, getPlantPhotos, homes, recordSoilChecked, resolvePlantHypothesis, rooms, saveBaselineHistory, savePlantAnalysis, saveRecommendationRevision, secondaryDataReady, updateRoom, waterPlant } =
+  const { addMilestone, addPlantPhotos, completePhotoFollowUp, completeSoilCheck, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getCurrentRecommendationRevision, getLatestCompletedFollowUp, getPlant, getPlantAnalysis, getPlantCareEvents, getPlantFollowUps, getPlantHypothesisResolutions, getPlantMilestones, getPlantPhotos, homes, recordSoilChecked, resolvePlantHypothesis, rooms, saveBaselineHistory, savePlantAnalysis, saveRecommendationRevision, secondaryDataReady, updateRoom, waterPlant } =
     usePlantStore();
   const { locale } = useI18n();
   const plant = getPlant(plantId);
@@ -250,6 +257,9 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     () => getPlantMilestones(plantId).sort(compareMilestonesNewestFirst),
     [getPlantMilestones, plantId]
   );
+  const followUps = getPlantFollowUps(plantId);
+  const activePhotoFollowUp = followUps[0];
+  const completedPhotoFollowUp = getLatestCompletedFollowUp(plantId);
   const hypothesisResolutions = getPlantHypothesisResolutions(plantId);
   const careEvents = getPlantCareEvents(plantId);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -348,7 +358,12 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
 
   useEffect(() => {
     const action = searchParams.get("action");
-    if (action !== "check_soil" || openedActionRef.current === `${plantId}:${action}`) {
+    if ((action !== "check_soil" && action !== "add_photo") || openedActionRef.current === `${plantId}:${action}`) {
+      return;
+    }
+    if (action === "add_photo") {
+      openedActionRef.current = `${plantId}:${action}`;
+      setSheet("add_photo");
       return;
     }
     if (careActionState?.actionType !== "check_soil" || !careActionState.isActionable) {
@@ -539,6 +554,9 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
 
     setPhotoAssessment({ status: "analyzing" });
     const startedAt = Date.now();
+    const followUp = activePhotoFollowUp;
+    const isFollowUpAssessment = Boolean(followUp);
+    const comparisonTargetPhotoIds = [coverPhoto?.id, ...photos.slice(0, 3).map((photo) => photo.id)].filter(Boolean) as string[];
     const userProvidedSpeciesContext = recommendationSpeciesContextFromPlant(plant, analysis);
     try {
       const formData = new FormData();
@@ -562,6 +580,36 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         formData.append("clientOrientationSources", photo.orientation.orientationSource);
         formData.append("clientDebugIds", photo.debugId ?? photo.id);
       }
+      if (followUp) {
+        const comparisonPhotos = photos
+          .filter((photo) => !savedPhotos.some((savedPhoto) => savedPhoto.id === photo.id))
+          .slice(0, Math.max(0, 5 - selectedPhotos.length));
+        for (const previousPhoto of comparisonPhotos) {
+          const previousUrl = await ensureFullPhotoUrl(previousPhoto.id);
+          if (!previousUrl) {
+            continue;
+          }
+          const previousResponse = await fetch(previousUrl);
+          if (!previousResponse.ok) {
+            continue;
+          }
+          const blob = await previousResponse.blob();
+          formData.append("photos", new File([blob], `previous-${previousPhoto.id}.jpg`, { type: blob.type || "image/jpeg" }));
+          formData.append("photoTypes", previousPhoto.type);
+          formData.append("photoSources", "comparison_baseline");
+          formData.append("clientFileNames", `previous-${previousPhoto.id}.jpg`);
+          formData.append("clientMimeTypes", blob.type || "image/jpeg");
+          formData.append("clientExtensions", "jpg");
+          formData.append("clientByteSizes", String(blob.size));
+          formData.append("clientDecodeSucceeded", "");
+          formData.append("clientWidths", "");
+          formData.append("clientHeights", "");
+          formData.append("clientExifOrientations", "");
+          formData.append("clientPhysicallyRotated", "");
+          formData.append("clientOrientationSources", "stored_baseline");
+          formData.append("clientDebugIds", `comparison-${previousPhoto.id}`);
+        }
+      }
       formData.append("locale", locale);
       formData.append("currentCommonName", plant.speciesName ?? "");
       formData.append("currentScientificName", plant.scientificName ?? "");
@@ -569,6 +617,16 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       formData.append("userProvidedSpecies", JSON.stringify(userProvidedSpeciesContext));
       formData.append("currentLightCondition", plant.lightConditionKey ? t(plant.lightConditionKey) : "");
       formData.append("environmentContext", formatEnvironmentContextForPrompt(buildPlantEnvironmentContext({ plant, homes, rooms, weather: weatherContext })));
+      formData.append("analysisMode", isFollowUpAssessment ? progressReviewMode() : "new_photo_analysis");
+      if (followUp) {
+        formData.append("followUpReason", followUp.reason);
+        formData.append("followUpDueAt", followUp.dueAt);
+        formData.append("comparisonTargetPhotoIds", JSON.stringify(comparisonTargetPhotoIds));
+        formData.append("recentCareEvents", JSON.stringify([...milestones.slice(0, 6), ...careEvents.slice(0, 6)].map((item) => ({
+          type: item.type,
+          date: "eventDate" in item ? item.eventDate : item.createdAt
+        }))));
+      }
 
       const response = await fetch("/api/analyze-plant", { method: "POST", body: formData });
       const payload = await response.json().catch(() => null);
@@ -577,14 +635,37 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       }
 
       const previousConfidence = analysis?.rawResult && typeof analysis.rawResult === "object" && "confidence" in analysis.rawResult ? Number(analysis.rawResult.confidence) : null;
-      const comparisonTargetPhotoIds = [coverPhoto?.id, ...photos.slice(0, 2).map((photo) => photo.id)].filter(Boolean) as string[];
       const message =
-        payload.analysis.condition === "needs_attention"
+        isFollowUpAssessment && payload.analysis.photoComparison?.message
+          ? localized(payload.analysis.photoComparison.message, locale)
+          : payload.analysis.condition === "needs_attention"
           ? t("photoAssessment.newSigns")
           : payload.analysis.condition === "healthy"
             ? t("photoAssessment.stable")
             : t("photoAssessment.reviewed");
       const changes = photoAssessmentChanges(payload.analysis.condition, locale);
+      if (followUp) {
+        const completed = await completePhotoFollowUp(plant.id, followUp.id, savedPhotos, {
+          ...payload.analysis,
+          photoComparison: {
+            analyzedPhotoIds: savedPhotos.map((photo) => photo.id),
+            analysisTimestamp: new Date().toISOString(),
+            comparisonTargetPhotoIds,
+            observationsAdded: payload.analysis.photoComparison?.observationsAdded ?? [],
+            observationsUnchanged: payload.analysis.photoComparison?.observationsUnchanged ?? [],
+            observationsImproved: payload.analysis.photoComparison?.observationsImproved ?? [],
+            observationsWorsened: payload.analysis.photoComparison?.observationsWorsened ?? [],
+            hypothesesChanged: payload.analysis.photoComparison?.hypothesesChanged ?? [],
+            recommendationChanges: payload.analysis.photoComparison?.recommendationChanges ?? changes,
+            confidenceChanges: payload.analysis.photoComparison?.confidenceChanges ?? { previous: Number.isFinite(previousConfidence) ? previousConfidence : null, current: payload.analysis.confidence ?? null },
+            reliableComparison: payload.analysis.photoComparison?.reliableComparison ?? false,
+            message: payload.analysis.photoComparison?.message ?? { en: message, ru: message }
+          }
+        });
+        console.info("photo_follow_up_completed", { plantId: plant.id, followUpId: followUp.id, result: completed.result, photoCount: savedPhotos.length, durationMs: Date.now() - startedAt });
+        setPhotoAssessment({ status: "complete", message: localized(completed.summary, locale) || message, changes: [t(followUpResultLabelKey(completed.result) as never)] });
+        return;
+      }
       await savePlantAnalysis(plant.id, {
         sourcePhotoIds: savedPhotos.map((photo) => photo.id),
         detectedSpecies: payload.analysis.detectedSpecies,
@@ -888,6 +969,37 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
             <button type="button" onClick={() => void analyzeNewPhotos(photoAssessment.retryPhotos, photoAssessment.savedPhotos)} className="mt-3 min-h-10 rounded-[16px] bg-white px-3 text-sm font-extrabold text-[#2d7a4f]">
               {t("common.tryAgain")}
             </button>
+          ) : null}
+        </section>
+      ) : null}
+      {activePhotoFollowUp || completedPhotoFollowUp ? (
+        <section className="mt-4 rounded-[24px] bg-white/80 p-4 shadow-soft">
+          <p className="text-xs font-bold uppercase text-[#78906c]">{t("followUps.title")}</p>
+          {activePhotoFollowUp ? (
+            <>
+              <p className="mt-1 text-sm font-extrabold leading-5 text-[#3f5f37]">
+                {followUpIsDue(activePhotoFollowUp)
+                  ? t("followUps.dueTitle")
+                  : t("followUps.scheduledTitle").replace("{days}", String(Math.max(1, daysUntilDate(activePhotoFollowUp.dueAt))))}
+              </p>
+              <p className="mt-1 text-sm font-bold leading-5 text-[#6f665d]">{t(`followUps.reason.${activePhotoFollowUp.reason}` as never)}</p>
+              <button
+                type="button"
+                onClick={() => setSheet("add_photo")}
+                className="mt-3 min-h-11 rounded-[18px] bg-[#ddf2dc] px-4 text-sm font-extrabold text-[#2d7a4f]"
+              >
+                {t("followUps.addPhoto")}
+              </button>
+            </>
+          ) : completedPhotoFollowUp ? (
+            <>
+              <p className="mt-1 text-sm font-extrabold leading-5 text-[#3f5f37]">
+                {t(followUpResultLabelKey(completedPhotoFollowUp.result) as never)}
+              </p>
+              {localized(completedPhotoFollowUp.summary, locale) ? (
+                <p className="mt-1 text-sm font-bold leading-5 text-[#6f665d]">{localized(completedPhotoFollowUp.summary, locale)}</p>
+              ) : null}
+            </>
           ) : null}
         </section>
       ) : null}

@@ -42,7 +42,7 @@ type CareReminderRow = {
   id: string;
   user_id: string;
   plant_id: string;
-  reminder_type: "soil_check";
+  reminder_type: "soil_check" | "follow_up_task";
   action_key: string;
   due_at: string;
   due_cycle_key: string;
@@ -52,6 +52,8 @@ type CareReminderRow = {
 type NotificationCandidate = {
   source: "care_reminders" | "plant_schedule";
   reminderId?: string;
+  reminderType?: CareReminderRow["reminder_type"];
+  actionKey?: string;
   plant: DuePlantRow;
   scheduledFor: string;
   dueCycleKey: string;
@@ -156,8 +158,32 @@ function relativeWateringText(dateKey: string | null | undefined, locale: "ru" |
   return formatter.format(-days, "day");
 }
 
-function notificationCopy(plant: DuePlantRow, locale: "ru" | "en") {
+function notificationCopy(plant: DuePlantRow, locale: "ru" | "en", reminderType: CareReminderRow["reminder_type"] = "soil_check", actionKey?: string) {
   const name = plant.home_name || plant.species_name || (locale === "ru" ? "растения" : "your plant");
+  if (reminderType === "follow_up_task") {
+    const isRepotting = actionKey?.startsWith("follow_up:after_repotting");
+    const isPruning = actionKey?.startsWith("follow_up:after_pruning");
+    if (locale === "ru") {
+      return {
+        title: `Как там ${name}?`,
+        body: isRepotting
+          ? "После пересадки прошло несколько дней. Добавь новое фото — проверим, как растение адаптируется."
+          : isPruning
+            ? "После обрезки пора проверить срезы и новый рост. Добавь новое фото."
+            : "Добавь новое фото — проверим, как меняется состояние растения."
+      };
+    }
+
+    return {
+      title: `How is ${name} doing?`,
+      body: isRepotting
+        ? "It has been a few days since repotting. Add a new photo so we can check adaptation."
+        : isPruning
+          ? "It is time to check the pruning cuts and new growth. Add a new photo."
+          : "Add a new photo so we can check how the plant is changing."
+    };
+  }
+
   if (locale === "ru") {
     return {
       title: `Пора проверить почву у ${name}`,
@@ -244,6 +270,7 @@ async function loadPlantScheduleCandidates(
     .filter((plant) => plant.next_check_at && !excludedPlantIds.has(plant.id))
     .map((plant) => ({
       source: "plant_schedule" as const,
+      reminderType: "soil_check" as const,
       plant,
       scheduledFor: plant.next_check_at as string,
       dueCycleKey: reminderDueCycleKey(plant.id, "soil_check", plant.next_check_at as string)
@@ -294,6 +321,8 @@ async function loadExplicitReminderCandidates(supabase: ReturnType<typeof create
       return [{
         source: "care_reminders" as const,
         reminderId: reminder.id,
+        reminderType: reminder.reminder_type,
+        actionKey: reminder.action_key,
         plant,
         scheduledFor: reminder.due_at,
         dueCycleKey: reminder.due_cycle_key,
@@ -303,6 +332,8 @@ async function loadExplicitReminderCandidates(supabase: ReturnType<typeof create
     return [{
       source: "care_reminders" as const,
       reminderId: reminder.id,
+      reminderType: reminder.reminder_type,
+      actionKey: reminder.action_key,
       plant,
       scheduledFor: reminder.due_at,
       dueCycleKey: reminder.due_cycle_key
@@ -437,7 +468,7 @@ export async function GET(request: Request) {
         .select("id, status")
         .eq("plant_id", plant.id)
         .eq("subscription_id", subscription.id)
-        .eq("notification_type", "soil_check_due")
+        .eq("notification_type", candidate.reminderType === "follow_up_task" ? "follow_up_task_due" : "soil_check_due")
         .eq("due_cycle_key", dueCycleKey)
         .maybeSingle();
       if (existingDeliveryError) {
@@ -463,7 +494,7 @@ export async function GET(request: Request) {
             user_id: plant.user_id,
             plant_id: plant.id,
             subscription_id: subscription.id,
-            notification_type: "soil_check_due",
+            notification_type: candidate.reminderType === "follow_up_task" ? "follow_up_task_due" : "soil_check_due",
             due_cycle_key: dueCycleKey,
             scheduled_for: candidate.scheduledFor,
             status: "pending"
@@ -477,12 +508,12 @@ export async function GET(request: Request) {
       }
 
       const locale = (settings.notification_locale ?? subscription.locale ?? "en").startsWith("ru") ? "ru" : "en";
-      const copy = notificationCopy(plant, locale);
+      const copy = notificationCopy(plant, locale, candidate.reminderType, candidate.actionKey);
       const payload = {
         ...copy,
         plantId: plant.id,
         deliveryId: delivery.id,
-        url: `/plants/${plant.id}?action=check_soil`,
+        url: candidate.reminderType === "follow_up_task" ? `/plants/${plant.id}?action=add_photo` : `/plants/${plant.id}?action=check_soil`,
         tag: `plant-care-${plant.id}`
       };
 

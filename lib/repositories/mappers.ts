@@ -12,6 +12,11 @@ import type {
   PlantHypothesis,
   PlantHypothesisResolution,
   PlantHypothesisStatus,
+  PlantFollowUp,
+  PlantFollowUpReason,
+  PlantFollowUpResult,
+  PlantFollowUpStatus,
+  PlantFollowUpTaskType,
   PlantMilestone,
   PlantMilestoneType,
   PlantPhoto,
@@ -104,6 +109,27 @@ export type CareEventRow = {
   event_date: string;
   created_at: string;
   metadata: Record<string, string> | null;
+};
+
+export type PlantFollowUpRow = {
+  id: string;
+  plant_id: string;
+  reason: PlantFollowUpReason;
+  task_type?: PlantFollowUpTaskType | null;
+  due_at: string;
+  status: PlantFollowUpStatus;
+  source_event_id?: string | null;
+  source_milestone_id?: string | null;
+  required_inputs?: unknown;
+  completed_photo_ids?: string[] | null;
+  completed_input_ids?: unknown;
+  result?: PlantFollowUpResult | null;
+  summary?: unknown;
+  timeline_entry?: unknown;
+  comparison?: unknown;
+  next_follow_up_at?: string | null;
+  created_at: string;
+  updated_at?: string | null;
 };
 
 export type PlantAnalysisRow = {
@@ -283,6 +309,29 @@ export function mapCareEvent(row: CareEventRow): PlantCareEvent {
     type: row.type,
     createdAt: toDateKey(row.event_date) ?? row.created_at,
     metadata: row.metadata ?? undefined
+  };
+}
+
+export function mapPlantFollowUp(row: PlantFollowUpRow): PlantFollowUp {
+  return {
+    id: row.id,
+    plantId: row.plant_id,
+    reason: row.reason,
+    taskType: row.task_type ?? "add_photo",
+    dueAt: row.due_at,
+    status: row.status,
+    sourceEventId: row.source_event_id ?? null,
+    sourceMilestoneId: row.source_milestone_id ?? null,
+    requiredInputs: Array.isArray(row.required_inputs) ? (row.required_inputs as PlantFollowUp["requiredInputs"]) : undefined,
+    completedPhotoIds: row.completed_photo_ids ?? [],
+    result: row.result ?? null,
+    completedInputIds: isRecord(row.completed_input_ids) as PlantFollowUp["completedInputIds"],
+    summary: isRecord(row.summary) as PlantFollowUp["summary"],
+    timelineEntry: isRecord(row.timeline_entry) as PlantFollowUp["timelineEntry"],
+    comparison: isRecord(row.comparison) as PlantFollowUp["comparison"],
+    nextFollowUpAt: row.next_follow_up_at ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at ?? undefined
   };
 }
 

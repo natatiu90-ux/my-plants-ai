@@ -21,6 +21,7 @@ const milestoneIcons: Record<PlantMilestoneType, string> = {
   recovered: "💚",
   treatment_started: "🧴",
   treatment_completed: "🌿",
+  follow_up_completed: "📷",
   custom_note: "✍️"
 };
 
@@ -40,6 +41,7 @@ const fallbackTitleKeys: Record<PlantMilestoneType, TranslationKey> = {
   recovered: "milestones.recovered.title",
   treatment_started: "milestones.treatment_started.title",
   treatment_completed: "milestones.treatment_completed.title",
+  follow_up_completed: "milestones.follow_up_completed.title",
   custom_note: "milestones.custom_note.title"
 };
 
@@ -59,6 +61,7 @@ const fallbackDescriptionKeys: Record<PlantMilestoneType, TranslationKey> = {
   recovered: "milestones.recovered.description",
   treatment_started: "milestones.treatment_started.description",
   treatment_completed: "milestones.treatment_completed.description",
+  follow_up_completed: "milestones.follow_up_completed.description",
   custom_note: "milestones.custom_note.description"
 };
 

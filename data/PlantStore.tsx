@@ -16,7 +16,16 @@ import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
 import { shouldEnableRemindersForNewPlant } from "@/lib/new-plant-reminders";
 import { getNotificationSupport } from "@/lib/push-client";
 import { getCachedHomeWeatherContext } from "@/lib/weather-context";
-import type { HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, PlantRecommendationRevision, Room, SoilCheckResult } from "@/types/plant";
+import {
+  activeFollowUpsForPlant,
+  classifyPlantCheckinResult,
+  dueAtForFollowUp,
+  latestCompletedFollowUpForPlant,
+  nextFollowUpDate,
+  reasonForAnalysis,
+  reasonForMilestone
+} from "@/lib/plant-follow-ups";
+import type { HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantFollowUp, PlantFollowUpReason, PlantHypothesis, PlantHypothesisResolution, PlantHypothesisStatus, PlantMilestone, PlantPhoto, PlantRecommendationRevision, Room, SoilCheckResult } from "@/types/plant";
 import type { LegacyRoomImportGroup } from "@/lib/home-room-context";
 
 type PlantState = {
@@ -24,6 +33,7 @@ type PlantState = {
   photos: PlantPhoto[];
   careEvents: PlantCareEvent[];
   milestones: PlantMilestone[];
+  followUps: PlantFollowUp[];
   analyses: PlantAnalysisRecord[];
   recommendationRevisions: PlantRecommendationRevision[];
   hypothesisResolutions: PlantHypothesisResolution[];
@@ -126,6 +136,8 @@ type PlantStoreValue = PlantState & {
   getCoverPhoto: (plantId: string) => PlantPhoto | undefined;
   getPlantCareEvents: (plantId: string) => PlantCareEvent[];
   getPlantMilestones: (plantId: string) => PlantMilestone[];
+  getPlantFollowUps: (plantId: string) => PlantFollowUp[];
+  getLatestCompletedFollowUp: (plantId: string) => PlantFollowUp | undefined;
   getPlantAnalysis: (plantId: string) => PlantAnalysisRecord | undefined;
   getCurrentRecommendationRevision: (plantId: string) => PlantRecommendationRevision | undefined;
   getPlantHypothesisResolutions: (plantId: string) => PlantHypothesisResolution[];
@@ -174,6 +186,7 @@ type PlantStoreValue = PlantState & {
       model?: string | null;
     }
   ) => Promise<void>;
+  completePhotoFollowUp: (plantId: string, followUpId: string, savedPhotos: PlantPhoto[], rawAnalysis: unknown) => Promise<PlantFollowUp>;
   saveRecommendationRevision: (
     plantId: string,
     input: {
@@ -206,6 +219,7 @@ const emptyState: PlantState = {
   photos: [],
   careEvents: [],
   milestones: [],
+  followUps: [],
   analyses: [],
   recommendationRevisions: [],
   hypothesisResolutions: [],
@@ -226,6 +240,10 @@ function resolveWithTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback:
     promise,
     new Promise<T>((resolve) => window.setTimeout(() => resolve(fallback), timeoutMs))
   ]);
+}
+
+function localizedResultSummary(value: PlantFollowUp["summary"], locale: "en" | "ru") {
+  return locale === "ru" ? value?.ru ?? value?.en ?? null : value?.en ?? value?.ru ?? null;
 }
 
 export function PlantStoreProvider({ children }: { children: React.ReactNode }) {
@@ -283,13 +301,14 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
 
     void Promise.all([
       nextRepositories.milestones.listMilestones(),
+      nextRepositories.followUps.listFollowUps(),
       nextRepositories.careEvents.listCareEvents(),
       nextRepositories.analyses.listAnalyses(),
       nextRepositories.recommendationRevisions.listRevisions(),
       nextRepositories.hypothesisResolutions.listResolutions()
     ])
-      .then(([milestones, careEvents, analyses, recommendationRevisions, hypothesisResolutions]) => {
-        setState((current) => ({ ...current, milestones, careEvents, analyses, recommendationRevisions, hypothesisResolutions, secondaryDataReady: true }));
+      .then(([milestones, followUps, careEvents, analyses, recommendationRevisions, hypothesisResolutions]) => {
+        setState((current) => ({ ...current, milestones, followUps, careEvents, analyses, recommendationRevisions, hypothesisResolutions, secondaryDataReady: true }));
       })
       .catch((nextError) => {
         console.error("secondary_plant_data_load_failed", {
@@ -411,6 +430,16 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         .filter((milestone) => milestone.plantId === plantId)
         .sort(compareMilestonesNewestFirst),
     [state.milestones]
+  );
+
+  const getPlantFollowUps = useCallback(
+    (plantId: string) => activeFollowUpsForPlant(state.followUps, plantId),
+    [state.followUps]
+  );
+
+  const getLatestCompletedFollowUp = useCallback(
+    (plantId: string) => latestCompletedFollowUpForPlant(state.followUps, plantId),
+    [state.followUps]
   );
 
   const getPlantAnalysis = useCallback(
@@ -617,6 +646,44 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
     [repositories]
   );
 
+  const scheduleFollowUp = useCallback(
+    async (
+      plantId: string,
+      reason: PlantFollowUpReason,
+      input?: { sourceEventId?: string | null; sourceMilestoneId?: string | null; fromDate?: string | Date }
+    ) => {
+      if (!repositories) {
+        return null;
+      }
+
+      let followUp: PlantFollowUp;
+      try {
+        followUp = await repositories.followUps.scheduleFollowUp(plantId, {
+        reason,
+        taskType: "add_photo",
+        dueAt: dueAtForFollowUp(reason, input?.fromDate),
+          sourceEventId: input?.sourceEventId ?? null,
+          sourceMilestoneId: input?.sourceMilestoneId ?? null
+        });
+      } catch (error) {
+        console.info("plant_follow_up_schedule_failed", {
+          plantId,
+          reason,
+          message: error instanceof Error ? error.message : "Unknown error"
+        });
+        return null;
+      }
+
+      setState((current) => ({
+        ...current,
+        followUps: [followUp, ...current.followUps.filter((item) => item.id !== followUp.id)]
+      }));
+
+      return followUp;
+    },
+    [repositories]
+  );
+
   const addPlantPhotos = useCallback(
     async (plantId: string, inputs: { url: string; storageId?: string; type: PhotoType; isCover?: boolean; debugId?: string }[]) => {
       if (!repositories || !inputs.length) {
@@ -715,6 +782,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       };
 
       let photos: PlantPhoto[] = [];
+      let scheduledFollowUps: PlantFollowUp[] = [];
       let postCreateStage: PlantCreationStage = "read_temporary_blob";
       try {
         photos = await repositories.photos.addPhotos(plant.id, input.photos ?? [], false);
@@ -761,6 +829,23 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
             rawResult: analysis.rawResult,
             model: analysis.model
           }));
+          const followUpReason = reasonForAnalysis(plant, analysis.rawResult);
+          if (followUpReason) {
+            try {
+              const followUp = await repositories.followUps.scheduleFollowUp(plant.id, {
+            reason: followUpReason,
+            taskType: "add_photo",
+            dueAt: dueAtForFollowUp(followUpReason)
+              });
+              scheduledFollowUps = [followUp];
+            } catch (followUpError) {
+              console.info("plant_follow_up_schedule_failed", {
+                plantId: plant.id,
+                reason: followUpReason,
+                message: followUpError instanceof Error ? followUpError.message : "Unknown error"
+              });
+            }
+          }
         }
 
         const analysisRecord: PlantAnalysisRecord | null = input.analysis
@@ -784,6 +869,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
           plants: [plant, ...current.plants],
           photos: [...photos, ...current.photos],
           milestones: [milestone, ...(wateringMilestone ? [wateringMilestone] : []), ...current.milestones],
+          followUps: [...scheduledFollowUps, ...current.followUps.filter((item) => !scheduledFollowUps.some((followUp) => followUp.id === item.id))],
           analyses: [...(analysisRecord ? [analysisRecord] : []), ...current.analyses],
           hypothesisResolutions: current.hypothesisResolutions,
           careEvents: [
@@ -983,16 +1069,25 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
     async (plantId: string, input: { type: PlantMilestone["type"]; eventDate: string; note?: string; photoId?: string }) => {
       if (!repositories) throw new Error("Plant collection is not ready.");
       const milestone = await repositories.milestones.addMilestone(plantId, input);
+      const followUpReason = reasonForMilestone(milestone.type);
+      if (followUpReason) {
+        void scheduleFollowUp(plantId, followUpReason, { sourceMilestoneId: milestone.id, fromDate: milestone.eventDate ?? milestone.createdAt });
+      }
       setState((current) => ({ ...current, milestones: [milestone, ...current.milestones] }));
       return milestone;
     },
-    [repositories]
+    [repositories, scheduleFollowUp]
   );
 
   const updateMilestone = useCallback(
     async (milestoneId: string, input: { type: PlantMilestone["type"]; eventDate?: string | null; note?: string; photoId?: string }) => {
       await repositories?.milestones.updateMilestone(milestoneId, input);
       const updatedAt = new Date().toISOString();
+      const updatedFollowUpReason = reasonForMilestone(input.type);
+      const existingMilestone = state.milestones.find((milestone) => milestone.id === milestoneId);
+      if (updatedFollowUpReason && existingMilestone) {
+        void scheduleFollowUp(existingMilestone.plantId, updatedFollowUpReason, { sourceMilestoneId: milestoneId, fromDate: input.eventDate ?? existingMilestone.eventDate ?? updatedAt });
+      }
       setState((current) => ({
         ...current,
         milestones: current.milestones.map((milestone) =>
@@ -1002,7 +1097,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         )
       }));
     },
-    [repositories]
+    [repositories, scheduleFollowUp, state.milestones]
   );
 
   const deleteMilestone = useCallback(
@@ -1265,6 +1360,10 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
 
       const milestoneType = baselineMilestoneType(input.kind, input.unknown);
       const milestone = await upsertBaselineMilestone(milestoneType, eventDate);
+      const followUpReason = reasonForMilestone(milestone.type);
+      if (followUpReason) {
+        void scheduleFollowUp(plantId, followUpReason, { sourceMilestoneId: milestone.id, fromDate: milestone.eventDate ?? milestone.createdAt });
+      }
       setState((current) => ({
         ...current,
         plants:
@@ -1274,7 +1373,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         milestones: [milestone, ...current.milestones.filter((item) => item.id !== milestone.id)]
       }));
     },
-    [repositories, state.milestones, state.plants]
+    [repositories, scheduleFollowUp, state.milestones, state.plants]
   );
 
   const savePlantAnalysis = useCallback(
@@ -1350,8 +1449,87 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         ),
         analyses: [analysisRecord, ...current.analyses]
       }));
+
+      const followUpReason = reasonForAnalysis(state.plants.find((plant) => plant.id === plantId) ?? ({ id: plantId, status: input.condition ?? "unknown" } as Plant), input.rawResult);
+      if (followUpReason) {
+        void scheduleFollowUp(plantId, followUpReason);
+      }
     },
-    [repositories, state.plants]
+    [repositories, scheduleFollowUp, state.plants]
+  );
+
+  const completePhotoFollowUp = useCallback(
+    async (plantId: string, followUpId: string, savedPhotos: PlantPhoto[], rawAnalysis: unknown) => {
+      if (!repositories) {
+        throw new Error("Plant collection is not ready.");
+      }
+
+      const followUp = state.followUps.find((item) => item.id === followUpId);
+      const result = classifyPlantCheckinResult(rawAnalysis);
+      const nextFollowUpAt = nextFollowUpDate(followUp?.reason ?? "recovery_monitoring", result);
+      const raw = rawAnalysis && typeof rawAnalysis === "object" ? (rawAnalysis as PlantAnalysisRecord["rawResult"]) : undefined;
+      const comparison = raw?.photoComparison;
+      const summary = comparison?.message ?? {
+        en:
+          result === "improved"
+            ? "The plant looks better in the new photos."
+            : result === "worse"
+              ? "The new photos show changes that need attention."
+              : result === "unclear"
+                ? "I reviewed the new photos, but the angle is too different for a confident comparison."
+                : "There are no clear signs of change in the new photos.",
+        ru:
+          result === "improved"
+            ? "На новых фото растению стало лучше."
+            : result === "worse"
+              ? "На новых фото есть изменения, которым нужно внимание."
+              : result === "unclear"
+                ? "Я изучила новые фото, но ракурс слишком отличается для уверенного сравнения."
+                : "На новых фото нет заметных изменений."
+      };
+
+      const completed = await repositories.followUps.completeFollowUp(followUpId, {
+        completedPhotoIds: savedPhotos.map((photo) => photo.id),
+        result,
+        summary,
+        timelineEntry: {
+          title: { en: "Recovery check", ru: "Проверка восстановления" },
+          body: summary
+        },
+        comparison,
+        nextFollowUpAt
+      });
+
+      const milestone = await repositories.milestones.addMilestone(plantId, {
+        type: "follow_up_completed",
+        eventDate: toDateKey(new Date()),
+        note: localizedResultSummary(summary, "ru") ?? localizedResultSummary(summary, "en") ?? result,
+        photoId: savedPhotos[0]?.id
+      });
+
+      const nextReason = result === "worse" ? "recovery_monitoring" : followUp?.reason;
+      let nextFollowUp: PlantFollowUp | null = null;
+      if (nextReason) {
+        nextFollowUp = await repositories.followUps.scheduleFollowUp(plantId, {
+          reason: nextReason,
+          taskType: "add_photo",
+          dueAt: nextFollowUpAt
+        });
+      }
+
+      setState((current) => ({
+        ...current,
+        followUps: [
+          ...(nextFollowUp ? [nextFollowUp] : []),
+          completed,
+          ...current.followUps.filter((item) => item.id !== completed.id && item.id !== nextFollowUp?.id)
+        ],
+        milestones: [milestone, ...current.milestones]
+      }));
+
+      return completed;
+    },
+    [repositories, state.followUps]
   );
 
   const saveRecommendationRevision = useCallback(
@@ -1559,6 +1737,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         photos: current.photos.filter((photo) => photo.plantId !== plantId),
         careEvents: current.careEvents.filter((event) => event.plantId !== plantId),
         milestones: current.milestones.filter((milestone) => milestone.plantId !== plantId),
+        followUps: current.followUps.filter((followUp) => followUp.plantId !== plantId),
         analyses: current.analyses.filter((analysis) => analysis.plantId !== plantId),
         recommendationRevisions: current.recommendationRevisions.filter((revision) => revision.plantId !== plantId),
         hypothesisResolutions: current.hypothesisResolutions.filter((resolution) => resolution.plantId !== plantId),
@@ -1584,6 +1763,8 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       getCoverPhoto,
       getPlantCareEvents,
       getPlantMilestones,
+      getPlantFollowUps,
+      getLatestCompletedFollowUp,
       getPlantAnalysis,
       getCurrentRecommendationRevision,
       getPlantHypothesisResolutions,
@@ -1612,6 +1793,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       recordSoilChecked,
       saveBaselineHistory,
       savePlantAnalysis,
+      completePhotoFollowUp,
       saveRecommendationRevision,
       resolvePlantHypothesis,
       updatePlantNotification,
@@ -1640,9 +1822,12 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       getPlantAnalysis,
       getPlantHypothesisResolutions,
       getPlantCareEvents,
+      getPlantFollowUps,
       getPlantMilestones,
+      getLatestCompletedFollowUp,
       getPlantPhotos,
       completeSoilCheck,
+      completePhotoFollowUp,
       recordSoilChecked,
       importLegacyPlantsToHome,
       saveBaselineHistory,

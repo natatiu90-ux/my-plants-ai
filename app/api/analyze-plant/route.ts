@@ -94,6 +94,20 @@ type AnalysisPayload = {
     impactLevel?: "none" | "minor" | "moderate" | "major";
     changeSummary?: { en?: string | null; ru?: string | null };
   };
+  photoComparison?: {
+    analyzedPhotoIds?: string[];
+    analysisTimestamp?: string;
+    comparisonTargetPhotoIds?: string[];
+    observationsAdded?: string[];
+    observationsUnchanged?: string[];
+    observationsImproved?: string[];
+    observationsWorsened?: string[];
+    hypothesesChanged?: string[];
+    recommendationChanges?: string[];
+    confidenceChanges?: { previous?: number | null; current?: number | null };
+    reliableComparison?: boolean;
+    message?: { en?: string | null; ru?: string | null };
+  };
 };
 
 const localizedStringSchema = {
@@ -297,6 +311,46 @@ const schema = {
         },
         required: ["impactLevel", "changeSummary"]
       },
+      photoComparison: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          analyzedPhotoIds: { type: "array", items: { type: "string" } },
+          analysisTimestamp: { type: "string" },
+          comparisonTargetPhotoIds: { type: "array", items: { type: "string" } },
+          observationsAdded: { type: "array", items: { type: "string" } },
+          observationsUnchanged: { type: "array", items: { type: "string" } },
+          observationsImproved: { type: "array", items: { type: "string" } },
+          observationsWorsened: { type: "array", items: { type: "string" } },
+          hypothesesChanged: { type: "array", items: { type: "string" } },
+          recommendationChanges: { type: "array", items: { type: "string" } },
+          confidenceChanges: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              previous: { type: ["number", "null"] },
+              current: { type: ["number", "null"] }
+            },
+            required: ["previous", "current"]
+          },
+          reliableComparison: { type: "boolean" },
+          message: localizedNullableStringSchema
+        },
+        required: [
+          "analyzedPhotoIds",
+          "analysisTimestamp",
+          "comparisonTargetPhotoIds",
+          "observationsAdded",
+          "observationsUnchanged",
+          "observationsImproved",
+          "observationsWorsened",
+          "hypothesesChanged",
+          "recommendationChanges",
+          "confidenceChanges",
+          "reliableComparison",
+          "message"
+        ]
+      },
       alternativeCauses: {
         type: "array",
         maxItems: 3,
@@ -397,6 +451,7 @@ const schema = {
       "clarificationQuestions",
       "reasoning",
       "recommendationImpact",
+      "photoComparison",
       "alternativeCauses",
       "hypotheses",
       "uncertainties"
@@ -897,9 +952,14 @@ export async function POST(request: Request) {
   const environmentContext = String(formData.get("environmentContext") ?? "");
   const analysisMode = String(formData.get("analysisMode") ?? "initial_or_photo_analysis");
   const isInitialAddFast = isInitialAddFastAnalysisMode(analysisMode);
+  const isPlantCheckin = analysisMode === "plant_checkin";
   const responseSchema = isInitialAddFast ? compactSchema : schema;
   const maxOutputTokensForRequest = maxOutputTokensForAnalysisMode(analysisMode, openAIMaxOutputTokens);
   const previousAnalysis = String(formData.get("previousAnalysis") ?? "");
+  const followUpReason = String(formData.get("followUpReason") ?? "");
+  const followUpDueAt = String(formData.get("followUpDueAt") ?? "");
+  const comparisonTargetPhotoIds = String(formData.get("comparisonTargetPhotoIds") ?? "");
+  const recentCareEvents = String(formData.get("recentCareEvents") ?? "");
   const photoTypes = formData.getAll("photoTypes").map(String);
   const photoSources = formData.getAll("photoSources").map(String);
   const clientFileNames = formData.getAll("clientFileNames").map(String);
@@ -1169,8 +1229,13 @@ export async function POST(request: Request) {
           `Analysis mode: ${analysisMode}.`,
           isInitialAddFast
             ? "Initial add fast rule: this is the first onboarding analysis before the plant is saved. Return only compact primitive fields. Do not write primary action prose, timeframe prose, status reason prose, summary prose, recommendation prose, species education, full reasoning, alternative causes, multiple hypotheses, impact metadata, or detailed what-not-to-do advice. Choose primaryActionId, actionTimeframeId, and statusReasonCode carefully; the app will localize obvious text from those IDs. Use free text only for species/common names and up to 2 meaningful visibleObservations from the photo. Include a compact visualEvidenceSnapshot for later enrichment. Keep the full response ideally under 900 tokens."
-            : "Follow-up analysis rule: include enough structured context to update recommendations clearly without repeating old advice. If previousAnalysis includes visualEvidenceSnapshot from an initial_add_fast result, treat it as the baseline visual snapshot and enrich care recommendations from current context instead of redoing unnecessary broad visual speculation. Do not contradict the initial visual snapshot unless the new photos or context clearly change confidence, and say so if confidence changed.",
+            : isPlantCheckin
+              ? "Plant check-in rule: this request is not a new primary plant analysis. Photo sources marked gallery/camera/local are the current check-in photos; photo sources marked comparison_baseline are previous photos. Compare current photos with baseline photos and recent care events. Answer the main question: what changed since the previous check? Focus on concrete change: new growth, turgor, color, leaf drop, stem/cut condition, soil surface, or visible worsening. Do not invent improvement or deterioration without visual evidence. Use photoComparison heavily: fill observationsImproved, observationsWorsened, observationsUnchanged, reliableComparison, and a short plant-centered message. Only update recommendations if the new evidence genuinely changes care. If angles are too different, set reliableComparison false and say comparison is unclear."
+              : "Follow-up analysis rule: include enough structured context to update recommendations clearly without repeating old advice. If previousAnalysis includes visualEvidenceSnapshot from an initial_add_fast result, treat it as the baseline visual snapshot and enrich care recommendations from current context instead of redoing unnecessary broad visual speculation. Do not contradict the initial visual snapshot unless the new photos or context clearly change confidence, and say so if confidence changed.",
           `Current plant context, if this is a follow-up photo analysis: commonName="${currentCommonName || "unknown"}", scientificName="${currentScientificName || "unknown"}", detectedSpecies="${currentDetectedSpecies || "unknown"}", light="${currentLightCondition || "unknown"}".`,
+          isPlantCheckin
+            ? `Plant check-in context: reason="${followUpReason || "unknown"}", dueAt="${followUpDueAt || "unknown"}", comparisonTargetPhotoIds=${comparisonTargetPhotoIds || "[]"}, recentCareEvents=${recentCareEvents || "[]"}.`
+            : "",
           `User-provided species signal, if any: ${userProvidedSpecies && userProvidedSpecies !== "null" ? userProvidedSpecies : "No user-provided species was supplied. If supplied, treat it as a helpful signal from the owner, not automatic scientific confirmation; compare it with photo evidence and continue refining if needed."}`,
           `Structured home and room context: ${environmentContext || "No structured home or room context was provided."}`,
           `Previous analysis, if available: ${previousAnalysis || "No previous analysis was provided."}`,

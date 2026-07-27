@@ -5,11 +5,12 @@ import { inspectImageDisplay, readJpegExifOrientation } from "@/lib/client-image
 import { PhotoStorageRepository } from "@/lib/photo-storage";
 import { plantCreationError } from "@/lib/plant-save-diagnostics";
 import { temporaryPhotoStorageIdFromUrl } from "@/lib/temporary-photo-url";
-import type { CareScheduleStatus, HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantHypothesis, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
+import type { CareScheduleStatus, HomeContext, PhotoType, Plant, PlantAnalysisRecord, PlantCareEvent, PlantFollowUp, PlantFollowUpReason, PlantFollowUpResult, PlantFollowUpTaskType, PlantHypothesis, PlantHypothesisStatus, PlantMilestone, PlantPhoto, Room, SoilCheckResult } from "@/types/plant";
 import type { RecommendationImpactLevel, RecommendationRevisionReasonType } from "@/types/plant";
 import type { RecommendationChangedContext, RecommendationRevisionSaveResult } from "@/lib/recommendation-refresh";
 import { normalizeReminderDueAt, reminderDueCycleKey, shouldScheduleCareReminder } from "@/lib/care-reminders";
-import { mapAnalysis, mapCareEvent, mapHome, mapHypothesisResolution, mapMilestone, mapPhoto, mapPlant, mapRecommendationRevision, mapRoom, type PlantPhotoRow } from "./mappers";
+import { DEFAULT_FOLLOW_UP_TASK_TYPE, FOLLOW_UP_REMINDER_TYPE, requiredInputsForFollowUp } from "@/lib/plant-follow-ups";
+import { mapAnalysis, mapCareEvent, mapHome, mapHypothesisResolution, mapMilestone, mapPhoto, mapPlant, mapPlantFollowUp, mapRecommendationRevision, mapRoom, type PlantPhotoRow } from "./mappers";
 
 const photoBucket = "plant-photos";
 const signedUrlTtlSeconds = 60 * 60;
@@ -1138,6 +1139,203 @@ export class CareEventRepository {
   }
 }
 
+export class PlantFollowUpRepository {
+  constructor(private supabase: SupabaseClient, private user: User) {}
+
+  async listFollowUps() {
+    const { data, error } = await this.supabase
+      .from("plant_follow_ups")
+      .select("*")
+      .eq("user_id", this.user.id)
+      .order("due_at", { ascending: true });
+
+    if (error?.code === "42P01") {
+      console.info("plant_follow_ups_unavailable", { reason: "migration_not_applied" });
+      return [];
+    }
+
+    assertNoError(error);
+    return (data ?? []).map(mapPlantFollowUp);
+  }
+
+  private async syncFollowUpReminder(followUp: PlantFollowUp) {
+    const { data: plant, error: plantError } = await this.supabase
+      .from("plants")
+      .select("id, user_id, notification_enabled, care_schedule_status")
+      .eq("id", followUp.plantId)
+      .eq("user_id", this.user.id)
+      .maybeSingle();
+
+    if (plantError || !plant || !plant.notification_enabled || plant.care_schedule_status === "paused") {
+      return;
+    }
+
+    const dueAt = normalizeReminderDueAt(followUp.dueAt);
+    const dueCycleKey = `${followUp.plantId}:${FOLLOW_UP_REMINDER_TYPE}:${followUp.id}:${dueAt.slice(0, 10)}`;
+
+    const { data: existingRows, error: existingError } = await this.supabase
+      .from("care_reminders")
+      .select("id, due_cycle_key")
+      .eq("plant_id", followUp.plantId)
+      .eq("reminder_type", FOLLOW_UP_REMINDER_TYPE)
+      .eq("status", "scheduled");
+
+    if (existingError) {
+      console.info("follow_up_reminder_sync_skipped", {
+        stage: "load_existing_reminders",
+        plantId: followUp.plantId,
+        code: existingError.code,
+        message: existingError.message
+      });
+      return;
+    }
+
+    const existing = existingRows ?? [];
+    const matching = existing.find((row) => row.due_cycle_key === dueCycleKey);
+    const staleIds = existing.filter((row) => row.due_cycle_key !== dueCycleKey).map((row) => row.id);
+    if (staleIds.length) {
+      await this.supabase.from("care_reminders").update({ status: "cancelled" }).in("id", staleIds);
+    }
+    if (matching) {
+      return;
+    }
+
+    const { error: insertError } = await this.supabase.from("care_reminders").insert({
+      user_id: this.user.id,
+      plant_id: followUp.plantId,
+      reminder_type: FOLLOW_UP_REMINDER_TYPE,
+      action_key: `follow_up:${followUp.reason}:${followUp.taskType}`,
+      due_at: dueAt,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      due_cycle_key: dueCycleKey,
+      status: "scheduled"
+    });
+
+    if (insertError) {
+      console.info("follow_up_reminder_sync_skipped", {
+        stage: "insert_reminder",
+        plantId: followUp.plantId,
+        followUpId: followUp.id,
+        code: insertError.code,
+        message: insertError.message
+      });
+    }
+  }
+
+  async scheduleFollowUp(
+    plantId: string,
+    input: {
+      reason: PlantFollowUpReason;
+      taskType?: PlantFollowUpTaskType;
+      dueAt: string;
+      sourceEventId?: string | null;
+      sourceMilestoneId?: string | null;
+    }
+  ) {
+    let query = this.supabase
+      .from("plant_follow_ups")
+      .select("*")
+      .eq("user_id", this.user.id)
+      .eq("plant_id", plantId)
+      .eq("reason", input.reason)
+      .in("status", ["scheduled", "due"]);
+
+    if (input.sourceMilestoneId) {
+      query = query.eq("source_milestone_id", input.sourceMilestoneId);
+    } else if (input.sourceEventId) {
+      query = query.eq("source_event_id", input.sourceEventId);
+    } else {
+      query = query.is("source_milestone_id", null).is("source_event_id", null);
+    }
+
+    const { data: existing, error: existingError } = await query.maybeSingle();
+    if (existingError && existingError.code !== "PGRST116") {
+      throw existingError;
+    }
+    if (existing) {
+      const mapped = mapPlantFollowUp(existing);
+      await this.syncFollowUpReminder(mapped);
+      return mapped;
+    }
+
+    const { data, error } = await this.supabase
+      .from("plant_follow_ups")
+      .insert({
+        user_id: this.user.id,
+        plant_id: plantId,
+        reason: input.reason,
+        task_type: input.taskType ?? DEFAULT_FOLLOW_UP_TASK_TYPE,
+        due_at: normalizeReminderDueAt(input.dueAt),
+        status: "scheduled",
+        required_inputs: requiredInputsForFollowUp(input.taskType ?? DEFAULT_FOLLOW_UP_TASK_TYPE),
+        source_event_id: input.sourceEventId ?? null,
+        source_milestone_id: input.sourceMilestoneId ?? null
+      })
+      .select("*")
+      .single();
+
+    assertNoError(error);
+    const followUp = mapPlantFollowUp(data);
+    await this.syncFollowUpReminder(followUp);
+    return followUp;
+  }
+
+  async completeFollowUp(
+    followUpId: string,
+    input: {
+      completedPhotoIds: string[];
+      result: PlantFollowUpResult;
+      summary?: PlantFollowUp["summary"];
+      timelineEntry?: PlantFollowUp["timelineEntry"];
+      comparison?: PlantFollowUp["comparison"];
+      nextFollowUpAt?: string | null;
+    }
+  ) {
+    const completedAt = new Date().toISOString();
+    const { data, error } = await this.supabase
+      .from("plant_follow_ups")
+      .update({
+        status: "completed",
+        completed_photo_ids: input.completedPhotoIds,
+        completed_input_ids: { photos: input.completedPhotoIds },
+        result: input.result,
+        summary: input.summary ?? {},
+        timeline_entry: input.timelineEntry ?? {},
+        comparison: input.comparison ?? {},
+        next_follow_up_at: input.nextFollowUpAt ?? null,
+        updated_at: completedAt
+      })
+      .eq("id", followUpId)
+      .eq("user_id", this.user.id)
+      .select("*")
+      .single();
+
+    assertNoError(error);
+
+    await this.supabase
+      .from("care_reminders")
+      .update({ status: "cancelled" })
+      .eq("plant_id", data.plant_id)
+      .eq("reminder_type", FOLLOW_UP_REMINDER_TYPE)
+      .eq("status", "scheduled");
+
+    return mapPlantFollowUp(data);
+  }
+
+  async skipFollowUp(followUpId: string) {
+    const { data, error } = await this.supabase
+      .from("plant_follow_ups")
+      .update({ status: "skipped" })
+      .eq("id", followUpId)
+      .eq("user_id", this.user.id)
+      .select("*")
+      .single();
+
+    assertNoError(error);
+    return mapPlantFollowUp(data);
+  }
+}
+
 export class AnalysisRepository {
   constructor(private supabase: SupabaseClient, private user: User) {}
 
@@ -1455,6 +1653,7 @@ export async function createRepositories(supabase: SupabaseClient, user: User) {
     rooms: new RoomRepository(supabase, user),
     milestones: new MilestoneRepository(supabase, user),
     careEvents: new CareEventRepository(supabase, user),
+    followUps: new PlantFollowUpRepository(supabase, user),
     analyses: new AnalysisRepository(supabase, user),
     recommendationRevisions: new RecommendationRevisionRepository(supabase, user),
     hypothesisResolutions: new HypothesisResolutionRepository(supabase, user)

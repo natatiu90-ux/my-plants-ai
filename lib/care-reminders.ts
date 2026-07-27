@@ -1,4 +1,4 @@
-export type CareReminderType = "soil_check";
+export type CareReminderType = "soil_check" | "follow_up_task";
 export type CareReminderStatus = "scheduled" | "sent" | "failed" | "cancelled";
 
 export type CareReminderScheduleInput = {
