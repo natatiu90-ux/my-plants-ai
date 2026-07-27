@@ -138,8 +138,10 @@ type PlantStoreValue = PlantState & {
   getPlantCareEvents: (plantId: string) => PlantCareEvent[];
   getPlantMilestones: (plantId: string) => PlantMilestone[];
   getPlantFollowUps: (plantId: string) => PlantFollowUp[];
+  getAllPlantFollowUps: (plantId: string) => PlantFollowUp[];
   getLatestCompletedFollowUp: (plantId: string) => PlantFollowUp | undefined;
   getPlantAnalysis: (plantId: string) => PlantAnalysisRecord | undefined;
+  getPlantAnalyses: (plantId: string) => PlantAnalysisRecord[];
   getCurrentRecommendationRevision: (plantId: string) => PlantRecommendationRevision | undefined;
   getPlantHypothesisResolutions: (plantId: string) => PlantHypothesisResolution[];
   ensureFullPhotoUrl: (photoId: string) => Promise<string | undefined>;
@@ -439,6 +441,11 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
     [state.followUps]
   );
 
+  const getAllPlantFollowUps = useCallback(
+    (plantId: string) => state.followUps.filter((followUp) => followUp.plantId === plantId),
+    [state.followUps]
+  );
+
   const getLatestCompletedFollowUp = useCallback(
     (plantId: string) => latestCompletedFollowUpForPlant(state.followUps, plantId),
     [state.followUps]
@@ -446,6 +453,11 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
 
   const getPlantAnalysis = useCallback(
     (plantId: string) => state.analyses.find((analysis) => analysis.plantId === plantId && !analysis.resolvedAt) ?? state.analyses.find((analysis) => analysis.plantId === plantId),
+    [state.analyses]
+  );
+
+  const getPlantAnalyses = useCallback(
+    (plantId: string) => state.analyses.filter((analysis) => analysis.plantId === plantId),
     [state.analyses]
   );
 
@@ -722,16 +734,6 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         photos: [
           ...photos,
           ...current.photos.map((photo) => (shouldAssignCover && photo.plantId === plantId ? { ...photo, isCover: false } : photo))
-        ],
-        careEvents: [
-          ...photos.map((photo) => ({
-            id: `${photo.id}-event`,
-            plantId,
-            type: "photo_added" as const,
-            createdAt: photo.createdAt,
-            metadata: { photoType: photo.type }
-          })),
-          ...current.careEvents
         ]
       }));
 
@@ -1782,8 +1784,10 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       getPlantCareEvents,
       getPlantMilestones,
       getPlantFollowUps,
+      getAllPlantFollowUps,
       getLatestCompletedFollowUp,
       getPlantAnalysis,
+      getPlantAnalyses,
       getCurrentRecommendationRevision,
       getPlantHypothesisResolutions,
       ensureFullPhotoUrl,
@@ -1838,9 +1842,11 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       getCurrentRecommendationRevision,
       getPlant,
       getPlantAnalysis,
+      getPlantAnalyses,
       getPlantHypothesisResolutions,
       getPlantCareEvents,
       getPlantFollowUps,
+      getAllPlantFollowUps,
       getPlantMilestones,
       getLatestCompletedFollowUp,
       getPlantPhotos,

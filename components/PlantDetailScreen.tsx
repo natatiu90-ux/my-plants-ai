@@ -9,6 +9,7 @@ import { recordAddPlantPerformanceStage } from "@/lib/add-plant-performance";
 import { deriveConversationalCareState } from "@/lib/conversational-care";
 import { buildPlantEnvironmentContext, formatEnvironmentContextForPrompt } from "@/lib/home-room-context";
 import { findExistingBaselineMilestone } from "@/lib/care-baseline";
+import { buildPlantTimeline } from "@/lib/plant-timeline";
 import { plantDisplayName } from "@/lib/plant-display";
 import { deriveCareActionState } from "@/lib/plant-action-eligibility";
 import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
@@ -244,11 +245,12 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useI18n();
-  const { addMilestone, addPlantPhotos, completePhotoFollowUp, completeSoilCheck, deletePlant, ensureFullPhotoUrl, getCoverPhoto, getCurrentRecommendationRevision, getLatestCompletedFollowUp, getPlant, getPlantAnalysis, getPlantCareEvents, getPlantFollowUps, getPlantHypothesisResolutions, getPlantMilestones, getPlantPhotos, homes, recordSoilChecked, resolvePlantHypothesis, rooms, saveBaselineHistory, savePlantAnalysis, saveRecommendationRevision, secondaryDataReady, updateRoom, waterPlant } =
+  const { addMilestone, addPlantPhotos, completePhotoFollowUp, completeSoilCheck, deletePlant, ensureFullPhotoUrl, getAllPlantFollowUps, getCoverPhoto, getCurrentRecommendationRevision, getLatestCompletedFollowUp, getPlant, getPlantAnalysis, getPlantAnalyses, getPlantCareEvents, getPlantFollowUps, getPlantHypothesisResolutions, getPlantMilestones, getPlantPhotos, homes, recordSoilChecked, resolvePlantHypothesis, rooms, saveBaselineHistory, savePlantAnalysis, saveRecommendationRevision, secondaryDataReady, updateRoom, waterPlant } =
     usePlantStore();
   const { locale } = useI18n();
   const plant = getPlant(plantId);
   const analysis = getPlantAnalysis(plantId);
+  const analyses = useMemo(() => getPlantAnalyses(plantId), [getPlantAnalyses, plantId]);
   const currentRecommendationRevision = getCurrentRecommendationRevision(plantId);
   const displayAnalysis = analysisWithRecommendationRevision(analysis, currentRecommendationRevision);
   const coverPhoto = getCoverPhoto(plantId);
@@ -258,10 +260,23 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     [getPlantMilestones, plantId]
   );
   const followUps = getPlantFollowUps(plantId);
+  const allFollowUps = useMemo(() => getAllPlantFollowUps(plantId), [getAllPlantFollowUps, plantId]);
   const activePhotoFollowUp = followUps[0];
   const completedPhotoFollowUp = getLatestCompletedFollowUp(plantId);
   const hypothesisResolutions = getPlantHypothesisResolutions(plantId);
   const careEvents = getPlantCareEvents(plantId);
+  const historyTimeline = useMemo(
+    () =>
+      buildPlantTimeline({
+        plantId,
+        milestones,
+        careEvents,
+        followUps: allFollowUps,
+        analyses,
+        photos
+      }),
+    [allFollowUps, analyses, careEvents, milestones, photos, plantId]
+  );
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [sheet, setSheet] = useState<Sheet>(null);
@@ -1068,7 +1083,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       <CareSummary plant={plant} />
       <PlantNotificationControls plant={plant} />
       <PhotoGallery photos={photos} onAddPhoto={() => setSheet("add_photo")} />
-      <CareHistory milestones={milestones} onAddEvent={() => setSheet("add_event")} />
+      <CareHistory events={historyTimeline} onAddEvent={() => setSheet("add_event")} />
 
       {careActionState?.isActionable ? <PrimaryCareAction plant={plant} actionState={careActionState} onAction={openPrimaryAction} disabled={isCompletingAction} /> : null}
       {sheet === "check_soil" ? (

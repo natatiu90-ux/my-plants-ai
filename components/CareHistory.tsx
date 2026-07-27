@@ -2,10 +2,10 @@
 
 import { Plus } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
-import type { PlantMilestone } from "@/types/plant";
+import type { PlantTimelineEvent } from "@/lib/plant-timeline";
 import { CareHistoryItem } from "./CareHistoryItem";
 
-export function CareHistory({ milestones, onAddEvent }: { milestones: PlantMilestone[]; onAddEvent?: () => void }) {
+export function CareHistory({ events, onAddEvent }: { events: PlantTimelineEvent[]; onAddEvent?: () => void }) {
   const { t } = useI18n();
 
   return (
@@ -24,10 +24,10 @@ export function CareHistory({ milestones, onAddEvent }: { milestones: PlantMiles
           </button>
         ) : null}
       </div>
-      {milestones.length > 0 ? (
+      {events.length > 0 ? (
         <ol className="grid gap-3">
-          {milestones.map((milestone) => (
-            <CareHistoryItem key={milestone.id} milestone={milestone} />
+          {events.map((event) => (
+            <CareHistoryItem key={event.id} event={event} />
           ))}
         </ol>
       ) : (
