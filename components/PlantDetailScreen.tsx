@@ -9,9 +9,11 @@ import { recordAddPlantPerformanceStage } from "@/lib/add-plant-performance";
 import { deriveConversationalCareState } from "@/lib/conversational-care";
 import { buildPlantEnvironmentContext, formatEnvironmentContextForPrompt } from "@/lib/home-room-context";
 import { findExistingBaselineMilestone } from "@/lib/care-baseline";
+import { plantDetailAnalysisMode, selectPlantDetailAnalysisContext } from "@/lib/plant-analysis-context";
 import { buildPlantTimeline } from "@/lib/plant-timeline";
 import { plantDisplayName } from "@/lib/plant-display";
 import { deriveCareActionState } from "@/lib/plant-action-eligibility";
+import { derivePlantHealthStatus } from "@/lib/plant-health-status";
 import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
@@ -90,7 +92,7 @@ function daysUntilDate(date: string) {
 }
 
 function analysisWithRecommendationRevision(analysis: PlantAnalysisRecord | undefined, revision: PlantRecommendationRevision | undefined): PlantAnalysisRecord | undefined {
-  if (!analysis || !revision) {
+  if (!analysis || !revision || revision.analysisId !== analysis.id) {
     return analysis;
   }
 
@@ -252,7 +254,6 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const analysis = getPlantAnalysis(plantId);
   const analyses = useMemo(() => getPlantAnalyses(plantId), [getPlantAnalyses, plantId]);
   const currentRecommendationRevision = getCurrentRecommendationRevision(plantId);
-  const displayAnalysis = analysisWithRecommendationRevision(analysis, currentRecommendationRevision);
   const coverPhoto = getCoverPhoto(plantId);
   const photos = getPlantPhotos(plantId);
   const milestones = useMemo(
@@ -265,6 +266,21 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const completedPhotoFollowUp = getLatestCompletedFollowUp(plantId);
   const hypothesisResolutions = getPlantHypothesisResolutions(plantId);
   const careEvents = getPlantCareEvents(plantId);
+  const analysisContext = useMemo(
+    () =>
+      plant
+        ? selectPlantDetailAnalysisContext({
+            plant,
+            analyses,
+            milestones,
+            followUps: allFollowUps,
+            hypothesisResolutions,
+            secondaryDataReady
+          })
+        : { latestAnalysis: analysis, meaningfulAnalysis: analysis, recoveryContext: false, hiddenReason: "no_analysis" as const },
+    [allFollowUps, analyses, analysis, hypothesisResolutions, milestones, plant, secondaryDataReady]
+  );
+  const displayAnalysis = analysisWithRecommendationRevision(analysisContext.meaningfulAnalysis, currentRecommendationRevision);
   const historyTimeline = useMemo(
     () =>
       buildPlantTimeline({
@@ -365,6 +381,44 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     () => (plant ? deriveCareActionState(plant, hypothesisResolutions, new Date(), { isCareDataReady: secondaryDataReady }) : null),
     [hypothesisResolutions, plant, secondaryDataReady]
   );
+  const derivedHealthStatus = useMemo(
+    () => (plant ? derivePlantHealthStatus({ plant, analysis: displayAnalysis, milestones, followUps: allFollowUps, careActionState }) : null),
+    [allFollowUps, careActionState, displayAnalysis, milestones, plant]
+  );
+
+  useEffect(() => {
+    if (!plant || process.env.NODE_ENV === "production") {
+      return;
+    }
+
+    const activeFollowUpsCount = allFollowUps.filter((followUp) => followUp.status === "scheduled" || followUp.status === "due").length;
+    const completedFollowUpsCount = allFollowUps.filter((followUp) => followUp.status === "completed").length;
+    console.info("plant_detail_ai_diagnostics", {
+      plantId,
+      plantStatus: plant.status,
+      analysesCount: analyses.length,
+      latestAnalysisId: analysisContext.latestAnalysis?.id ?? null,
+      latestAnalysisMode: plantDetailAnalysisMode(analysisContext.latestAnalysis),
+      latestCondition: analysisContext.latestAnalysis?.condition ?? null,
+      meaningfulAnalysisId: analysisContext.meaningfulAnalysis?.id ?? null,
+      milestonesCount: milestones.length,
+      activeFollowUpsCount,
+      completedFollowUpsCount,
+      derivedHealthStatus: derivedHealthStatus?.status ?? null,
+      careActionState: careActionState
+        ? {
+            actionType: careActionState.actionType,
+            status: careActionState.status,
+            isActionable: careActionState.isActionable,
+            dueAt: careActionState.dueAt ?? null,
+            reason: careActionState.reason
+          }
+        : null,
+      recoveryContext: analysisContext.recoveryContext,
+      shouldRenderAnalysis: Boolean(displayAnalysis),
+      hiddenReason: displayAnalysis ? "not_hidden" : analysisContext.hiddenReason
+    });
+  }, [allFollowUps, analyses.length, analysisContext, careActionState, derivedHealthStatus?.status, displayAnalysis, milestones.length, plant, plantId]);
   const primaryCareAction = careActionState?.isActionable
     ? careActionState.actionType === "observe" || careActionState.actionType === "none"
       ? null
