@@ -138,6 +138,26 @@ function photoAssessmentSavedButRefreshFailedMessage(locale: "en" | "ru") {
   return locale === "ru" ? "Фото сохранены, но обновить рекомендации не удалось." : "Photos were saved, but I could not update the recommendations.";
 }
 
+function mergePhotosForRecommendationRefresh(input: {
+  coverPhoto?: PlantPhoto | null;
+  currentPhotos: PlantPhoto[];
+  savedPhotos?: PlantPhoto[];
+}) {
+  const ordered = [
+    input.coverPhoto,
+    ...(input.savedPhotos ?? []),
+    ...input.currentPhotos.filter((photo) => photo.id !== input.coverPhoto?.id)
+  ].filter(Boolean) as PlantPhoto[];
+  const seen = new Set<string>();
+  return ordered.filter((photo) => {
+    if (seen.has(photo.id)) {
+      return false;
+    }
+    seen.add(photo.id);
+    return true;
+  }).slice(0, 5);
+}
+
 function daysUntilDate(date: string) {
   const today = new Date(`${toDateKey(new Date())}T12:00:00`);
   const target = new Date(`${date.slice(0, 10)}T12:00:00`);
@@ -892,6 +912,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           setPhotoAssessment({ status: "updating_recommendations" });
           const refreshResult = await updateRecommendations({
             sourceAnalysis: persistedAnalysis,
+            photosForAnalysis: mergePhotosForRecommendationRefresh({ coverPhoto, currentPhotos: photos, savedPhotos }),
             contextSnapshot: buildRecommendationContextSnapshot({
               plant,
               homes,
@@ -965,6 +986,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         setPhotoAssessment({ status: "updating_recommendations" });
         const refreshResult = await updateRecommendations({
           sourceAnalysis: persistedAnalysis,
+          photosForAnalysis: mergePhotosForRecommendationRefresh({ coverPhoto, currentPhotos: photos, savedPhotos }),
           contextSnapshot: buildRecommendationContextSnapshot({
             plant,
             homes,
@@ -1003,12 +1025,14 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       sourceAnalysis?: PlantAnalysisRecord;
       contextSnapshot?: RecommendationContextSnapshot;
       changedContext?: RecommendationChangedContext;
+      photosForAnalysis?: PlantPhoto[];
       successStatus?: "success" | "unchanged";
     } = {}
   ): Promise<"success" | "unchanged" | "failed" | "skipped"> => {
     const sourceAnalysis = input.sourceAnalysis ?? analysis;
     const sourceContextSnapshot = input.contextSnapshot ?? activeRecommendationContextSnapshot;
-    if (visibleRecommendationRefreshState.status === "loading" || !photos.length || !sourceAnalysis) {
+    const photosForAnalysis = input.photosForAnalysis ?? mergePhotosForRecommendationRefresh({ coverPhoto, currentPhotos: photos });
+    if (visibleRecommendationRefreshState.status === "loading" || !photosForAnalysis.length || !sourceAnalysis) {
       return "skipped";
     }
 
@@ -1032,8 +1056,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       hasUserProvidedSpecies: Boolean(userProvidedSpeciesContext?.displayName)
     });
     try {
-      const photosForAnalysis = [coverPhoto, ...photos.filter((photo) => photo.id !== coverPhoto?.id)].filter(Boolean).slice(0, 5) as PlantPhoto[];
       const formData = new FormData();
+      let includedPhotoCount = 0;
       for (const photo of photosForAnalysis) {
         const url = (await ensureFullPhotoUrl(photo.id)) ?? photo.url ?? photo.thumbnailUrl;
         if (!url) {
@@ -1041,7 +1065,12 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         }
         const response = await fetch(url);
         if (!response.ok) {
-          throw new Error("saved_photo_fetch_failed");
+          console.warn("recommendation_refresh_photo_fetch_skipped", {
+            plantId: plant.id,
+            photoId: photo.id,
+            status: response.status
+          });
+          continue;
         }
         const blob = await response.blob();
         formData.append("photos", new File([blob], `${photo.id}.jpg`, { type: blob.type || "image/jpeg" }));
@@ -1058,6 +1087,11 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         formData.append("clientPhysicallyRotated", "true");
         formData.append("clientOrientationSources", "saved_normalized_photo");
         formData.append("clientDebugIds", photo.id);
+        includedPhotoCount += 1;
+      }
+
+      if (includedPhotoCount === 0) {
+        throw new Error("saved_photo_fetch_failed");
       }
 
       formData.append("locale", locale);
