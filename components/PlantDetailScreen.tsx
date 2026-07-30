@@ -15,6 +15,7 @@ import { buildPlantTimeline } from "@/lib/plant-timeline";
 import { plantDisplayName } from "@/lib/plant-display";
 import { deriveCareActionState } from "@/lib/plant-action-eligibility";
 import { derivePlantHealthStatus } from "@/lib/plant-health-status";
+import { evaluateRecommendationUpdate } from "@/lib/recommendation-update-decision";
 import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
@@ -50,8 +51,8 @@ const recommendationRefreshTimeoutMs = 45_000;
 const sunlightOptions: NonNullable<Room["directSun"]>[] = ["none", "morning", "midday", "evening", "most_of_day", "unsure"];
 type PhotoAssessmentState =
   | { status: "idle" }
-  | { status: "analyzing" }
-  | { status: "complete"; message: string; changes: string[] }
+  | { status: "uploading_photos" | "analyzing_photos" | "saving_checkin" | "evaluating_update" | "updating_recommendations"; message?: string }
+  | { status: "completed_updated" | "completed_no_change"; message: string; changes: string[] }
   | { status: "failed"; message: string; retryPhotos: PendingPhotoUpload[]; savedPhotos: PlantPhoto[] };
 
 function PlantDetailDebugPanel({ data }: { data: PlantDetailDebugData }) {
@@ -113,6 +114,28 @@ function photoAssessmentChanges(condition: string | undefined, locale: "en" | "r
   return locale === "ru"
     ? ["Фото сохранены. Для уверенного сравнения нужен похожий ракурс."]
     : ["Photos saved. A similar angle would help compare changes with confidence."];
+}
+
+function photoAssessmentMessage(status: PhotoAssessmentState["status"], locale: "en" | "ru", fallback?: string) {
+  if (fallback) return fallback;
+  if (status === "uploading_photos") return locale === "ru" ? "Сохраняю фото..." : "Saving photos...";
+  if (status === "analyzing_photos") return locale === "ru" ? "Изучаю новые фото..." : "Reviewing the new photos...";
+  if (status === "saving_checkin") return locale === "ru" ? "Сохраняю проверку состояния..." : "Saving the check-in...";
+  if (status === "evaluating_update") return locale === "ru" ? "Проверяю, нужно ли менять план..." : "Checking whether the care plan should change...";
+  if (status === "updating_recommendations") return locale === "ru" ? "Обновляю план ухода..." : "Updating the care plan...";
+  return "";
+}
+
+function photoAssessmentUpdatedMessage(locale: "en" | "ru") {
+  return locale === "ru" ? "Фото изучены — план ухода обновлён." : "Photos reviewed — the care plan was updated.";
+}
+
+function photoAssessmentNoChangeMessage(locale: "en" | "ru") {
+  return locale === "ru" ? "Фото проверены. Текущий план остаётся актуальным." : "Photos checked. The current care plan is still relevant.";
+}
+
+function photoAssessmentSavedButRefreshFailedMessage(locale: "en" | "ru") {
+  return locale === "ru" ? "Фото сохранены, но обновить рекомендации не удалось." : "Photos were saved, but I could not update the recommendations.";
 }
 
 function daysUntilDate(date: string) {
@@ -416,6 +439,19 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     () => (plant ? derivePlantHealthStatus({ plant, analysis: displayAnalysis, milestones, followUps: allFollowUps, careActionState }) : null),
     [allFollowUps, careActionState, displayAnalysis, milestones, plant]
   );
+  const recommendationContextSnapshot = plant
+    ? buildRecommendationContextSnapshot({
+        plant,
+        homes,
+        rooms,
+        milestones,
+        careEvents,
+        hypothesisResolutions,
+        weather: weatherContext,
+        analyses,
+        currentRevision: currentRecommendationRevision
+      })
+    : null;
   const plantDebugData = useMemo(
     () =>
       plant && plantDebugEnabled
@@ -434,7 +470,10 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
             timeline: historyTimeline,
             derivedHealthStatus,
             careActionState,
-            hypothesisResolutions
+            hypothesisResolutions,
+            recommendationContextSnapshot: recommendationContextSnapshot ?? undefined,
+            recommendationRefreshStatus: visibleRecommendationRefreshState.status,
+            recommendationRefreshError: visibleRecommendationRefreshState.error
           })
         : null,
     [
@@ -451,9 +490,12 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       photos,
       plant,
       plantDebugEnabled,
+      recommendationContextSnapshot,
       secondaryDataReady,
       secondaryDataStatus,
-      secondaryLoadState
+      secondaryLoadState,
+      visibleRecommendationRefreshState.error,
+      visibleRecommendationRefreshState.status
     ]
   );
 
@@ -578,16 +620,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     hypothesisResolutions,
     locale
   });
-  const recommendationContextSnapshot = buildRecommendationContextSnapshot({
-    plant,
-    homes,
-    rooms,
-    milestones,
-    careEvents,
-    hypothesisResolutions,
-    weather: weatherContext
-  });
-  const currentChangedContext = changedContextSince(currentRecommendationRevision?.contextSnapshot, recommendationContextSnapshot, {
+  const activeRecommendationContextSnapshot = recommendationContextSnapshot!;
+  const currentChangedContext = changedContextSince(currentRecommendationRevision?.contextSnapshot, activeRecommendationContextSnapshot, {
     previousPromptVersion: currentRecommendationRevision?.promptVersion,
     currentPromptVersion: RECOMMENDATION_PROMPT_VERSION,
     previousModelVersion: currentRecommendationRevision?.modelVersion
@@ -603,7 +637,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           milestones,
           careEvents,
           hypothesisResolutions,
-          weather: weatherContext
+          weather: weatherContext,
+          analyses
         })
     : false;
   const recommendationRefreshKey = JSON.stringify({
@@ -694,7 +729,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       return;
     }
 
-    setPhotoAssessment({ status: "analyzing" });
+    setPhotoAssessment({ status: "analyzing_photos" });
     const startedAt = Date.now();
     const followUp = activePhotoFollowUp;
     const isFollowUpAssessment = Boolean(followUp);
@@ -820,7 +855,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
             message: payload.analysis.photoComparison?.message ?? { en: message, ru: message }
           }
         };
-        await savePlantAnalysis(plant.id, {
+        setPhotoAssessment({ status: "saving_checkin" });
+        const persistedAnalysis = await savePlantAnalysis(plant.id, {
           sourcePhotoIds: savedPhotos.map((photo) => photo.id),
           detectedSpecies: payload.analysis.detectedSpecies,
           confidence: payload.analysis.confidence,
@@ -837,10 +873,49 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           ...checkinRawResult
         });
         console.info("photo_follow_up_completed", { plantId: plant.id, followUpId: followUp.id, result: completed.result, photoCount: savedPhotos.length, durationMs: Date.now() - startedAt });
-        setPhotoAssessment({ status: "complete", message: localized(completed.summary, locale) || message, changes: [t(followUpResultLabelKey(completed.result) as never)] });
+        setPhotoAssessment({ status: "evaluating_update" });
+        const evaluation = evaluateRecommendationUpdate({
+          checkin: persistedAnalysis,
+          previousMeaningfulAnalysis: analysisContext.meaningfulAnalysis,
+          currentRevision: currentRecommendationRevision,
+          followUps: allFollowUps,
+          milestones,
+          hypothesisResolutions
+        });
+        console.info("recommendation_update_evaluated", {
+          plantId: plant.id,
+          persistedAnalysisId: persistedAnalysis.id,
+          decision: evaluation.decision,
+          meaningfulChangeReasons: evaluation.meaningfulChangeReasons
+        });
+        if (evaluation.decision === "refresh_required") {
+          setPhotoAssessment({ status: "updating_recommendations" });
+          const refreshResult = await updateRecommendations({
+            sourceAnalysis: persistedAnalysis,
+            contextSnapshot: buildRecommendationContextSnapshot({
+              plant,
+              homes,
+              rooms,
+              milestones,
+              careEvents,
+              hypothesisResolutions,
+              weather: weatherContext,
+              analyses: [persistedAnalysis, ...analyses.filter((item) => item.id !== persistedAnalysis.id)],
+              currentRevision: currentRecommendationRevision
+            })
+          });
+          if (refreshResult === "failed" || refreshResult === "skipped") {
+            setPhotoAssessment({ status: "failed", message: photoAssessmentSavedButRefreshFailedMessage(locale), retryPhotos: selectedPhotos, savedPhotos });
+            return;
+          }
+          setPhotoAssessment({ status: refreshResult === "unchanged" ? "completed_no_change" : "completed_updated", message: refreshResult === "unchanged" ? photoAssessmentNoChangeMessage(locale) : photoAssessmentUpdatedMessage(locale), changes: [t(followUpResultLabelKey(completed.result) as never)] });
+          return;
+        }
+        setPhotoAssessment({ status: "completed_no_change", message: localized(completed.summary, locale) || photoAssessmentNoChangeMessage(locale), changes: [t(followUpResultLabelKey(completed.result) as never)] });
         return;
       }
-      await savePlantAnalysis(plant.id, {
+      setPhotoAssessment({ status: "saving_checkin" });
+      const persistedAnalysis = await savePlantAnalysis(plant.id, {
         sourcePhotoIds: savedPhotos.map((photo) => photo.id),
         detectedSpecies: payload.analysis.detectedSpecies,
         confidence: payload.analysis.confidence,
@@ -871,8 +946,47 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         model: payload.model,
         analysisMode: progressReviewMode()
       });
-      console.info("photo_assessment_completed", { plantId: plant.id, photoCount: savedPhotos.length, durationMs: Date.now() - startedAt });
-      setPhotoAssessment({ status: "complete", message, changes });
+      setPhotoAssessment({ status: "evaluating_update" });
+      const evaluation = evaluateRecommendationUpdate({
+        checkin: persistedAnalysis,
+        previousMeaningfulAnalysis: analysisContext.meaningfulAnalysis,
+        currentRevision: currentRecommendationRevision,
+        followUps: allFollowUps,
+        milestones,
+        hypothesisResolutions
+      });
+      console.info("recommendation_update_evaluated", {
+        plantId: plant.id,
+        persistedAnalysisId: persistedAnalysis.id,
+        decision: evaluation.decision,
+        meaningfulChangeReasons: evaluation.meaningfulChangeReasons
+      });
+      if (evaluation.decision === "refresh_required") {
+        setPhotoAssessment({ status: "updating_recommendations" });
+        const refreshResult = await updateRecommendations({
+          sourceAnalysis: persistedAnalysis,
+          contextSnapshot: buildRecommendationContextSnapshot({
+            plant,
+            homes,
+            rooms,
+            milestones,
+            careEvents,
+            hypothesisResolutions,
+            weather: weatherContext,
+            analyses: [persistedAnalysis, ...analyses.filter((item) => item.id !== persistedAnalysis.id)],
+            currentRevision: currentRecommendationRevision
+          })
+        });
+        if (refreshResult === "failed" || refreshResult === "skipped") {
+          setPhotoAssessment({ status: "failed", message: photoAssessmentSavedButRefreshFailedMessage(locale), retryPhotos: selectedPhotos, savedPhotos });
+          return;
+        }
+        console.info("photo_assessment_completed", { plantId: plant.id, photoCount: savedPhotos.length, durationMs: Date.now() - startedAt, recommendationUpdate: refreshResult });
+        setPhotoAssessment({ status: refreshResult === "unchanged" ? "completed_no_change" : "completed_updated", message: refreshResult === "unchanged" ? photoAssessmentNoChangeMessage(locale) : photoAssessmentUpdatedMessage(locale), changes });
+        return;
+      }
+      console.info("photo_assessment_completed", { plantId: plant.id, photoCount: savedPhotos.length, durationMs: Date.now() - startedAt, recommendationUpdate: evaluation.decision });
+      setPhotoAssessment({ status: "completed_no_change", message: photoAssessmentNoChangeMessage(locale), changes: changes.length ? changes : [message] });
     } catch (error) {
       console.warn("photo_assessment_failed", {
         plantId: plant.id,
@@ -884,9 +998,18 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     }
   };
 
-  const updateRecommendations = async () => {
-    if (visibleRecommendationRefreshState.status === "loading" || !photos.length || !analysis) {
-      return;
+  const updateRecommendations = async (
+    input: {
+      sourceAnalysis?: PlantAnalysisRecord;
+      contextSnapshot?: RecommendationContextSnapshot;
+      changedContext?: RecommendationChangedContext;
+      successStatus?: "success" | "unchanged";
+    } = {}
+  ): Promise<"success" | "unchanged" | "failed" | "skipped"> => {
+    const sourceAnalysis = input.sourceAnalysis ?? analysis;
+    const sourceContextSnapshot = input.contextSnapshot ?? activeRecommendationContextSnapshot;
+    if (visibleRecommendationRefreshState.status === "loading" || !photos.length || !sourceAnalysis) {
+      return "skipped";
     }
 
     dispatchRecommendationRefresh({ type: "start", plantId: plant.id });
@@ -902,7 +1025,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       }
     }, recommendationRefreshTimeoutMs);
     const startedAt = Date.now();
-    const userProvidedSpeciesContext = recommendationSpeciesContextFromPlant(plant, analysis);
+    const userProvidedSpeciesContext = recommendationSpeciesContextFromPlant(plant, sourceAnalysis);
     console.info("recommendation_refresh_started", {
       plantId: plant.id,
       revisionIdBefore: currentRecommendationRevision?.id ?? null,
@@ -945,19 +1068,20 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       formData.append("userProvidedSpecies", JSON.stringify(userProvidedSpeciesContext));
       formData.append("currentLightCondition", plant.lightConditionKey ? t(plant.lightConditionKey) : "");
       formData.append("environmentContext", formatEnvironmentContextForPrompt(buildPlantEnvironmentContext({ plant, homes, rooms, weather: weatherContext })));
-      const changedContext = changedContextSince(currentRecommendationRevision?.contextSnapshot, recommendationContextSnapshot, {
+      const changedContext = changedContextSince(currentRecommendationRevision?.contextSnapshot, sourceContextSnapshot, {
         previousPromptVersion: currentRecommendationRevision?.promptVersion,
         currentPromptVersion: RECOMMENDATION_PROMPT_VERSION,
         previousModelVersion: currentRecommendationRevision?.modelVersion
       });
-      const reasonType = reasonTypeFromChangedContext(changedContext);
-      const refreshReason = recommendationRefreshReason(changedContext, recommendationContextSnapshot, locale, t);
+      const effectiveChangedContext = input.changedContext ?? changedContext;
+      const reasonType = reasonTypeFromChangedContext(effectiveChangedContext);
+      const refreshReason = recommendationRefreshReason(effectiveChangedContext, sourceContextSnapshot, locale, t);
       formData.append(
         "previousAnalysis",
         JSON.stringify({
           ...compactPreviousRecommendation(displayAnalysis, {
             previousContextSnapshot: currentRecommendationRevision?.contextSnapshot,
-            changedContext,
+            changedContext: effectiveChangedContext,
             reasonType,
             userProvidedSpecies: userProvidedSpeciesContext
           })
@@ -972,7 +1096,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       if (enrichmentLatencyMs != null) {
         recordAddPlantPerformanceStage("recommendation_enrichment_latency", enrichmentLatencyMs, {
           plantId: plant.id,
-          analysisId: analysis.id,
+          analysisId: sourceAnalysis.id,
           model: payload?.model ?? "unknown"
         });
       }
@@ -982,22 +1106,22 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
 
       const persistenceStartedAt = performance.now();
       const revisionResult = await saveRecommendationRevision(plant.id, {
-        analysisId: analysis.id,
+        analysisId: sourceAnalysis.id,
         recommendations: Array.isArray(payload.analysis.recommendations) ? payload.analysis.recommendations : [],
         structuredResult: {
           ...payload.analysis,
           recommendationRefresh: {
             refreshedAt: new Date().toISOString(),
             reason: refreshReason,
-            sourceAnalysisId: analysis.id,
+            sourceAnalysisId: sourceAnalysis.id,
             sourcePhotoIds: photosForAnalysis.map((photo) => photo.id),
-            changedContext
+            changedContext: effectiveChangedContext
           }
         },
         reasonType,
         reasonText: refreshReason,
-        changedContext,
-        contextSnapshot: recommendationContextSnapshot,
+        changedContext: effectiveChangedContext,
+        contextSnapshot: sourceContextSnapshot,
         promptVersion: RECOMMENDATION_PROMPT_VERSION,
         recommendationVersion: RECOMMENDATION_VERSION,
         modelVersion: typeof payload.model === "string" ? payload.model : undefined,
@@ -1006,7 +1130,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       });
       recordAddPlantPerformanceStage("recommendation_enrichment_persistence", performance.now() - persistenceStartedAt, {
         plantId: plant.id,
-        analysisId: analysis.id,
+        analysisId: sourceAnalysis.id,
         unchanged: Boolean(revisionResult.unchanged)
       });
       console.info("recommendation_refresh_completed", {
@@ -1018,8 +1142,9 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         hasUserProvidedSpecies: Boolean(userProvidedSpeciesContext?.displayName)
       });
       if (!didTimeout && activePlantIdRef.current === plant.id) {
-        dispatchRecommendationRefresh({ type: revisionResult.unchanged ? "unchanged" : "success", plantId: plant.id });
+        dispatchRecommendationRefresh({ type: revisionResult.unchanged ? "unchanged" : input.successStatus ?? "success", plantId: plant.id });
       }
+      return revisionResult.unchanged ? "unchanged" : "success";
     } catch (error) {
       const wasAborted = error instanceof DOMException && error.name === "AbortError";
       console.warn("recommendation_refresh_failed", {
@@ -1032,6 +1157,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       if (!didTimeout && activePlantIdRef.current === plant.id) {
         dispatchRecommendationRefresh({ type: "error", plantId: plant.id, error: userProvidedSpeciesContext ? t("plantAnalysis.userSpeciesRefreshFailed") : t("plantAnalysis.refreshFailedInline") });
       }
+      return "failed";
     } finally {
       window.clearTimeout(timeoutId);
       if (recommendationRefreshAbortRef.current === abortController) {
@@ -1130,9 +1256,9 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         <section className="mt-4 rounded-[24px] bg-[#eef5e8] p-4 shadow-soft">
           <p className="text-xs font-bold uppercase text-[#6f8c62]">{t("photoAssessment.title")}</p>
           <p className="mt-1 text-sm font-extrabold leading-5 text-[#355f3d]">
-            {photoAssessment.status === "analyzing" ? t("photoAssessment.analyzing") : photoAssessment.message}
+            {photoAssessmentMessage(photoAssessment.status, locale, "message" in photoAssessment ? photoAssessment.message : undefined)}
           </p>
-          {photoAssessment.status === "complete" ? (
+          {photoAssessment.status === "completed_updated" || photoAssessment.status === "completed_no_change" ? (
             <ul className="mt-3 grid gap-2 text-sm font-bold leading-5 text-[#4f6946]">
               {photoAssessment.changes.map((change) => (
                 <li key={change} className="flex gap-2">
@@ -1278,11 +1404,14 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           onCancel={() => setSheet(null)}
           onSave={async (selectedPhotos) => {
             setIsCompletingAction(true);
+            setPhotoAssessment({ status: "uploading_photos" });
             try {
               const savedPhotos = await addPlantPhotos(plant.id, selectedPhotos);
               setSheet(null);
-              setToast(t("toast.photoSaved"));
               void analyzeNewPhotos(selectedPhotos, savedPhotos);
+            } catch (error) {
+              setPhotoAssessment({ status: "idle" });
+              throw error;
             } finally {
               setIsCompletingAction(false);
             }

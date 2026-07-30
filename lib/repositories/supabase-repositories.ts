@@ -1363,21 +1363,25 @@ export class AnalysisRepository {
     rawResult?: unknown;
     model?: string | null;
   }) {
-    const { error } = await this.supabase.from("plant_analyses").insert({
-      user_id: this.user.id,
-      plant_id: input.plantId,
-      source_photo_ids: input.sourcePhotoIds,
-      detected_species: input.detectedSpecies ?? null,
-      confidence: input.confidence ?? null,
-      condition: input.condition ?? "unknown",
-      status: "complete",
-      next_action: input.nextAction ?? null,
-      summary_en: input.summaryEn ?? null,
-      summary_ru: input.summaryRu ?? null,
-      recommendations: input.recommendations ?? [],
-      raw_result: input.rawResult ?? null,
-      model: input.model ?? null
-    });
+    const { data, error } = await this.supabase
+      .from("plant_analyses")
+      .insert({
+        user_id: this.user.id,
+        plant_id: input.plantId,
+        source_photo_ids: input.sourcePhotoIds,
+        detected_species: input.detectedSpecies ?? null,
+        confidence: input.confidence ?? null,
+        condition: input.condition ?? "unknown",
+        status: "complete",
+        next_action: input.nextAction ?? null,
+        summary_en: input.summaryEn ?? null,
+        summary_ru: input.summaryRu ?? null,
+        recommendations: input.recommendations ?? [],
+        raw_result: input.rawResult ?? null,
+        model: input.model ?? null
+      })
+      .select("*")
+      .single();
 
     if (error) {
       logSupabaseStageError("plant_creation_supabase_error", "save_analysis", error, {
@@ -1387,6 +1391,12 @@ export class AnalysisRepository {
       });
       throw error;
     }
+
+    if (!data) {
+      throw new Error("plant_analysis_insert_returned_no_row");
+    }
+
+    return mapAnalysis(data);
   }
 
   async updateLatestSpeciesConfirmation(

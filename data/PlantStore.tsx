@@ -211,7 +211,7 @@ type PlantStoreValue = PlantState & {
       model?: string | null;
       analysisMode?: string | null;
     }
-  ) => Promise<void>;
+  ) => Promise<PlantAnalysisRecord>;
   completePhotoFollowUp: (plantId: string, followUpId: string, savedPhotos: PlantPhoto[], rawAnalysis: unknown) => Promise<PlantFollowUp>;
   saveRecommendationRevision: (
     plantId: string,
@@ -1521,7 +1521,7 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         throw new Error("Plant collection is not ready.");
       }
 
-      await repositories.analyses.addAnalysis({
+      const analysisRecord = await repositories.analyses.addAnalysis({
         plantId,
         sourcePhotoIds: input.sourcePhotoIds,
         detectedSpecies: input.detectedSpecies,
@@ -1561,18 +1561,6 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
         });
       }
 
-      const analysisRecord: PlantAnalysisRecord = {
-        id: `${plantId}-analysis-${Date.now()}`,
-        plantId,
-        condition: input.condition ?? "unknown",
-        nextAction: input.nextAction ?? null,
-        summary: input.summary,
-        recommendations: Array.isArray(input.recommendations) ? (input.recommendations as PlantAnalysisRecord["recommendations"]) : [],
-        rawResult: input.rawResult as PlantAnalysisRecord["rawResult"],
-        model: input.model ?? undefined,
-        createdAt: new Date().toISOString()
-      };
-
       setState((current) => ({
         ...current,
         plants: current.plants.map((plant) =>
@@ -1594,6 +1582,8 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
       if (followUpReason) {
         void scheduleFollowUp(plantId, followUpReason);
       }
+
+      return analysisRecord;
     },
     [repositories, scheduleFollowUp, state.analyses, state.followUps, state.milestones, state.plants]
   );

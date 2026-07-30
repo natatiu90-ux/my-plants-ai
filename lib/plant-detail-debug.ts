@@ -1,6 +1,8 @@
 import type { DerivedCareActionState } from "./plant-action-eligibility";
 import type { DerivedPlantHealthStatus } from "./plant-health-status";
 import { plantDetailAnalysisMode, type PlantDetailAnalysisContext } from "./plant-analysis-context";
+import { evaluateRecommendationUpdate } from "./recommendation-update-decision";
+import { changedContextSince, type RecommendationContextSnapshot } from "./recommendation-refresh";
 import type { Plant, PlantAnalysisRecord, PlantCareEvent, PlantFollowUp, PlantHypothesisResolution, PlantMilestone, PlantPhoto, PlantRecommendationRevision } from "@/types/plant";
 import type { PlantTimelineEvent } from "./plant-timeline";
 
@@ -70,6 +72,20 @@ export type PlantDetailDebugData = {
     | "recommendation_mismatch"
     | "no_presentable_content"
     | "unknown";
+  recommendationUpdate: {
+    persistedAnalysisId: string | null;
+    analysisSaveStatus: "saved" | "missing";
+    latestCheckinCreatedAt: string | null;
+    currentRevisionId: string | null;
+    currentRevisionAnalysisId: string | null;
+    currentRevisionCreatedAt: string | null;
+    decision: string;
+    meaningfulChangeReasons: string[];
+    staleReason: string | null;
+    refreshStarted: boolean;
+    refreshCompleted: boolean;
+    refreshError: string | null;
+  };
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -156,11 +172,38 @@ export function buildPlantDetailDebugData(input: {
   derivedHealthStatus?: DerivedPlantHealthStatus | null;
   careActionState?: DerivedCareActionState | null;
   hypothesisResolutions?: PlantHypothesisResolution[];
+  recommendationContextSnapshot?: RecommendationContextSnapshot;
+  recommendationRefreshStatus?: string;
+  recommendationRefreshError?: string;
 }): PlantDetailDebugData {
   const meaningfulAnalysisCanBuildView = canBuildPlantAnalysisView(input.analysisContext.meaningfulAnalysis);
   const shouldRenderAnalysis = Boolean(input.analysisContext.meaningfulAnalysis && meaningfulAnalysisCanBuildView);
   const activeFollowUps = input.followUps.filter((followUp) => followUp.status === "scheduled" || followUp.status === "due");
   const completedFollowUps = input.followUps.filter((followUp) => followUp.status === "completed");
+  const latestCheckin = input.analyses.find((analysis) => analysis.plantId === input.plant.id && plantDetailAnalysisMode(analysis) === "plant_checkin");
+  const updateEvaluation = evaluateRecommendationUpdate({
+    checkin: latestCheckin,
+    previousMeaningfulAnalysis: input.analysisContext.meaningfulAnalysis?.id === latestCheckin?.id ? input.analysisContext.latestAnalysis : input.analysisContext.meaningfulAnalysis,
+    currentRevision: input.recommendationRevision,
+    followUps: input.followUps,
+    milestones: input.milestones,
+    hypothesisResolutions: input.hypothesisResolutions
+  });
+  const staleReason =
+    input.recommendationContextSnapshot && input.recommendationRevision
+      ? Object.entries(
+          changedContextSince(input.recommendationRevision.contextSnapshot, input.recommendationContextSnapshot, {
+            previousPromptVersion: input.recommendationRevision.promptVersion,
+            currentPromptVersion: input.recommendationRevision.promptVersion
+          })
+        )
+          .flatMap(([section, values]) =>
+            Object.entries(values).filter(([, changed]) => changed).map(([key]) => `${section}.${key}`)
+          )
+          .join(", ") || null
+      : latestCheckin && !input.recommendationRevision
+        ? "no_current_revision"
+        : null;
 
   return {
     plantId: input.plant.id,
@@ -215,6 +258,20 @@ export function buildPlantDetailDebugData(input: {
           meaningfulAnalysis: input.analysisContext.meaningfulAnalysis,
           meaningfulAnalysisCanBuildView,
           revision: input.recommendationRevision
-        })
+        }),
+    recommendationUpdate: {
+      persistedAnalysisId: latestCheckin?.id ?? null,
+      analysisSaveStatus: latestCheckin ? "saved" : "missing",
+      latestCheckinCreatedAt: latestCheckin?.createdAt ?? null,
+      currentRevisionId: input.recommendationRevision?.id ?? null,
+      currentRevisionAnalysisId: input.recommendationRevision?.analysisId ?? null,
+      currentRevisionCreatedAt: input.recommendationRevision?.createdAt ?? null,
+      decision: updateEvaluation.decision,
+      meaningfulChangeReasons: updateEvaluation.meaningfulChangeReasons,
+      staleReason,
+      refreshStarted: input.recommendationRefreshStatus === "loading",
+      refreshCompleted: input.recommendationRefreshStatus === "success" || input.recommendationRefreshStatus === "unchanged",
+      refreshError: input.recommendationRefreshError ?? null
+    }
   };
 }

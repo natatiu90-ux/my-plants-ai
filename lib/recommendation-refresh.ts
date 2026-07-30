@@ -3,6 +3,7 @@ import type { RecommendationImpactLevel, RecommendationRevisionReasonType } from
 import { shouldStartRecommendationEnrichment } from "./plant-analysis-pipeline";
 import { RECOMMENDATION_PROMPT_VERSION, RECOMMENDATION_VERSION, VISUAL_EVIDENCE_STALE_DAYS } from "./recommendation-version";
 import type { HomeWeatherContext } from "./weather-context";
+import { checkinHasMeaningfulChange } from "./recommendation-update-decision";
 import { summarizedWeatherForSnapshot, weatherChangedSubstantially } from "./weather-context";
 
 function timestamp(value: string | undefined | null) {
@@ -125,6 +126,14 @@ export type RecommendationContextSnapshot = {
     latestCareEventAt: string | null;
     latestResolutionAt: string | null;
   };
+  analysis?: {
+    latestCheckinAnalysisId?: string | null;
+    latestCheckinCreatedAt?: string | null;
+    latestCheckinMeaningfulChange?: boolean;
+    latestPhotoBatchFingerprint?: string | null;
+    currentRecommendationAnalysisId?: string | null;
+    currentRecommendationCreatedAt?: string | null;
+  };
 };
 
 export type RecommendationChangedContext = {
@@ -182,9 +191,18 @@ export function buildRecommendationContextSnapshot(input: {
   careEvents: PlantCareEvent[];
   hypothesisResolutions: PlantHypothesisResolution[];
   weather?: HomeWeatherContext | null;
+  analyses?: PlantAnalysisRecord[];
+  currentRevision?: PlantRecommendationRevision;
 }): RecommendationContextSnapshot {
   const home = input.plant.homeId ? input.homes.find((item) => item.id === input.plant.homeId) : undefined;
   const room = input.plant.roomId ? input.rooms.find((item) => item.id === input.plant.roomId) : undefined;
+  const analyses = [...(input.analyses ?? [])].filter((analysis) => analysis.plantId === input.plant.id);
+  const latestCheckin = analyses
+    .filter((analysis) => analysis.rawResult?.analysisMode === "plant_checkin")
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const latestPhotoBatchFingerprint = latestCheckin?.rawResult?.photoComparison?.analyzedPhotoIds?.length
+    ? latestCheckin.rawResult.photoComparison.analyzedPhotoIds.slice().sort().join("|")
+    : null;
   return {
     latestContextAt: isoTimestamp(latestContextTimestamp(input)),
     plant: {
@@ -230,6 +248,22 @@ export function buildRecommendationContextSnapshot(input: {
       latestMilestoneAt: isoTimestamp(latestMilestoneTimestamp(input.milestones)),
       latestCareEventAt: isoTimestamp(latestCareEventTimestamp(input.careEvents)),
       latestResolutionAt: isoTimestamp(latestResolutionTimestamp(input.hypothesisResolutions))
+    },
+    analysis: {
+      latestCheckinAnalysisId: latestCheckin?.id ?? null,
+      latestCheckinCreatedAt: latestCheckin?.createdAt ?? null,
+      latestCheckinMeaningfulChange: latestCheckin
+        ? checkinHasMeaningfulChange({
+            checkin: latestCheckin,
+            previousMeaningfulAnalysis: analyses.find((analysis) => analysis.id !== latestCheckin.id && analysis.rawResult?.analysisMode !== "plant_checkin"),
+            currentRevision: input.currentRevision,
+            milestones: input.milestones,
+            hypothesisResolutions: input.hypothesisResolutions
+          })
+        : false,
+      latestPhotoBatchFingerprint,
+      currentRecommendationAnalysisId: input.currentRevision?.analysisId ?? null,
+      currentRecommendationCreatedAt: input.currentRevision?.createdAt ?? null
     }
   };
 }
@@ -257,6 +291,7 @@ export function changedContextSince(
   const previousPlant = previous?.plant && typeof previous.plant === "object" ? (previous.plant as Record<string, unknown>) : undefined;
   const previousHistory = previous?.history && typeof previous.history === "object" ? (previous.history as Record<string, unknown>) : undefined;
   const previousWeather = previous?.weather && typeof previous.weather === "object" ? previous.weather : undefined;
+  const previousAnalysis = previous?.analysis && typeof previous.analysis === "object" ? (previous.analysis as Record<string, unknown>) : undefined;
   const changes = emptyChangedContext();
 
   changes.home.city = previousHome?.city !== current.home?.city;
@@ -289,6 +324,9 @@ export function changedContextSince(
 
   changes.system.promptVersion = Boolean(options.previousPromptVersion && options.currentPromptVersion && options.previousPromptVersion !== options.currentPromptVersion);
   changes.system.modelVersion = Boolean(options.previousModelVersion && options.currentModelVersion && options.previousModelVersion !== options.currentModelVersion);
+  if (previousAnalysis?.latestCheckinAnalysisId !== current.analysis?.latestCheckinAnalysisId && current.analysis?.latestCheckinMeaningfulChange) {
+    changes.care.history = true;
+  }
   return changes;
 }
 
@@ -444,6 +482,7 @@ export function isRecommendationStale(input: {
   careEvents: PlantCareEvent[];
   hypothesisResolutions: PlantHypothesisResolution[];
   weather?: HomeWeatherContext | null;
+  analyses?: PlantAnalysisRecord[];
 }) {
   if (input.currentRevision?.isCurrent) {
     const currentSnapshot = buildRecommendationContextSnapshot(input);
@@ -454,6 +493,15 @@ export function isRecommendationStale(input: {
     });
     return (
       hasChangedContextChanges(changedContext) ||
+      Boolean(
+        currentSnapshot.analysis?.latestCheckinMeaningfulChange &&
+          currentSnapshot.analysis.latestCheckinCreatedAt &&
+          input.currentRevision.createdAt &&
+          timestamp(currentSnapshot.analysis.latestCheckinCreatedAt) != null &&
+          timestamp(input.currentRevision.createdAt) != null &&
+          (timestamp(currentSnapshot.analysis.latestCheckinCreatedAt) as number) > (timestamp(input.currentRevision.createdAt) as number)
+      ) ||
+      Boolean(currentSnapshot.analysis?.latestCheckinMeaningfulChange && currentSnapshot.analysis.latestCheckinAnalysisId && input.currentRevision.analysisId !== currentSnapshot.analysis.latestCheckinAnalysisId) ||
       input.currentRevision.promptVersion !== RECOMMENDATION_PROMPT_VERSION ||
       input.currentRevision.recommendationVersion !== RECOMMENDATION_VERSION
     );

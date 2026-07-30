@@ -272,4 +272,89 @@ assert.equal(
 assert.equal(sourceAnalysisAgeDays(analysis, new Date("2026-07-31T10:00:00.000Z")), 30);
 assert.equal(isVisualEvidenceStale(analysis, new Date("2026-07-31T10:00:00.000Z"), 30), true);
 
+const stableCheckin: PlantAnalysisRecord = {
+  id: "analysis-checkin-stable",
+  plantId: plant.id,
+  condition: "healthy",
+  nextAction: null,
+  summary: { en: "Checked" },
+  recommendations: [],
+  rawResult: {
+    analysisMode: "plant_checkin",
+    plantStatus: "healthy",
+    urgency: "none",
+    checkinResult: "stable",
+    photoComparison: {
+      analyzedPhotoIds: ["photo-new"],
+      comparisonTargetPhotoIds: ["photo-old"],
+      analysisTimestamp: "2026-07-30T10:00:00.000Z",
+      observationsUnchanged: ["No clear change"],
+      reliableComparison: true
+    }
+  },
+  createdAt: "2026-07-30T10:00:00.000Z"
+};
+
+const stableCheckinSnapshot = buildRecommendationContextSnapshot({
+  plant,
+  homes: [home],
+  rooms: [room],
+  milestones: [],
+  careEvents: [],
+  hypothesisResolutions: [],
+  analyses: [stableCheckin, analysis],
+  currentRevision: revision
+});
+
+assert.equal(stableCheckinSnapshot.analysis?.latestCheckinAnalysisId, stableCheckin.id);
+assert.equal(stableCheckinSnapshot.analysis?.latestCheckinMeaningfulChange, false);
+assert.equal(
+  isRecommendationStale({
+    plant,
+    analysis: stableCheckin,
+    currentRevision: revision,
+    homes: [home],
+    rooms: [room],
+    milestones: [],
+    careEvents: [],
+    hypothesisResolutions: [],
+    analyses: [stableCheckin, analysis]
+  }),
+  false,
+  "no-change check-in should not make the current recommendation stale"
+);
+
+const meaningfulCheckin: PlantAnalysisRecord = {
+  ...stableCheckin,
+  id: "analysis-checkin-worse",
+  condition: "needs_attention",
+  rawResult: {
+    ...stableCheckin.rawResult,
+    plantStatus: "needs_attention",
+    urgency: "soon",
+    checkinResult: "worse",
+    photoComparison: {
+      ...stableCheckin.rawResult?.photoComparison,
+      observationsWorsened: ["More yellowing is visible"],
+      recommendationChanges: ["Check sooner"]
+    }
+  }
+};
+
+assert.equal(
+  isRecommendationStale({
+    plant,
+    analysis: meaningfulCheckin,
+    currentRevision: revision,
+    homes: [home],
+    rooms: [room],
+    milestones: [],
+    careEvents: [],
+    hypothesisResolutions: [],
+    analyses: [meaningfulCheckin, analysis]
+  }),
+  true,
+  "meaningful check-in newer than the current revision should make recommendations stale"
+);
+
 console.log("recommendation-refresh tests passed");
