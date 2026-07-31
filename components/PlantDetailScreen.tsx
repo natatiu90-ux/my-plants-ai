@@ -56,6 +56,12 @@ type PhotoAssessmentState =
   | { status: "failed"; message: string; retryPhotos: PendingPhotoUpload[]; savedPhotos: PlantPhoto[]; changes?: string[] };
 
 type PhotoComparisonResult = NonNullable<PlantAnalysisRecord["rawResult"]>["photoComparison"];
+type LocalRecommendationPhoto = {
+  id: string;
+  type: PlantPhoto["type"];
+  file: File;
+  source: string;
+};
 
 function PlantDetailDebugPanel({ data }: { data: PlantDetailDebugData }) {
   return (
@@ -122,6 +128,14 @@ function stringList(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
 }
 
+function looksLikeWrongLocale(text: string, locale: "en" | "ru") {
+  if (locale !== "ru") {
+    return false;
+  }
+
+  return /[A-Za-z]{3,}/.test(text) && !/[А-Яа-яЁё]/.test(text);
+}
+
 function buildCheckinPhotoComparison(input: {
   analysis: PlantAnalysisRecord["rawResult"];
   savedPhotoIds: string[];
@@ -157,19 +171,31 @@ function buildCheckinPhotoComparison(input: {
 }
 
 function photoAssessmentChangesFromComparison(comparison: PhotoComparisonResult, fallback: string[], locale: "en" | "ru") {
+  const localizedMessage = localized(comparison?.message, locale);
+  const filterLocale = (items: string[]) => items.filter((item) => !looksLikeWrongLocale(item, locale)).slice(0, 2);
+
   const worsened = stringList(comparison?.observationsWorsened);
   if (worsened.length) {
-    return worsened.slice(0, 2);
+    const visible = filterLocale(worsened);
+    if (visible.length) return visible;
+    if (localizedMessage && !looksLikeWrongLocale(localizedMessage, locale)) return [localizedMessage];
+    return locale === "ru" ? ["На новых фото есть признаки ухудшения."] : ["The new photos show signs of worsening."];
   }
 
   const improved = stringList(comparison?.observationsImproved);
   if (improved.length) {
-    return improved.slice(0, 2);
+    const visible = filterLocale(improved);
+    if (visible.length) return visible;
+    if (localizedMessage && !looksLikeWrongLocale(localizedMessage, locale)) return [localizedMessage];
+    return locale === "ru" ? ["На новых фото есть признаки улучшения."] : ["The new photos show signs of improvement."];
   }
 
   const added = stringList(comparison?.observationsAdded);
   if (added.length) {
-    return added.slice(0, 2);
+    const visible = filterLocale(added);
+    if (visible.length) return visible;
+    if (localizedMessage && !looksLikeWrongLocale(localizedMessage, locale)) return [localizedMessage];
+    return fallback;
   }
 
   if (comparison?.reliableComparison === false) {
@@ -369,7 +395,7 @@ function RecommendationAutoRefresh({
       return;
     }
 
-    if (!refreshKey || status === "loading" || lastStartedKeyRef.current === refreshKey) {
+    if (!refreshKey || status === "loading" || status === "error" || lastStartedKeyRef.current === refreshKey) {
       return;
     }
 
@@ -447,6 +473,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   const loggedEvents = useRef(new Set<string>());
   const openedActionRef = useRef<string | null>(null);
   const recommendationRefreshAbortRef = useRef<AbortController | null>(null);
+  const recommendationRefreshRunIdRef = useRef(0);
   const activePlantIdRef = useRef(plantId);
 
   useEffect(() => {
@@ -464,12 +491,14 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
 
   useEffect(() => {
     return () => {
+      recommendationRefreshRunIdRef.current += 1;
       recommendationRefreshAbortRef.current?.abort();
     };
   }, []);
 
   useEffect(() => {
     activePlantIdRef.current = plantId;
+    recommendationRefreshRunIdRef.current += 1;
     recommendationRefreshAbortRef.current?.abort();
     recommendationRefreshAbortRef.current = null;
     setPhotoAssessment({ status: "idle" });
@@ -734,6 +763,12 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     promptVersion: RECOMMENDATION_PROMPT_VERSION,
     recommendationVersion: RECOMMENDATION_VERSION
   });
+  const photoAssessmentBlocksAutoRefresh =
+    photoAssessment.status === "uploading_photos" ||
+    photoAssessment.status === "analyzing_photos" ||
+    photoAssessment.status === "saving_checkin" ||
+    photoAssessment.status === "evaluating_update" ||
+    photoAssessment.status === "updating_recommendations";
   const visualEvidenceAge = sourceAnalysisAgeDays(analysis);
   const visualEvidenceIsStale = isVisualEvidenceStale(analysis);
 
@@ -816,6 +851,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
 
     setPhotoAssessment({ status: "analyzing_photos" });
     const startedAt = Date.now();
+    const freshRecommendationPhotos: LocalRecommendationPhoto[] = [];
     const followUp = activePhotoFollowUp;
     const isFollowUpAssessment = Boolean(followUp);
     const comparisonTargetPhotoIds = [coverPhoto?.id, ...photos.slice(0, 3).map((photo) => photo.id)].filter(Boolean) as string[];
@@ -826,12 +862,20 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         : {};
     try {
       const formData = new FormData();
-      for (const photo of selectedPhotos) {
+      for (let index = 0; index < selectedPhotos.length; index += 1) {
+        const photo = selectedPhotos[index];
         const blob = await PhotoStorageRepository.getPhoto(photo.storageId);
         if (!blob) {
           throw new Error("temporary_photo_missing");
         }
-        formData.append("photos", new File([blob], `${photo.originalName.replace(/\.[^.]+$/, "") || "plant-photo"}.jpg`, { type: blob.type || "image/jpeg" }));
+        const file = new File([blob], `${photo.originalName.replace(/\.[^.]+$/, "") || "plant-photo"}.jpg`, { type: blob.type || "image/jpeg" });
+        freshRecommendationPhotos.push({
+          id: savedPhotos[index]?.id ?? photo.id,
+          type: savedPhotos[index]?.type ?? photo.type,
+          file,
+          source: "new_checkin"
+        });
+        formData.append("photos", file);
         formData.append("photoTypes", photo.type);
         formData.append("photoSources", photo.source);
         formData.append("clientFileNames", photo.originalName);
@@ -978,6 +1022,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           const refreshResult = await updateRecommendations({
             sourceAnalysis: persistedAnalysis,
             photosForAnalysis: mergePhotosForRecommendationRefresh({ coverPhoto, currentPhotos: photos, savedPhotos }),
+            localPhotoFiles: freshRecommendationPhotos,
+            restartIfLoading: true,
             contextSnapshot: buildRecommendationContextSnapshot({
               plant,
               homes,
@@ -1040,6 +1086,8 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         const refreshResult = await updateRecommendations({
           sourceAnalysis: persistedAnalysis,
           photosForAnalysis: mergePhotosForRecommendationRefresh({ coverPhoto, currentPhotos: photos, savedPhotos }),
+          localPhotoFiles: freshRecommendationPhotos,
+          restartIfLoading: true,
           contextSnapshot: buildRecommendationContextSnapshot({
             plant,
             homes,
@@ -1079,16 +1127,20 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
       contextSnapshot?: RecommendationContextSnapshot;
       changedContext?: RecommendationChangedContext;
       photosForAnalysis?: PlantPhoto[];
+      localPhotoFiles?: LocalRecommendationPhoto[];
+      restartIfLoading?: boolean;
       successStatus?: "success" | "unchanged";
     } = {}
   ): Promise<"success" | "unchanged" | "failed" | "skipped"> => {
     const sourceAnalysis = input.sourceAnalysis ?? analysis;
     const sourceContextSnapshot = input.contextSnapshot ?? activeRecommendationContextSnapshot;
     const photosForAnalysis = input.photosForAnalysis ?? mergePhotosForRecommendationRefresh({ coverPhoto, currentPhotos: photos });
-    if (visibleRecommendationRefreshState.status === "loading" || !photosForAnalysis.length || !sourceAnalysis) {
+    if ((visibleRecommendationRefreshState.status === "loading" && !input.restartIfLoading) || !photosForAnalysis.length || !sourceAnalysis) {
       return "skipped";
     }
 
+    const runId = recommendationRefreshRunIdRef.current + 1;
+    recommendationRefreshRunIdRef.current = runId;
     dispatchRecommendationRefresh({ type: "start", plantId: plant.id });
     const abortController = new AbortController();
     recommendationRefreshAbortRef.current?.abort();
@@ -1097,7 +1149,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     const timeoutId = window.setTimeout(() => {
       didTimeout = true;
       abortController.abort();
-      if (activePlantIdRef.current === plant.id) {
+      if (activePlantIdRef.current === plant.id && recommendationRefreshRunIdRef.current === runId) {
         dispatchRecommendationRefresh({ type: "error", plantId: plant.id, error: t("plantAnalysis.refreshFailedInline") });
       }
     }, recommendationRefreshTimeoutMs);
@@ -1111,7 +1163,27 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     try {
       const formData = new FormData();
       let includedPhotoCount = 0;
-      for (const photo of photosForAnalysis) {
+      const localPhotoIds = new Set(input.localPhotoFiles?.map((photo) => photo.id) ?? []);
+      for (const localPhoto of input.localPhotoFiles ?? []) {
+        const blob = localPhoto.file;
+        formData.append("photos", blob);
+        formData.append("photoTypes", localPhoto.type);
+        formData.append("photoSources", localPhoto.source);
+        formData.append("clientFileNames", blob.name || `${localPhoto.id}.jpg`);
+        formData.append("clientMimeTypes", blob.type || "image/jpeg");
+        formData.append("clientExtensions", "jpg");
+        formData.append("clientByteSizes", String(blob.size));
+        formData.append("clientDecodeSucceeded", "true");
+        formData.append("clientWidths", "");
+        formData.append("clientHeights", "");
+        formData.append("clientExifOrientations", "");
+        formData.append("clientPhysicallyRotated", "true");
+        formData.append("clientOrientationSources", "saved_normalized_photo");
+        formData.append("clientDebugIds", localPhoto.id);
+        includedPhotoCount += 1;
+      }
+
+      for (const photo of photosForAnalysis.filter((item) => !localPhotoIds.has(item.id))) {
         const url = (await ensureFullPhotoUrl(photo.id)) ?? photo.url ?? photo.thumbnailUrl;
         if (!url) {
           continue;
@@ -1228,7 +1300,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         revisionIdAfter: revisionResult.revisionId,
         hasUserProvidedSpecies: Boolean(userProvidedSpeciesContext?.displayName)
       });
-      if (!didTimeout && activePlantIdRef.current === plant.id) {
+      if (!didTimeout && activePlantIdRef.current === plant.id && recommendationRefreshRunIdRef.current === runId) {
         dispatchRecommendationRefresh({ type: revisionResult.unchanged ? "unchanged" : input.successStatus ?? "success", plantId: plant.id });
       }
       return revisionResult.unchanged ? "unchanged" : "success";
@@ -1241,13 +1313,13 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         message: wasAborted ? "recommendation_refresh_timeout_or_abort" : error instanceof Error ? error.message : "Unknown error",
         durationMs: Date.now() - startedAt
       });
-      if (!didTimeout && activePlantIdRef.current === plant.id) {
+      if (!didTimeout && activePlantIdRef.current === plant.id && recommendationRefreshRunIdRef.current === runId) {
         dispatchRecommendationRefresh({ type: "error", plantId: plant.id, error: userProvidedSpeciesContext ? t("plantAnalysis.userSpeciesRefreshFailed") : t("plantAnalysis.refreshFailedInline") });
       }
       return "failed";
     } finally {
       window.clearTimeout(timeoutId);
-      if (recommendationRefreshAbortRef.current === abortController) {
+      if (recommendationRefreshAbortRef.current === abortController && recommendationRefreshRunIdRef.current === runId) {
         recommendationRefreshAbortRef.current = null;
       }
     }
@@ -1256,7 +1328,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
   return (
     <main className={`mx-auto min-h-screen w-full max-w-[430px] bg-cream px-5 ${careActionState?.isActionable ? "pb-[calc(9rem+env(safe-area-inset-bottom))]" : "pb-10"}`}>
       <RecommendationAutoRefresh
-        shouldRefresh={recommendationsAreStale}
+        shouldRefresh={recommendationsAreStale && !photoAssessmentBlocksAutoRefresh}
         refreshKey={recommendationRefreshKey}
         status={visibleRecommendationRefreshState.status}
         onRefresh={() => void updateRecommendations()}
