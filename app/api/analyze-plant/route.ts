@@ -1225,7 +1225,7 @@ export async function POST(request: Request) {
           "Do not claim measured soil moisture, root health when roots are not visible, pests that are not clearly visible, or exact disease diagnoses without sufficient visual evidence.",
           "For watering, prefer nextAction check_soil over water unless dry soil is directly visible or user-provided context confirms dryness.",
           "Before returning, silently self-check: no invisible claims, species-appropriate terminology, no overstated certainty, concrete actions, no generic filler, no repeated advice. Rewrite any weak section before returning JSON.",
-          `User locale: ${locale}. Photo types in order: ${photoTypes.join(", ") || "unknown"}.`,
+          `User locale: ${locale}. Photo types in order: ${photoTypes.join(", ") || "unknown"}. Photo sources in order: ${photoSources.join(", ") || "unknown"}.`,
           `Analysis mode: ${analysisMode}.`,
           isInitialAddFast
             ? "Initial add fast rule: this is the first onboarding analysis before the plant is saved. Return only compact primitive fields. Do not write primary action prose, timeframe prose, status reason prose, summary prose, recommendation prose, species education, full reasoning, alternative causes, multiple hypotheses, impact metadata, or detailed what-not-to-do advice. Choose primaryActionId, actionTimeframeId, and statusReasonCode carefully; the app will localize obvious text from those IDs. Use free text only for species/common names and up to 2 meaningful visibleObservations from the photo. Include a compact visualEvidenceSnapshot for later enrichment. Keep the full response ideally under 900 tokens."

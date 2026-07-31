@@ -92,5 +92,29 @@ assert.equal(worseEvaluation.decision, "refresh_required", "worse check-in shoul
 assert(worseEvaluation.meaningfulChangeReasons.includes("checkin_worse"), "worse check-in should include an explicit reason");
 assert(worseEvaluation.meaningfulChangeReasons.includes("observations_worsened"), "worsened observations should be meaningful");
 
+const visuallyWorseButSameStatusCheckin: PlantAnalysisRecord = {
+  ...baseCheckin,
+  id: "analysis-visually-worse",
+  condition: "check_soon",
+  rawResult: {
+    ...baseCheckin.rawResult,
+    plantStatus: "watch",
+    urgency: "observe",
+    checkinResult: "worse",
+    photoComparison: {
+      ...baseCheckin.rawResult?.photoComparison,
+      observationsWorsened: ["More leaves are limp compared with the previous photo"]
+    }
+  }
+};
+
+const visuallyWorseEvaluation = evaluateRecommendationUpdate({
+  checkin: visuallyWorseButSameStatusCheckin,
+  previousMeaningfulAnalysis: previousAnalysis,
+  currentRevision: revision
+});
+assert.equal(visuallyWorseEvaluation.decision, "refresh_required", "visual worsening should refresh recommendations even when the coarse condition does not change");
+assert(visuallyWorseEvaluation.meaningfulChangeReasons.includes("observations_worsened"), "worsened comparison observations should not be ignored");
+
 const missingCheckin = evaluateRecommendationUpdate({ previousMeaningfulAnalysis: previousAnalysis, currentRevision: revision });
 assert.equal(missingCheckin.decision, "insufficient_data", "missing check-in should not attempt a refresh decision");

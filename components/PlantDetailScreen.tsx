@@ -20,7 +20,7 @@ import { compareMilestonesNewestFirst } from "@/lib/milestone-dates";
 import { logNavigationEvent, startNavigationLog } from "@/lib/navigation-performance";
 import { PhotoStorageRepository } from "@/lib/photo-storage";
 import { recommendationSpeciesContextFromPlant } from "@/lib/plant-detail-recovery-presentation";
-import { followUpIsDue, followUpResultLabelKey, progressReviewMode } from "@/lib/plant-follow-ups";
+import { classifyPlantCheckinResult, followUpIsDue, followUpResultLabelKey, progressReviewMode } from "@/lib/plant-follow-ups";
 import { nextPostCreationClarificationStep } from "@/lib/post-creation-clarifications";
 import { buildRecommendationContextSnapshot, changedContextSince, impactLabelKey, isRecommendationStale, isVisualEvidenceStale, reasonTypeFromChangedContext, sourceAnalysisAgeDays, type RecommendationChangedContext, type RecommendationContextSnapshot } from "@/lib/recommendation-refresh";
 import { recommendationRefreshReducer, recommendationRefreshStateForPlant, type RecommendationRefreshStatus } from "@/lib/recommendation-refresh-state";
@@ -53,7 +53,9 @@ type PhotoAssessmentState =
   | { status: "idle" }
   | { status: "uploading_photos" | "analyzing_photos" | "saving_checkin" | "evaluating_update" | "updating_recommendations"; message?: string }
   | { status: "completed_updated" | "completed_no_change"; message: string; changes: string[] }
-  | { status: "failed"; message: string; retryPhotos: PendingPhotoUpload[]; savedPhotos: PlantPhoto[] };
+  | { status: "failed"; message: string; retryPhotos: PendingPhotoUpload[]; savedPhotos: PlantPhoto[]; changes?: string[] };
+
+type PhotoComparisonResult = NonNullable<PlantAnalysisRecord["rawResult"]>["photoComparison"];
 
 function PlantDetailDebugPanel({ data }: { data: PlantDetailDebugData }) {
   return (
@@ -114,6 +116,69 @@ function photoAssessmentChanges(condition: string | undefined, locale: "en" | "r
   return locale === "ru"
     ? ["Фото сохранены. Для уверенного сравнения нужен похожий ракурс."]
     : ["Photos saved. A similar angle would help compare changes with confidence."];
+}
+
+function stringList(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
+}
+
+function buildCheckinPhotoComparison(input: {
+  analysis: PlantAnalysisRecord["rawResult"];
+  savedPhotoIds: string[];
+  comparisonTargetPhotoIds: string[];
+  previousConfidence: number | null;
+  fallbackChanges: string[];
+  fallbackMessage: string;
+  locale: "en" | "ru";
+}): PhotoComparisonResult {
+  const source = input.analysis?.photoComparison;
+  const sourceMessage = source?.message && typeof source.message === "object" ? source.message : undefined;
+  const unchanged = stringList(source?.observationsUnchanged);
+
+  return {
+    analyzedPhotoIds: input.savedPhotoIds,
+    analysisTimestamp: new Date().toISOString(),
+    comparisonTargetPhotoIds: input.comparisonTargetPhotoIds,
+    observationsAdded: stringList(source?.observationsAdded),
+    observationsUnchanged: unchanged.length
+      ? unchanged
+      : (input.analysis?.visibleObservations ?? []).map((item) => localized(item, input.locale)).filter(Boolean),
+    observationsImproved: stringList(source?.observationsImproved),
+    observationsWorsened: stringList(source?.observationsWorsened),
+    hypothesesChanged: stringList(source?.hypothesesChanged),
+    recommendationChanges: stringList(source?.recommendationChanges).length ? stringList(source?.recommendationChanges) : input.fallbackChanges,
+    confidenceChanges: source?.confidenceChanges ?? {
+      previous: Number.isFinite(input.previousConfidence) ? input.previousConfidence : null,
+      current: typeof input.analysis?.confidence === "number" ? input.analysis.confidence : null
+    },
+    reliableComparison: typeof source?.reliableComparison === "boolean" ? source.reliableComparison : false,
+    message: sourceMessage ?? { en: input.fallbackMessage, ru: input.fallbackMessage }
+  };
+}
+
+function photoAssessmentChangesFromComparison(comparison: PhotoComparisonResult, fallback: string[], locale: "en" | "ru") {
+  const worsened = stringList(comparison?.observationsWorsened);
+  if (worsened.length) {
+    return worsened.slice(0, 2);
+  }
+
+  const improved = stringList(comparison?.observationsImproved);
+  if (improved.length) {
+    return improved.slice(0, 2);
+  }
+
+  const added = stringList(comparison?.observationsAdded);
+  if (added.length) {
+    return added.slice(0, 2);
+  }
+
+  if (comparison?.reliableComparison === false) {
+    return locale === "ru"
+      ? ["Фото сохранены. Для уверенного сравнения нужен похожий ракурс."]
+      : ["Photos saved. A similar angle would help compare changes with confidence."];
+  }
+
+  return fallback;
 }
 
 function photoAssessmentMessage(status: PhotoAssessmentState["status"], locale: "en" | "ru", fallback?: string) {
@@ -854,26 +919,26 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
             ? t("photoAssessment.stable")
             : t("photoAssessment.reviewed");
       const changes = photoAssessmentChanges(payload.analysis.condition, locale);
+      const photoComparison = buildCheckinPhotoComparison({
+        analysis: payload.analysis,
+        savedPhotoIds: savedPhotos.map((photo) => photo.id),
+        comparisonTargetPhotoIds,
+        previousConfidence: Number.isFinite(previousConfidence) ? previousConfidence : null,
+        fallbackChanges: changes,
+        fallbackMessage: message,
+        locale
+      });
+      const comparisonChanges = photoAssessmentChangesFromComparison(photoComparison, changes, locale);
+      const checkinResult = classifyPlantCheckinResult({
+        ...payload.analysis,
+        photoComparison
+      });
       if (followUp) {
-        const checkinResult = payload.analysis.photoComparison?.reliableComparison === false ? "unclear" : payload.analysis.condition === "needs_attention" ? "worse" : payload.analysis.condition === "healthy" ? "improved" : "stable";
         const checkinRawResult = {
           ...payload.analysis,
           analysisMode: progressReviewMode(),
           checkinResult,
-          photoComparison: {
-            analyzedPhotoIds: savedPhotos.map((photo) => photo.id),
-            analysisTimestamp: new Date().toISOString(),
-            comparisonTargetPhotoIds,
-            observationsAdded: payload.analysis.photoComparison?.observationsAdded ?? [],
-            observationsUnchanged: payload.analysis.photoComparison?.observationsUnchanged ?? [],
-            observationsImproved: payload.analysis.photoComparison?.observationsImproved ?? [],
-            observationsWorsened: payload.analysis.photoComparison?.observationsWorsened ?? [],
-            hypothesesChanged: payload.analysis.photoComparison?.hypothesesChanged ?? [],
-            recommendationChanges: payload.analysis.photoComparison?.recommendationChanges ?? changes,
-            confidenceChanges: payload.analysis.photoComparison?.confidenceChanges ?? { previous: Number.isFinite(previousConfidence) ? previousConfidence : null, current: payload.analysis.confidence ?? null },
-            reliableComparison: payload.analysis.photoComparison?.reliableComparison ?? false,
-            message: payload.analysis.photoComparison?.message ?? { en: message, ru: message }
-          }
+          photoComparison
         };
         setPhotoAssessment({ status: "saving_checkin" });
         const persistedAnalysis = await savePlantAnalysis(plant.id, {
@@ -926,16 +991,22 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
             })
           });
           if (refreshResult === "failed" || refreshResult === "skipped") {
-            setPhotoAssessment({ status: "failed", message: photoAssessmentSavedButRefreshFailedMessage(locale), retryPhotos: selectedPhotos, savedPhotos });
+            setPhotoAssessment({ status: "failed", message: photoAssessmentSavedButRefreshFailedMessage(locale), retryPhotos: selectedPhotos, savedPhotos, changes: comparisonChanges });
             return;
           }
-          setPhotoAssessment({ status: refreshResult === "unchanged" ? "completed_no_change" : "completed_updated", message: refreshResult === "unchanged" ? photoAssessmentNoChangeMessage(locale) : photoAssessmentUpdatedMessage(locale), changes: [t(followUpResultLabelKey(completed.result) as never)] });
+          setPhotoAssessment({ status: refreshResult === "unchanged" ? "completed_no_change" : "completed_updated", message: refreshResult === "unchanged" ? photoAssessmentNoChangeMessage(locale) : photoAssessmentUpdatedMessage(locale), changes: comparisonChanges.length ? comparisonChanges : [t(followUpResultLabelKey(completed.result) as never)] });
           return;
         }
-        setPhotoAssessment({ status: "completed_no_change", message: localized(completed.summary, locale) || photoAssessmentNoChangeMessage(locale), changes: [t(followUpResultLabelKey(completed.result) as never)] });
+        setPhotoAssessment({ status: "completed_no_change", message: localized(completed.summary, locale) || photoAssessmentNoChangeMessage(locale), changes: comparisonChanges.length ? comparisonChanges : [t(followUpResultLabelKey(completed.result) as never)] });
         return;
       }
       setPhotoAssessment({ status: "saving_checkin" });
+      const checkinRawResult = {
+        ...payload.analysis,
+        analysisMode: progressReviewMode(),
+        checkinResult,
+        photoComparison
+      };
       const persistedAnalysis = await savePlantAnalysis(plant.id, {
         sourcePhotoIds: savedPhotos.map((photo) => photo.id),
         detectedSpecies: payload.analysis.detectedSpecies,
@@ -945,25 +1016,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         nextCheckInDays: payload.analysis.nextCheckInDays,
         summary: payload.analysis.summary,
         recommendations: payload.analysis.recommendations,
-        rawResult: {
-          ...payload.analysis,
-          analysisMode: progressReviewMode(),
-          checkinResult: payload.analysis.photoComparison?.reliableComparison === false ? "unclear" : payload.analysis.condition === "needs_attention" ? "worse" : payload.analysis.condition === "healthy" ? "improved" : "stable",
-          photoComparison: {
-            analyzedPhotoIds: savedPhotos.map((photo) => photo.id),
-            analysisTimestamp: new Date().toISOString(),
-            comparisonTargetPhotoIds,
-            observationsAdded: [],
-            observationsUnchanged: (payload.analysis.visibleObservations ?? []).map((item: { en?: string; ru?: string }) => localized(item, locale)),
-            observationsImproved: [],
-            observationsWorsened: [],
-            hypothesesChanged: [],
-            recommendationChanges: changes,
-            confidenceChanges: { previous: Number.isFinite(previousConfidence) ? previousConfidence : null, current: payload.analysis.confidence ?? null },
-            reliableComparison: false,
-            message: { en: payload.analysis.condition === "needs_attention" ? "I found new signs, so the care plan should adjust." : "I reviewed the new photos. The plant looks stable.", ru: message }
-          }
-        },
+        rawResult: checkinRawResult,
         model: payload.model,
         analysisMode: progressReviewMode()
       });
@@ -1000,15 +1053,15 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           })
         });
         if (refreshResult === "failed" || refreshResult === "skipped") {
-          setPhotoAssessment({ status: "failed", message: photoAssessmentSavedButRefreshFailedMessage(locale), retryPhotos: selectedPhotos, savedPhotos });
+          setPhotoAssessment({ status: "failed", message: photoAssessmentSavedButRefreshFailedMessage(locale), retryPhotos: selectedPhotos, savedPhotos, changes: comparisonChanges });
           return;
         }
         console.info("photo_assessment_completed", { plantId: plant.id, photoCount: savedPhotos.length, durationMs: Date.now() - startedAt, recommendationUpdate: refreshResult });
-        setPhotoAssessment({ status: refreshResult === "unchanged" ? "completed_no_change" : "completed_updated", message: refreshResult === "unchanged" ? photoAssessmentNoChangeMessage(locale) : photoAssessmentUpdatedMessage(locale), changes });
+        setPhotoAssessment({ status: refreshResult === "unchanged" ? "completed_no_change" : "completed_updated", message: refreshResult === "unchanged" ? photoAssessmentNoChangeMessage(locale) : photoAssessmentUpdatedMessage(locale), changes: comparisonChanges });
         return;
       }
       console.info("photo_assessment_completed", { plantId: plant.id, photoCount: savedPhotos.length, durationMs: Date.now() - startedAt, recommendationUpdate: evaluation.decision });
-      setPhotoAssessment({ status: "completed_no_change", message: photoAssessmentNoChangeMessage(locale), changes: changes.length ? changes : [message] });
+      setPhotoAssessment({ status: "completed_no_change", message: photoAssessmentNoChangeMessage(locale), changes: comparisonChanges.length ? comparisonChanges : [message] });
     } catch (error) {
       console.warn("photo_assessment_failed", {
         plantId: plant.id,
@@ -1292,7 +1345,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           <p className="mt-1 text-sm font-extrabold leading-5 text-[#355f3d]">
             {photoAssessmentMessage(photoAssessment.status, locale, "message" in photoAssessment ? photoAssessment.message : undefined)}
           </p>
-          {photoAssessment.status === "completed_updated" || photoAssessment.status === "completed_no_change" ? (
+          {"changes" in photoAssessment && photoAssessment.changes?.length ? (
             <ul className="mt-3 grid gap-2 text-sm font-bold leading-5 text-[#4f6946]">
               {photoAssessment.changes.map((change) => (
                 <li key={change} className="flex gap-2">
