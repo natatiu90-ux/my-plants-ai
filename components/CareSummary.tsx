@@ -2,6 +2,7 @@
 
 import { Droplets, MapPin, SunMedium } from "lucide-react";
 import { formatRelativeDate } from "@/lib/date-format";
+import { latestWateredAtFromHistory } from "@/lib/care-summary";
 import { usePlantStore } from "@/data/PlantStore";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
@@ -11,7 +12,10 @@ import { roomOptions } from "./RoomPicker";
 
 export function CareSummary({ plant }: { plant: Plant }) {
   const { locale, t } = useI18n();
-  const { rooms } = usePlantStore();
+  const { getPlantCareEvents, getPlantMilestones, rooms } = usePlantStore();
+  const milestones = getPlantMilestones(plant.id);
+  const careEvents = getPlantCareEvents(plant.id);
+  const lastWateredAt = latestWateredAtFromHistory({ plant, milestones, careEvents });
   const builtInRoomKeys = roomOptions as readonly string[];
   const structuredRoom = plant.roomId ? rooms.find((room) => room.id === plant.roomId) : undefined;
   const legacyRoomValue = plant.roomKey
@@ -25,7 +29,7 @@ export function CareSummary({ plant }: { plant: Plant }) {
   const rows = [
     {
       label: t("plantDetail.lastWatered"),
-      value: formatRelativeDate(plant.lastWateredAt, locale, t("plantDetail.notSpecified")),
+      value: formatRelativeDate(lastWateredAt, locale, t("plantDetail.notSpecified")),
       icon: <Droplets aria-hidden="true" size={18} />
     },
     ...(structuredRoom || plant.roomKey

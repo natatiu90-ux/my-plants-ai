@@ -1193,14 +1193,56 @@ export function PlantStoreProvider({ children }: { children: React.ReactNode }) 
     async (plantId: string, input: { type: PlantMilestone["type"]; eventDate: string; note?: string; photoId?: string }) => {
       if (!repositories) throw new Error("Plant collection is not ready.");
       const milestone = await repositories.milestones.addMilestone(plantId, input);
+      let wateringCareEvent: PlantCareEvent | null = null;
+      let manualWateringNextCheckAt: string | undefined;
+      if (milestone.type === "watered" && milestone.eventDate) {
+        const currentPlant = state.plants.find((plant) => plant.id === plantId);
+        const currentRoom = currentPlant?.roomId ? state.rooms.find((room) => room.id === currentPlant.roomId) : undefined;
+        const currentHome = currentPlant?.homeId ? state.homes.find((home) => home.id === currentPlant.homeId) : undefined;
+        const weather = getCachedHomeWeatherContext(currentHome);
+        const checkInDays = currentPlant ? nextSoilCheckAfterWatering({ plant: currentPlant, room: currentRoom, weather }) : 4;
+        manualWateringNextCheckAt = toDateKey(addDays(new Date(`${milestone.eventDate}T12:00:00`), checkInDays));
+        await repositories.plants.updateRecommendationState(plantId, {
+          status: currentPlant?.status ?? "unknown",
+          nextAction: null,
+          nextCheckAt: manualWateringNextCheckAt,
+          lastWateredAt: milestone.eventDate,
+          careScheduleStatus: "active",
+          notificationDueCycleKey: null
+        });
+        await repositories.careEvents.addCareEvent(plantId, { type: "watered", eventDate: milestone.eventDate, metadata: { source: "manual_history" } });
+        wateringCareEvent = {
+          id: `${plantId}-manual-watered-${Date.now()}`,
+          plantId,
+          type: "watered",
+          createdAt: milestone.eventDate,
+          metadata: { source: "manual_history" }
+        };
+      }
       const followUpReason = reasonForMilestone(milestone.type);
       if (followUpReason) {
         void scheduleFollowUp(plantId, followUpReason, { sourceMilestoneId: milestone.id, fromDate: milestone.eventDate ?? milestone.createdAt });
       }
-      setState((current) => ({ ...current, milestones: [milestone, ...current.milestones] }));
+      setState((current) => ({
+        ...current,
+        plants: current.plants.map((plant) =>
+          plant.id === plantId && milestone.type === "watered" && milestone.eventDate
+            ? {
+                ...plant,
+                lastWateredAt: milestone.eventDate,
+                nextAction: null,
+                nextCheckAt: manualWateringNextCheckAt ?? plant.nextCheckAt,
+                careScheduleStatus: "active",
+                notificationDueCycleKey: undefined
+              }
+            : plant
+        ),
+        milestones: [milestone, ...current.milestones],
+        careEvents: wateringCareEvent ? [wateringCareEvent, ...current.careEvents] : current.careEvents
+      }));
       return milestone;
     },
-    [repositories, scheduleFollowUp]
+    [repositories, scheduleFollowUp, state.homes, state.plants, state.rooms]
   );
 
   const updateMilestone = useCallback(

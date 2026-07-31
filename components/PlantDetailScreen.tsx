@@ -53,7 +53,17 @@ type PhotoAssessmentState =
   | { status: "idle" }
   | { status: "uploading_photos" | "analyzing_photos" | "saving_checkin" | "evaluating_update" | "updating_recommendations"; message?: string }
   | { status: "completed_updated" | "completed_no_change"; message: string; changes: string[] }
-  | { status: "failed"; message: string; retryPhotos: PendingPhotoUpload[]; savedPhotos: PlantPhoto[]; changes?: string[] };
+  | {
+      status: "failed";
+      message: string;
+      retryPhotos: PendingPhotoUpload[];
+      savedPhotos: PlantPhoto[];
+      changes?: string[];
+      retryRecommendationRefresh?: {
+        sourceAnalysis: PlantAnalysisRecord;
+        localPhotoFiles: LocalRecommendationPhoto[];
+      };
+    };
 
 type PhotoComparisonResult = NonNullable<PlantAnalysisRecord["rawResult"]>["photoComparison"];
 type LocalRecommendationPhoto = {
@@ -257,6 +267,9 @@ function daysUntilDate(date: string) {
 
 function analysisWithRecommendationRevision(analysis: PlantAnalysisRecord | undefined, revision: PlantRecommendationRevision | undefined): PlantAnalysisRecord | undefined {
   if (!analysis || !revision) {
+    return analysis;
+  }
+  if (revision.analysisId !== analysis.id) {
     return analysis;
   }
 
@@ -1037,7 +1050,14 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
             })
           });
           if (refreshResult === "failed" || refreshResult === "skipped") {
-            setPhotoAssessment({ status: "failed", message: photoAssessmentSavedButRefreshFailedMessage(locale), retryPhotos: selectedPhotos, savedPhotos, changes: comparisonChanges });
+            setPhotoAssessment({
+              status: "failed",
+              message: photoAssessmentSavedButRefreshFailedMessage(locale),
+              retryPhotos: selectedPhotos,
+              savedPhotos,
+              changes: comparisonChanges,
+              retryRecommendationRefresh: { sourceAnalysis: persistedAnalysis, localPhotoFiles: freshRecommendationPhotos }
+            });
             return;
           }
           setPhotoAssessment({ status: refreshResult === "unchanged" ? "completed_no_change" : "completed_updated", message: refreshResult === "unchanged" ? photoAssessmentNoChangeMessage(locale) : photoAssessmentUpdatedMessage(locale), changes: comparisonChanges.length ? comparisonChanges : [t(followUpResultLabelKey(completed.result) as never)] });
@@ -1101,7 +1121,14 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
           })
         });
         if (refreshResult === "failed" || refreshResult === "skipped") {
-          setPhotoAssessment({ status: "failed", message: photoAssessmentSavedButRefreshFailedMessage(locale), retryPhotos: selectedPhotos, savedPhotos, changes: comparisonChanges });
+          setPhotoAssessment({
+            status: "failed",
+            message: photoAssessmentSavedButRefreshFailedMessage(locale),
+            retryPhotos: selectedPhotos,
+            savedPhotos,
+            changes: comparisonChanges,
+            retryRecommendationRefresh: { sourceAnalysis: persistedAnalysis, localPhotoFiles: freshRecommendationPhotos }
+          });
           return;
         }
         console.info("photo_assessment_completed", { plantId: plant.id, photoCount: savedPhotos.length, durationMs: Date.now() - startedAt, recommendationUpdate: refreshResult });
@@ -1325,6 +1352,49 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
     }
   };
 
+  const retryPhotoAssessment = async () => {
+    if (photoAssessment.status !== "failed") {
+      return;
+    }
+
+    const failedState = photoAssessment;
+    if (failedState.retryRecommendationRefresh) {
+      setPhotoAssessment({ status: "updating_recommendations" });
+      const sourceAnalysis = failedState.retryRecommendationRefresh.sourceAnalysis;
+      const refreshResult = await updateRecommendations({
+        sourceAnalysis,
+        photosForAnalysis: mergePhotosForRecommendationRefresh({ coverPhoto, currentPhotos: photos, savedPhotos: failedState.savedPhotos }),
+        localPhotoFiles: failedState.retryRecommendationRefresh.localPhotoFiles,
+        restartIfLoading: true,
+        contextSnapshot: buildRecommendationContextSnapshot({
+          plant,
+          homes,
+          rooms,
+          milestones,
+          careEvents,
+          hypothesisResolutions,
+          weather: weatherContext,
+          analyses: [sourceAnalysis, ...analyses.filter((item) => item.id !== sourceAnalysis.id)],
+          currentRevision: currentRecommendationRevision
+        })
+      });
+
+      if (refreshResult === "failed" || refreshResult === "skipped") {
+        setPhotoAssessment(failedState);
+        return;
+      }
+
+      setPhotoAssessment({
+        status: refreshResult === "unchanged" ? "completed_no_change" : "completed_updated",
+        message: refreshResult === "unchanged" ? photoAssessmentNoChangeMessage(locale) : photoAssessmentUpdatedMessage(locale),
+        changes: failedState.changes ?? []
+      });
+      return;
+    }
+
+    await analyzeNewPhotos(failedState.retryPhotos, failedState.savedPhotos);
+  };
+
   return (
     <main className={`mx-auto min-h-screen w-full max-w-[430px] bg-cream px-5 ${careActionState?.isActionable ? "pb-[calc(9rem+env(safe-area-inset-bottom))]" : "pb-10"}`}>
       <RecommendationAutoRefresh
@@ -1428,7 +1498,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
             </ul>
           ) : null}
           {photoAssessment.status === "failed" ? (
-            <button type="button" onClick={() => void analyzeNewPhotos(photoAssessment.retryPhotos, photoAssessment.savedPhotos)} className="mt-3 min-h-10 rounded-[16px] bg-white px-3 text-sm font-extrabold text-[#2d7a4f]">
+            <button type="button" onClick={() => void retryPhotoAssessment()} className="mt-3 min-h-10 rounded-[16px] bg-white px-3 text-sm font-extrabold text-[#2d7a4f]">
               {t("common.tryAgain")}
             </button>
           ) : null}
@@ -1477,7 +1547,7 @@ export function PlantDetailScreen({ plantId }: { plantId: string }) {
         careActionState={careActionState}
         onKnowSpecies={() => router.push(`/plants/${plant.id}/edit`)}
         onAddPhoto={() => setSheet("add_photo")}
-        onRetryRecommendationRefresh={() => void updateRecommendations()}
+        onRetryRecommendationRefresh={() => void updateRecommendations({ sourceAnalysis: analysisContext.meaningfulAnalysis, restartIfLoading: true })}
       />
       {currentRecommendationRevision?.reasonText && !recommendationsAreStale && visibleRecommendationRefreshState.status === "success" && currentRecommendationRevision.impactLevel && currentRecommendationRevision.impactLevel !== "none" ? (
         <section className="mt-4 rounded-[24px] bg-[#eef5e8] p-4 shadow-soft">
